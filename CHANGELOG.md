@@ -7,7 +7,8 @@ All notable changes to this project are documented in this file.
 ## [0.3.0] - 2026-07-19
 
 ### Added
-- `page_search`: full-text Wiki search (`POST /v1/search`), read-only, `page_size` 1-50 (clamped client-side), client-side `slug_prefix`/`result_type` filters, page urls normalized to absolute `wiki.yandex.ru` links
+- `page_search`: full-text Wiki search (`POST /v1/search`), read-only, `page_size` 1-50 (clamped client-side), client-side `slug_prefix` (case-insensitive, path-segment boundary) and `result_type` filters, page urls normalized to absolute links; `total_documents`/`total_pages` recalculated after filtering
+- `WIKI_WEB_BASE_URL` setting (default `https://wiki.yandex.ru`) — base for absolute page links in `page_search` results
 - New `page_get` fields: `access_policy`, `access_lists`, `owner`
 - Org-neutral live API probe scripts (`scripts/probe_api*.sh`, `scripts/smoke.sh`) documenting verified Yandex Wiki API behavior
 - Synthetic test fixtures in `tests/fixtures/`
@@ -15,6 +16,7 @@ All notable changes to this project are documented in this file.
 ### Changed
 - Rebranded to `yandex-wiki-search-mcp` (fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)); added `NOTICE` and README credits
 - `WikiApiError.message` now accepts list payloads (both API error envelope shapes) and renders them joined
+- API error parsing tolerates non-object JSON error bodies (e.g. from proxies) instead of raising `AttributeError`
 
 ## [0.2.0] - 2026-04-06
 
