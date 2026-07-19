@@ -2,6 +2,7 @@ import pytest
 from mcp.client.session import ClientSession
 
 READ_ONLY_TOOL_NAMES = [
+    "page_search",
     "page_get",
     "page_get_descendants",
     "page_get_comments",
@@ -85,7 +86,7 @@ class TestServerConfiguration:
         client_session: ClientSession,
     ) -> None:
         result = await client_session.initialize()
-        assert result.serverInfo.name == "Yet Another Yandex Wiki MCP Server"
+        assert result.serverInfo.name == "Yandex Wiki Search MCP"
 
     async def test_server_has_instructions(
         self,

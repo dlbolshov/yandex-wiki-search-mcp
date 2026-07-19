@@ -5,7 +5,7 @@ description: add new MCP tools to the Yandex Wiki MCP server
 
 # Task
 
-Add a new MCP tool to `ya-yandex-wiki-mcp`.
+Add a new MCP tool to `yandex-wiki-search-mcp`.
 
 Always follow `@CLAUDE.md`.
 

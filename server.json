@@ -1,20 +1,20 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.APonkratov/ya-yandex-wiki-mcp",
-  "version": "0.2.0",
-  "description": "Yet Another Yandex Wiki MCP Server.",
+  "name": "io.github.dlbolshov/yandex-wiki-search-mcp",
+  "version": "0.3.0",
+  "description": "MCP server for Yandex Wiki with full-text search.",
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "ya-yandex-wiki-mcp",
-      "version": "0.2.0",
+      "identifier": "yandex-wiki-search-mcp",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       }
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/aponkratov/ya-yandex-wiki-mcp:0.2.0",
+      "identifier": "ghcr.io/dlbolshov/yandex-wiki-search-mcp:0.3.0",
       "transport": {
         "type": "stdio"
       }

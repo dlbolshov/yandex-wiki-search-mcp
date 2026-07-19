@@ -5,7 +5,7 @@ description: validate GitHub Actions workflows for the Yandex Wiki MCP project
 
 # Task
 
-Validate that GitHub Actions workflows for the latest push of `ya-yandex-wiki-mcp` are passing.
+Validate that GitHub Actions workflows for the latest push of `yandex-wiki-search-mcp` are passing.
 
 # Instructions
 

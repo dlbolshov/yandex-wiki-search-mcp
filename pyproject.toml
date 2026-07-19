@@ -1,14 +1,15 @@
 [project]
-name = "ya-yandex-wiki-mcp"
-version = "0.2.0"
-description = "Yet Another Yandex Wiki MCP Server"
+name = "yandex-wiki-search-mcp"
+version = "0.3.0"
+description = "MCP server for Yandex Wiki with full-text search"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
+    { name = "David Bolshov", email = "dlbolshov@gmail.com" },
     { name = "Aleksandr Ponkratov", email = "aleks.ponkratov@gmail.com" },
 ]
 maintainers = [
-    { name = "Aleksandr Ponkratov", email = "aleks.ponkratov@gmail.com" },
+    { name = "David Bolshov", email = "dlbolshov@gmail.com" },
 ]
 dependencies = [
     "aiocache[redis]>=0.12.3",
@@ -28,7 +29,12 @@ where = ["."]
 include = ["mcp_wiki*"]
 
 [project.scripts]
-ya-yandex-wiki-mcp = "mcp_wiki.__main__:main"
+yandex-wiki-search-mcp = "mcp_wiki.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/dlbolshov/yandex-wiki-search-mcp"
+Repository = "https://github.com/dlbolshov/yandex-wiki-search-mcp"
+Issues = "https://github.com/dlbolshov/yandex-wiki-search-mcp/issues"
 
 [dependency-groups]
 dev = [

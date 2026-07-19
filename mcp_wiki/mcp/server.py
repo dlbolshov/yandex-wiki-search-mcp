@@ -134,7 +134,7 @@ def create_mcp_server(
         )
 
     server = FastMCP(
-        name="Yet Another Yandex Wiki MCP Server",
+        name="Yandex Wiki Search MCP",
         instructions=instructions,
         host=settings.host,
         port=settings.port,

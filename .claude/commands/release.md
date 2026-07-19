@@ -13,7 +13,7 @@ description: make a new release of the Yandex Wiki MCP project
 
 # Task
 
-Prepare a new release of `ya-yandex-wiki-mcp`.
+Prepare a new release of `yandex-wiki-search-mcp`.
 
 # Instructions
 
