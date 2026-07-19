@@ -74,6 +74,8 @@ Read-only tools:
 - `page_get_comments`
 - `page_get_resources`
 - `page_get_attachments`
+- `page_get_grids`
+- `grid_get`
 
 Write tools:
 - `page_create`
@@ -83,6 +85,17 @@ Write tools:
 - `page_delete`
 - `page_recover`
 - `page_upload_attachment`
+- `grid_create`
+- `grid_update`
+- `grid_delete`
+- `grid_copy`
+- `grid_add_rows`
+- `grid_delete_rows`
+- `grid_update_cells`
+- `grid_add_columns`
+- `grid_delete_columns`
+- `grid_move_rows`
+- `grid_move_columns`
 
 ## Testing
 

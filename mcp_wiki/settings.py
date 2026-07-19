@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     transport: Literal["stdio", "sse", "streamable-http"] = "stdio"
 
     wiki_api_base_url: str = "https://api.wiki.yandex.net"
+    wiki_web_base_url: str = "https://wiki.yandex.ru"
     wiki_token: str | None = None
     wiki_iam_token: str | None = None
     wiki_auth_scheme: Literal["OAuth", "Bearer"] = "OAuth"

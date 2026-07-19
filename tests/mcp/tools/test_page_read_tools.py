@@ -72,13 +72,14 @@ class TestPageReadTools:
         )
 
         result = await client_session.call_tool(
-            "page_search", {"query": "x", "slug_prefix": "/tech-doc/ml/"}
+            "page_search", {"query": "x", "slug_prefix": "/Tech-Doc/ML/"}
         )
 
         content = get_tool_result_content(result)
         # segment-boundary match: 'tech-doc/mlops' must NOT pass; prefix got normalized
         assert [r["slug"] for r in content["results"]] == ["tech-doc/ml/page"]
         assert content["total_documents"] == 1
+        assert content["total_pages"] == 1
         assert content["results"][0]["url"] == "https://wiki.yandex.ru/tech-doc/ml/page"
 
     async def test_page_get_by_slug(

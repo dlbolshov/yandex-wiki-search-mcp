@@ -124,6 +124,22 @@ class TestWikiClient:
         assert exc_info.value.message == ["Страница не найдена"]
         assert "message=Страница не найдена" in str(exc_info.value)
 
+    async def test_page_search_raises_api_error_on_non_dict_json_body(
+        self, wiki_client: WikiClient
+    ) -> None:
+        capture = RequestCapture(status=502, payload=["upstream error"])
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            with pytest.raises(WikiApiError) as exc_info:
+                await wiki_client.page_search("q")
+
+        assert exc_info.value.status == 502
+        assert exc_info.value.error_code is None
+        assert exc_info.value.message is None
+
     async def test_page_get_grids(
         self,
         wiki_client: WikiClient,

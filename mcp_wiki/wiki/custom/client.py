@@ -108,7 +108,9 @@ class WikiClient(WikiProtocol):
         details: dict[str, Any] | None = None
         if payload:
             with contextlib.suppress(json.JSONDecodeError):
-                details = json.loads(payload)
+                decoded = json.loads(payload)
+                if isinstance(decoded, dict):
+                    details = decoded
         raise WikiApiError(
             status=response.status,
             error_code=details.get("error_code") if details else None,
@@ -676,7 +678,9 @@ class WikiClient(WikiProtocol):
                 details: dict[str, Any] | None = None
                 if payload:
                     with contextlib.suppress(json.JSONDecodeError):
-                        details = json.loads(payload)
+                        decoded = json.loads(payload)
+                        if isinstance(decoded, dict):
+                            details = decoded
                 if (
                     anchor
                     and details

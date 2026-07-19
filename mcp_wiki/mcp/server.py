@@ -56,7 +56,7 @@ def make_wiki_lifespan(settings: Settings) -> Lifespan:
         )
         try:
             await wiki.prepare()
-            yield AppContext(wiki=wiki)
+            yield AppContext(wiki=wiki, web_base_url=settings.wiki_web_base_url)
         finally:
             await wiki.close()
 

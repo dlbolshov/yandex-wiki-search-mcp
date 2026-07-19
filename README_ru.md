@@ -150,6 +150,7 @@ Docker, read-only (рекомендуется для агентов):
 
 - `TRANSPORT=stdio|sse|streamable-http`
 - `WIKI_API_BASE_URL=https://api.wiki.yandex.net`
+- `WIKI_WEB_BASE_URL=https://wiki.yandex.ru` (база для абсолютных ссылок на страницы в результатах `page_search`)
 - `WIKI_READ_ONLY=true|false`
 
 ## Локальный запуск

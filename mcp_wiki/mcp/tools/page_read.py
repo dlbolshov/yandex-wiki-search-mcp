@@ -26,8 +26,6 @@ from mcp_wiki.mcp.utils import (
     resolve_page_locator,
 )
 
-WIKI_WEB_BASE_URL = "https://wiki.yandex.ru"
-
 
 async def _resolve_page_id(
     ctx: Context[Any, AppContext, Request],
@@ -100,26 +98,31 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
             Field(description="Optional client-side filter by result type."),
         ] = None,
     ) -> Any:
-        response = await ctx.request_context.lifespan_context.wiki.page_search(
+        app_context = ctx.request_context.lifespan_context
+        response = await app_context.wiki.page_search(
             query,
             page_size=page_size,
             auth=get_yandex_auth(ctx),
         )
         if slug_prefix:
-            prefix = normalize_slug(slug_prefix)
+            prefix = normalize_slug(slug_prefix).lower()
             response.results = [
                 r
                 for r in response.results
-                if r.slug == prefix or (r.slug or "").startswith(prefix + "/")
+                if (slug := (r.slug or "").lower()) == prefix
+                or slug.startswith(prefix + "/")
             ]
         if result_type:
             response.results = [r for r in response.results if r.type == result_type]
         if slug_prefix or result_type:
-            # keep the field's semantics: it always equals the number of returned results
+            # keep the fields' semantics: total_documents always equals the number
+            # of returned results and total_pages is 0 only when there are none
             response.total_documents = len(response.results)
+            response.total_pages = 1 if response.results else 0
+        web_base_url = app_context.web_base_url.rstrip("/")
         for r in response.results:
             if r.url and r.url.startswith("/"):
-                r.url = WIKI_WEB_BASE_URL + r.url
+                r.url = web_base_url + r.url
         return response
 
     @mcp.tool(

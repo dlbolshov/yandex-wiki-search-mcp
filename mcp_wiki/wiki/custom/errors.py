@@ -14,7 +14,11 @@ class WikiApiError(WikiError):
         parts = [f"Wiki API request failed with status {status}"]
         if error_code:
             parts.append(f"error_code={error_code}")
-        message_text = ", ".join(message) if isinstance(message, list) else message
+        message_text = (
+            ", ".join(str(item) for item in message)
+            if isinstance(message, list)
+            else message
+        )
         if debug_message:
             parts.append(f"debug_message={debug_message}")
         elif message_text:
