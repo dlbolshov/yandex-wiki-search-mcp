@@ -3,7 +3,7 @@
 # Yandex Wiki Search MCP
 
 [![PyPI](https://img.shields.io/pypi/v/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
-[![Python](https://img.shields.io/pypi/pyversions/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fdlbolshov%2Fyandex-wiki-search-mcp%2Fmain%2Fpyproject.toml)](https://pypi.org/project/yandex-wiki-search-mcp/)
 [![CI](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
@@ -168,6 +168,17 @@ claude mcp add yandex-wiki-search \
 | Структурированные ошибки API (оба формата) | ✅ | ❌ | ❌ |
 | Docker-образ / PyPI / MCP Registry | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ | ❌ (ручная установка) |
 | Многопользовательский OAuth для HTTP | ✅ | ✅ | ❌ |
+
+Прочие альтернативы (факты сверены с их документацией, июль 2026):
+
+- [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) (PyPI) — 36 тулзов: CRUD страниц и гридов, локальный кэш дерева страниц, справочник YFM и конвертер Markdown→YFM, prompt-шаблоны; без полнотекстового поиска
+- [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) (PyPI) — 6 тулзов для страниц (чтение / create / update / append), отдельный read-only вариант запуска и Redis-кэш чтения; есть несколько форков
+- [brekhov-ilya/yandex-wiki-mcp](https://github.com/brekhov-ilya/yandex-wiki-mcp) (npm) — страницы read / write / move, гриды только на чтение; интерактивное получение токена через PKCE с автообновлением, без поиска
+- [n-r-w/yandex-mcp](https://github.com/n-r-w/yandex-mcp) (Go) — Yandex Tracker + Wiki в одном сервере, принципиально только чтение (5 wiki-тулзов), без поиска
+
+На июль 2026 полнотекстовый поиск есть только здесь (до 50 результатов) и у slartus (до 10);
+сочетание поиска, записи в гриды, серверного read-only и типизированных схем —
+уникально для этого проекта.
 
 Проект — форк `ya-yandex-wiki-mcp`, поиск построен на находках `slartus/mcp-yandex-wiki` —
 см. [Благодарности](#благодарности).

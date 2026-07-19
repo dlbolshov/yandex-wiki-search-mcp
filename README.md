@@ -3,7 +3,7 @@
 # Yandex Wiki Search MCP
 
 [![PyPI](https://img.shields.io/pypi/v/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
-[![Python](https://img.shields.io/pypi/pyversions/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
+[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fdlbolshov%2Fyandex-wiki-search-mcp%2Fmain%2Fpyproject.toml)](https://pypi.org/project/yandex-wiki-search-mcp/)
 [![CI](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
@@ -167,6 +167,17 @@ Grid specifics:
 | Structured API errors (both envelope shapes) | ✅ | ❌ | ❌ |
 | Docker image / PyPI / MCP Registry | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ | ❌ (manual install) |
 | Multi-user OAuth for HTTP deployments | ✅ | ✅ | ❌ |
+
+Other alternatives (facts verified against their docs, July 2026):
+
+- [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) (PyPI) — 36 tools: pages + grids CRUD, local page-tree cache, YFM syntax guide and Markdown→YFM converter, prompt templates; no full-text search
+- [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) (PyPI) — 6 page tools (read / create / update / append) with a separate read-only entry point and Redis caching of reads; has several forks
+- [brekhov-ilya/yandex-wiki-mcp](https://github.com/brekhov-ilya/yandex-wiki-mcp) (npm) — pages read / write / move, grids read-only; interactive PKCE token flow with auto-refresh, no full-text search
+- [n-r-w/yandex-mcp](https://github.com/n-r-w/yandex-mcp) (Go) — Yandex Tracker + Wiki in one server, read-only by design (5 wiki read tools), no search
+
+As of July 2026, full-text search exists only here (up to 50 results) and in slartus
+(up to 10); the combination of search, grid writes, server-side read-only mode, and
+typed schemas is unique to this project.
 
 This project is a fork of `ya-yandex-wiki-mcp` and builds on findings from
 `slartus/mcp-yandex-wiki` — see [Credits](#credits).
