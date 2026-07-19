@@ -20,7 +20,7 @@ class TestWikiClient:
         self,
         wiki_client: WikiClient,
     ) -> None:
-        headers = await wiki_client._build_headers()
+        headers = wiki_client._build_headers()
         assert headers["Authorization"] == "OAuth test-token"
         assert headers["X-Org-Id"] == "test-org"
 

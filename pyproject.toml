@@ -28,6 +28,9 @@ package = true
 where = ["."]
 include = ["mcp_wiki*"]
 
+[tool.setuptools.package-data]
+mcp_wiki = ["py.typed"]
+
 [project.scripts]
 yandex-wiki-search-mcp = "mcp_wiki.__main__:main"
 

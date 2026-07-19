@@ -1,15 +1,11 @@
-from collections.abc import Iterable
-from typing import Any, TypeVar
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import Context
-from pydantic import BaseModel
 from starlette.requests import Request
 
 from mcp_wiki.wiki.proto.common import YandexAuth
-
-T = TypeVar("T", bound=BaseModel)
 
 
 def get_yandex_auth(ctx: Context[Any, Any, Request]) -> YandexAuth:
@@ -53,10 +49,3 @@ def resolve_page_locator(
             raise ValueError("Slug must not be empty.")
 
     return page_id, slug
-
-
-def set_non_needed_fields_null(data: Iterable[T], needed_fields: set[str]) -> None:
-    for item in data:
-        for field in item.model_fields_set:
-            if field not in needed_fields:
-                setattr(item, field, None)

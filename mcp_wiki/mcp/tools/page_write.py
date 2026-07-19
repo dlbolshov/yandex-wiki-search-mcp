@@ -6,12 +6,20 @@ from pydantic import Field
 from starlette.requests import Request
 
 from mcp_wiki.mcp.context import AppContext
-from mcp_wiki.mcp.params import GridID, GridRevision, PageID, PageSlug, RecoveryToken
+from mcp_wiki.mcp.params import (
+    CommentID,
+    GridID,
+    GridRevision,
+    PageID,
+    PageSlug,
+    RecoveryToken,
+)
 from mcp_wiki.mcp.tools.page_read import _resolve_page_id, _resolve_page_slug
 from mcp_wiki.mcp.utils import get_yandex_auth
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
     GridUpdateRequest,
+    UploadLocation,
     WikiGridPageRef,
 )
 
@@ -611,7 +619,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             ),
         ] = None,
         location: Annotated[
-            Literal["top", "bottom"],
+            UploadLocation,
             Field(
                 description="Target location in the page body when anchor is not provided."
             ),
@@ -650,11 +658,11 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             ),
         ] = None,
         parent_id: Annotated[
-            int | None,
+            CommentID | None,
             Field(description="Optional parent comment ID for a reply."),
         ] = None,
         thread_id: Annotated[
-            int | None,
+            CommentID | None,
             Field(
                 description="Optional thread ID when replying in an existing thread."
             ),
@@ -734,7 +742,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             ),
         ] = False,
         append_location: Annotated[
-            Literal["top", "bottom"],
+            UploadLocation,
             Field(
                 description="Where to append the generated file macro when append_markup is true."
             ),
