@@ -41,7 +41,10 @@ Fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-m
 
 `page_search` wraps the undocumented-but-public `POST /v1/search` endpoint — the same
 backend that powers the Wiki web search bar. It is the content **discovery** entry point:
-search first, then open a result with `page_get` by its `slug`.
+search first, then open a result with `page_get` by its `slug`. The endpoint was first
+discovered and published by [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki),
+which directly inspired this tool; this project independently re-verified and extended
+those findings (e.g. `page_size` accepts up to 50, not 10).
 
 - Returns up to **50** results per call (`page_size` is clamped to 1–50 client-side; the API rejects anything else with HTTP 400).
 - Search is **global only** — there is no server-side section or type filter. The optional `slug_prefix` and `result_type` arguments are applied **client-side after fetching**, so combine them with `page_size=50` to avoid missing matches. `slug_prefix` matches on path-segment boundaries (`tech-doc/ml` does not match `tech-doc/mlops`).
@@ -55,7 +58,9 @@ Findings verified live against a production Yandex 360 organization (see the pro
 scripts in [`scripts/`](scripts/)):
 
 - `POST /v1/search` is undocumented; `page_size` max is 50 (0, negative, or >50 → HTTP 400); there is no server-side pagination or filtering — `page`/`offset`/`limit` and any section/type body params are ignored, and `total_pages` is always 1 (or 0 when empty).
-- **OAuth scopes are not enforced** by the Wiki API — a token with only `wiki:read` can still write. Read-only is guaranteed only by not registering write tools (`WIKI_READ_ONLY=true`). *Credit: this was first reported publicly by the [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) project.*
+- **OAuth scopes are not enforced** by the Wiki API — a token with only `wiki:read` can still write. Read-only is guaranteed only by not registering write tools (`WIKI_READ_ONLY=true`). *Credit: first reported publicly by [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) and independently confirmed here.*
+- **HTTP 403 is about user permissions**, not token scopes — e.g. readonly system pages owned by `yandex360-wiki` (per slartus, see above).
+- **Any `POST /pages/{id}` bumps `modified_at`**, even with an empty body — the page is marked as modified (per slartus, see above).
 - Quoted `"exact phrase"` search works; `-minus` and boolean operators are ignored.
 - There is **no revisions/history/backlinks API** — "who links here" workflows are not possible.
 - `created_at`/`modified_at`/`comments_count`/`is_readonly` are not top-level page fields; fetch them via `page_get` with `fields=["attributes"]`.
@@ -245,3 +250,9 @@ This project is a fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkr
 for the Yandex Wiki API, licensed under Apache-2.0. This fork adds full-text search
 (`page_search`) and rebranding; the original copyright and license are preserved
 (see [LICENSE](LICENSE) and [NOTICE](NOTICE)).
+
+The idea and key API findings behind full-text search come from
+[slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) (JavaScript, MIT):
+it was the first to discover the undocumented `POST /v1/search` endpoint and to report
+that OAuth scopes are not enforced. No code was taken from it — only findings and ideas,
+independently re-verified against a live organization and extended here.
