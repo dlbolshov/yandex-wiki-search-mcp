@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-19
+
 ### Added
 - `LOG_LEVEL` setting (default `INFO`): logging goes to stderr (stdio-safe); startup logs a secret-free config summary; `DEBUG` additionally logs every Wiki API request (method, path, status, duration — no headers or bodies)
 - `py.typed` marker so the package ships type information

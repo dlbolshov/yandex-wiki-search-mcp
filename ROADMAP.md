@@ -120,3 +120,4 @@
 - 2026-07-19: M2 завершён — SecretStr (+oauth_encryption_keys), repr-гигиена YandexAuth, LOG_LEVEL,
   TraceConfig-лог HTTP, стартовый лог; живой смок на реальном .env — токен замаскирован.
   Ветка chore/m1-m2-hygiene-secrets-logging.
+- 2026-07-19: PR #2 (M1+M2) смержен в main; выпущен релиз v0.4.0.
