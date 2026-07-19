@@ -1,12 +1,16 @@
-# Yet Another Yandex Wiki MCP Server
+# Yandex Wiki Search MCP
 
-`mcp-name: io.github.APonkratov/ya-yandex-wiki-mcp`
+`mcp-name: io.github.dlbolshov/yandex-wiki-search-mcp`
 
-Yet another MCP server for the Yandex Wiki API, focused on Wiki pages, comments, resources, attachments, and recovery workflows.
-The current tool surface also includes first-class support for Yandex Wiki dynamic tables ("grids").
+MCP server for the Yandex Wiki API with **full-text search**, focused on Wiki pages, comments, resources, attachments, and recovery workflows.
+It is the only Yandex Wiki MCP server that combines full-text content discovery, a server-side read-only mode, and a ready-to-use Docker image.
+The tool surface also includes first-class support for Yandex Wiki dynamic tables ("grids").
+
+Fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) (`ya-yandex-wiki-mcp`), see [Credits](#credits).
 
 ## Supported tools
 
+- `page_search`: full-text search across the entire Wiki (the headline feature)
 - `page_get_grids`: list grids attached to a page
 - `grid_get`: get a grid by `grid_id`
 - `page_get`: get a page by `page_id` or `slug`
@@ -33,10 +37,78 @@ The current tool surface also includes first-class support for Yandex Wiki dynam
 - `page_recover`: recover a page by recovery token
 - `page_upload_attachment`: upload a local file in chunks and attach it to a page
 
+## Full-text search
+
+`page_search` wraps the undocumented-but-public `POST /v1/search` endpoint — the same
+backend that powers the Wiki web search bar. It is the content **discovery** entry point:
+search first, then open a result with `page_get` by its `slug`.
+
+- Returns up to **50** results per call (`page_size` is clamped to 1–50 client-side; the API rejects anything else with HTTP 400).
+- Search is **global only** — there is no server-side section or type filter. The optional `slug_prefix` and `result_type` arguments are applied **client-side after fetching**, so combine them with `page_size=50` to avoid missing matches. `slug_prefix` matches on path-segment boundaries (`tech-doc/ml` does not match `tech-doc/mlops`).
+- Results come in two types: **`page`** (relative url, normalized by the tool to an absolute `https://wiki.yandex.ru/...` link) and **`file`** (absolute `...?download=1` download link).
+- Quoted `"exact phrase"` queries work and produce phrase-matched results.
+- `total_documents` always equals the number of returned results — it is **not** a global hit count.
+
+## Notes on the Yandex Wiki API
+
+Findings verified live against a production Yandex 360 organization (see the probe
+scripts in [`scripts/`](scripts/)):
+
+- `POST /v1/search` is undocumented; `page_size` max is 50 (0, negative, or >50 → HTTP 400); there is no server-side pagination or filtering — `page`/`offset`/`limit` and any section/type body params are ignored, and `total_pages` is always 1 (or 0 when empty).
+- **OAuth scopes are not enforced** by the Wiki API — a token with only `wiki:read` can still write. Read-only is guaranteed only by not registering write tools (`WIKI_READ_ONLY=true`). *Credit: this was first reported publicly by the [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) project.*
+- Quoted `"exact phrase"` search works; `-minus` and boolean operators are ignored.
+- There is **no revisions/history/backlinks API** — "who links here" workflows are not possible.
+- `created_at`/`modified_at`/`comments_count`/`is_readonly` are not top-level page fields; fetch them via `page_get` with `fields=["attributes"]`.
+- Error responses come in **two envelope shapes** (`message` as string-or-null plus `details`, or as a list plus `level`); the client parses both.
+- No rate-limit headers are exposed (`X-RateLimit-*`/`Retry-After` absent).
+- `GET /pages/{id}/resources?q=` is the only server-side *text* filter in the whole API (title search within one page's attachments/grids) — exposed via `page_get_resources`.
+
+The org-neutral scripts in [`scripts/`](scripts/) (`probe_api*.sh`, `smoke.sh`) are living
+documentation of this behavior and can be re-run against your own organization
+(credentials via env vars or a `$SECRETS` file; probe output goes to `raw/`, which is
+gitignored because it contains real org data).
+
+## Quickstart (Claude Desktop / Cursor / Windsurf)
+
+Docker, read-only (recommended for agents):
+
+```json
+{
+  "mcpServers": {
+    "yandex-wiki-search": {
+      "command": "docker",
+      "args": ["run","--rm","-i",
+        "-e","WIKI_TOKEN","-e","WIKI_ORG_ID","-e","WIKI_READ_ONLY=true",
+        "ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest"],
+      "env": {"WIKI_TOKEN":"...","WIKI_ORG_ID":"..."}
+    }
+  }
+}
+```
+
+`uvx` (PyPI):
+
+```json
+{
+  "mcpServers": {
+    "yandex-wiki-search": {
+      "command": "uvx",
+      "args": ["yandex-wiki-search-mcp"],
+      "env": {
+        "WIKI_TOKEN": "...",
+        "WIKI_ORG_ID": "...",
+        "WIKI_READ_ONLY": "true"
+      }
+    }
+  }
+}
+```
+
 ## Why these tools
 
 The toolset is based on the public Yandex Wiki API areas that are most useful in an MCP workflow:
 
+- full-text discovery of pages and files
 - page read/write operations
 - grid read/write operations
 - subtree traversal for documentation sections
@@ -82,7 +154,7 @@ Optional:
 
 ```bash
 uv sync --dev
-uv run ya-yandex-wiki-mcp
+uv run yandex-wiki-search-mcp
 ```
 
 ## Docker deployment
@@ -104,14 +176,14 @@ Optional:
 
 ```bash
 # Using environment file
-docker run --env-file .env -p 8000:8000 ghcr.io/aponkratov/ya-yandex-wiki-mcp:latest
+docker run --env-file .env -p 8000:8000 ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
 
 # With inline environment variables
 docker run -e WIKI_TOKEN=your_token \
            -e WIKI_ORG_ID=your_org_id \
            -e TRANSPORT=streamable-http \
            -p 8000:8000 \
-           ghcr.io/aponkratov/ya-yandex-wiki-mcp:latest
+           ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
 ```
 
 The MCP endpoint is available at `http://localhost:8000/mcp`.
@@ -119,7 +191,7 @@ The MCP endpoint is available at `http://localhost:8000/mcp`.
 ## Building the Image Locally
 
 ```bash
-docker build -t ya-yandex-wiki-mcp .
+docker build -t yandex-wiki-search-mcp .
 ```
 
 ## Docker Compose
@@ -130,7 +202,7 @@ docker build -t ya-yandex-wiki-mcp .
 version: '3.8'
 services:
   mcp-wiki:
-    image: ghcr.io/aponkratov/ya-yandex-wiki-mcp:latest
+    image: ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
     ports:
       - "8000:8000"
     environment:
@@ -165,3 +237,11 @@ Before creating a commit or opening a merge request, run the full local verifica
 ```bash
 uv run pytest
 ```
+
+## Credits
+
+This project is a fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
+(`ya-yandex-wiki-mcp`) by Aleksandr Ponkratov, an excellent, well-tested Python MCP server
+for the Yandex Wiki API, licensed under Apache-2.0. This fork adds full-text search
+(`page_search`) and rebranding; the original copyright and license are preserved
+(see [LICENSE](LICENSE) and [NOTICE](NOTICE)).

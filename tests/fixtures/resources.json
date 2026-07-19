@@ -1,0 +1,30 @@
+{
+  "results": [
+    {
+      "type": "attachment",
+      "item": {
+        "id": 12000001,
+        "name": "diagram.png",
+        "is_downloadable": true,
+        "download_url": "/tech-doc/example/ml/.files/diagram.png",
+        "size": "0.23",
+        "description": "",
+        "user": {"id": 78000001, "identity": {"uid": "1130000000000010", "cloud_uid": "aje000000000000000001"}, "username": "user1", "display_name": "User One", "is_dismissed": false, "affiliation": ""},
+        "created_at": "2023-01-17T15:08:04.729Z",
+        "mimetype": "image/png",
+        "has_preview": true,
+        "check_status": "ready"
+      }
+    },
+    {
+      "type": "grid",
+      "item": {
+        "id": "5f000000000000000000abcd",
+        "title": "Roadmap",
+        "created_at": "2024-05-01T10:00:00.000Z"
+      }
+    }
+  ],
+  "next_cursor": null,
+  "prev_cursor": null
+}

@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "url": "/tech-doc/example/ml/pipeline-overview",
+      "slug": "tech-doc/example/ml/pipeline-overview",
+      "title": "ML Pipeline Overview",
+      "body": "The pipeline trains models and evaluates convergence.\n\nSee the testing module for details.\tHow to prepare inputs.",
+      "type": "page",
+      "modified_at": 1778104120
+    },
+    {
+      "url": "/tech-doc/example/ml/model-registry",
+      "slug": "tech-doc/example/ml/model-registry",
+      "title": "Model Registry",
+      "body": "How models are versioned and promoted to production.",
+      "type": "page",
+      "modified_at": 1775500000
+    },
+    {
+      "url": "https://wiki.yandex.ru/tech-doc/example/ml/.files/benchmark-results.xlsx?download=1",
+      "slug": "tech-doc/example/ml",
+      "title": "benchmark-results.xlsx",
+      "body": "",
+      "type": "file",
+      "modified_at": 1769154990
+    }
+  ],
+  "page_id": 1,
+  "total_documents": 3,
+  "total_pages": 1,
+  "search_client": "mailsearch",
+  "uid": "1130000000000001"
+}
