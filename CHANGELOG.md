@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-19
+
 ### Added
 - All 26 tools now declare `outputSchema` (typed returns) and emit structured content
 - `ToolAnnotations` on write tools: `destructiveHint` for deletes, `idempotentHint` for updates/moves, additive hints for creates/appends
