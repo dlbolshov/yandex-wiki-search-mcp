@@ -8,6 +8,8 @@
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
 
+![Demo: search a wiki page and summarize it via MCP](docs/assets/demo.gif)
+
 Connect Claude, Cursor, Windsurf, or any MCP client to **Yandex Wiki**: full-text search,
 pages, comments, attachments, and dynamic tables ("grids") — **26 tools** with typed schemas.
 
@@ -156,24 +158,24 @@ Grid specifics:
 
 ## How it compares
 
-| | **yandex-wiki-search-mcp** | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) |
-|---|---|---|---|
-| Full-text search | ✅ up to 50 results, client-side filters | ❌ | ✅ up to 10 results |
-| Pages: create / update / append / recover | ✅ | ✅ | partial (no append/recover) |
-| Grids: write tools | ✅ 11 tools | ✅ | ❌ read-only |
-| Comments, attachment upload | ✅ | ✅ | ❌ |
-| Server-side read-only mode | ✅ | ✅ | ❌ |
-| Typed output schemas + tool annotations | ✅ | ❌ | ❌ |
-| Structured API errors (both envelope shapes) | ✅ | ❌ | ❌ |
-| Docker image / PyPI / MCP Registry | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ | ❌ (manual install) |
-| Multi-user OAuth for HTTP deployments | ✅ | ✅ | ❌ |
+Facts verified against the alternatives' docs and published code, July 2026.
 
-Other alternatives (facts verified against their docs, July 2026):
+| | **yandex-wiki-search-mcp** | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) | [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) |
+|---|---|---|---|---|---|
+| Full-text search | ✅ up to 50 results, client-side filters | ❌ | ✅ up to 10 results | ❌ | ❌ |
+| Pages: create / update / append / delete + recover | ✅ all | ✅ all | partial — no append / recover | partial — no delete / recover | partial — no recover; has clone |
+| Grids: write tools | ✅ 11 | ✅ 11 | ❌ read-only | ❌ no grid tools | ✅ 11, incl. clone |
+| Comments, attachment upload | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Server-side read-only mode | ✅ | ✅ | ❌ | ✅ separate `-ro` entry point | ❌ |
+| Typed output schemas + tool annotations | ✅ | ❌ | ❌ | ❌ | ❌ tools return plain strings |
+| YFM helpers (Markdown→YFM converter, syntax guide) | planned ([ROADMAP](ROADMAP.md)) | ❌ | ❌ | ❌ | ✅ + page-tree cache, prompt templates |
+| Docker / PyPI / MCP Registry | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ | ❌ manual install | PyPI only | PyPI only; no source repo linked |
+| Multi-user OAuth for HTTP deployments | ✅ | ✅ | ❌ | ❌ | ❌ |
 
-- [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) (PyPI) — 36 tools: pages + grids CRUD, local page-tree cache, YFM syntax guide and Markdown→YFM converter, prompt templates; no full-text search
-- [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) (PyPI) — 6 page tools (read / create / update / append) with a separate read-only entry point and Redis caching of reads; has several forks
+Also worth knowing:
+
 - [brekhov-ilya/yandex-wiki-mcp](https://github.com/brekhov-ilya/yandex-wiki-mcp) (npm) — pages read / write / move, grids read-only; interactive PKCE token flow with auto-refresh, no full-text search
-- [n-r-w/yandex-mcp](https://github.com/n-r-w/yandex-mcp) (Go) — Yandex Tracker + Wiki in one server, read-only by design (5 wiki read tools), no search
+- [n-r-w/yandex-mcp](https://github.com/n-r-w/yandex-mcp) (Go) — Yandex Tracker + Wiki in one server, read-only by design (5 wiki read tools), no search; auth via IAM tokens from the `yc` CLI only — Yandex OAuth tokens are not supported
 
 As of July 2026, full-text search exists only here (up to 50 results) and in slartus
 (up to 10); the combination of search, grid writes, server-side read-only mode, and

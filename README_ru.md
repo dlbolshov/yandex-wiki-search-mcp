@@ -8,6 +8,8 @@
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
 
+![Демо: поиск страницы в вики и саммари через MCP](docs/assets/demo.gif)
+
 Подключите Claude, Cursor, Windsurf или любой MCP-клиент к **Яндекс Вики**: полнотекстовый
 поиск, страницы, комментарии, вложения и динамические таблицы («гриды») — **26 тулзов**
 с типизированными схемами.
@@ -157,24 +159,24 @@ claude mcp add yandex-wiki-search \
 
 ## Сравнение с аналогами
 
-| | **yandex-wiki-search-mcp** | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) |
-|---|---|---|---|
-| Полнотекстовый поиск | ✅ до 50 результатов, клиентские фильтры | ❌ | ✅ до 10 результатов |
-| Страницы: create / update / append / recover | ✅ | ✅ | частично (нет append/recover) |
-| Гриды: write-тулзы | ✅ 11 тулзов | ✅ | ❌ только чтение |
-| Комментарии, загрузка вложений | ✅ | ✅ | ❌ |
-| Серверный read-only режим | ✅ | ✅ | ❌ |
-| Типизированные output-схемы + аннотации | ✅ | ❌ | ❌ |
-| Структурированные ошибки API (оба формата) | ✅ | ❌ | ❌ |
-| Docker-образ / PyPI / MCP Registry | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ | ❌ (ручная установка) |
-| Многопользовательский OAuth для HTTP | ✅ | ✅ | ❌ |
+Факты сверены с документацией и опубликованным кодом альтернатив, июль 2026.
 
-Прочие альтернативы (факты сверены с их документацией, июль 2026):
+| | **yandex-wiki-search-mcp** | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) | [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) |
+|---|---|---|---|---|---|
+| Полнотекстовый поиск | ✅ до 50 результатов, клиентские фильтры | ❌ | ✅ до 10 результатов | ❌ | ❌ |
+| Страницы: create / update / append / delete + recover | ✅ всё | ✅ всё | частично — нет append / recover | частично — нет delete / recover | частично — нет recover; есть clone |
+| Гриды: write-тулзы | ✅ 11 | ✅ 11 | ❌ только чтение | ❌ гридов нет | ✅ 11, вкл. clone |
+| Комментарии, загрузка вложений | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Серверный read-only режим | ✅ | ✅ | ❌ | ✅ отдельный `-ro` вариант запуска | ❌ |
+| Типизированные output-схемы + аннотации | ✅ | ❌ | ❌ | ❌ | ❌ тулзы возвращают голые строки |
+| YFM-хелперы (конвертер Markdown→YFM, справочник) | в планах ([ROADMAP](ROADMAP.md)) | ❌ | ❌ | ❌ | ✅ + кэш дерева страниц, prompt-шаблоны |
+| Docker / PyPI / MCP Registry | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ | ❌ ручная установка | только PyPI | только PyPI; репозиторий исходников не указан |
+| Многопользовательский OAuth для HTTP | ✅ | ✅ | ❌ | ❌ | ❌ |
 
-- [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) (PyPI) — 36 тулзов: CRUD страниц и гридов, локальный кэш дерева страниц, справочник YFM и конвертер Markdown→YFM, prompt-шаблоны; без полнотекстового поиска
-- [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) (PyPI) — 6 тулзов для страниц (чтение / create / update / append), отдельный read-only вариант запуска и Redis-кэш чтения; есть несколько форков
+Ещё стоит знать:
+
 - [brekhov-ilya/yandex-wiki-mcp](https://github.com/brekhov-ilya/yandex-wiki-mcp) (npm) — страницы read / write / move, гриды только на чтение; интерактивное получение токена через PKCE с автообновлением, без поиска
-- [n-r-w/yandex-mcp](https://github.com/n-r-w/yandex-mcp) (Go) — Yandex Tracker + Wiki в одном сервере, принципиально только чтение (5 wiki-тулзов), без поиска
+- [n-r-w/yandex-mcp](https://github.com/n-r-w/yandex-mcp) (Go) — Yandex Tracker + Wiki в одном сервере, принципиально только чтение (5 wiki-тулзов), без поиска; авторизация только IAM-токенами через `yc` CLI — OAuth-токены Яндекса не поддерживаются
 
 На июль 2026 полнотекстовый поиск есть только здесь (до 50 результатов) и у slartus (до 10);
 сочетание поиска, записи в гриды, серверного read-only и типизированных схем —
@@ -194,7 +196,7 @@ claude mcp add yandex-wiki-search \
 - Запросы `"в кавычках"` дают фразовый поиск; результаты-`page` получают абсолютные ссылки `https://wiki.yandex.ru/...`, результаты-`file` — прямые ссылки на скачивание.
 
 Больше проверенного поведения API (скоупы, семантика 403, форматы ошибок, лимиты):
-[docs/api-notes.md](docs/api-notes.md) (en).
+[docs/api-notes_ru.md](docs/api-notes_ru.md).
 
 ## Конфигурация
 
@@ -276,7 +278,7 @@ services:
 ## Безопасность
 
 - **Read-only работает на сервере**: при `WIKI_READ_ONLY=true` write-тулзы не регистрируются — запутавшемуся агенту просто нечего вызывать.
-- **Wiki API не проверяет OAuth-скоупы** (проверено живьём — см. [docs/api-notes.md](docs/api-notes.md)): токен с `wiki:read` может писать, поэтому полагайтесь на read-only режим, а не на скоупы.
+- **Wiki API не проверяет OAuth-скоупы** (проверено живьём — см. [docs/api-notes_ru.md](docs/api-notes_ru.md)): токен с `wiki:read` может писать, поэтому полагайтесь на read-only режим, а не на скоупы.
 - Секреты — `SecretStr` по всему коду: замаскированы в логах и `repr`; `DEBUG`-логирование HTTP никогда не пишет заголовки и тела.
 - Удаление обратимо: `page_delete` возвращает токен восстановления для `page_recover`.
 
@@ -289,7 +291,7 @@ uv run pytest                   # тесты
 ```
 
 Перед коммитом прогоните полный набор проверок из [CONTRIBUTING.md](CONTRIBUTING.md).
-Проверенное поведение API и probe-скрипты описаны в [docs/api-notes.md](docs/api-notes.md).
+Проверенное поведение API и probe-скрипты описаны в [docs/api-notes_ru.md](docs/api-notes_ru.md).
 
 ## Благодарности
 

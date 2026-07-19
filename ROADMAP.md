@@ -16,7 +16,6 @@
 
 - M1 + M2 — одна ветка/PR → релиз v0.4.0
 - M3 + M4 — одна ветка/PR → релиз v0.5.0
-- README-апгрейд (M-docs) — отдельная ветка/PR (docs/readme-overhaul), без релиза
 - M5 + ретраи из M3 — одна ветка/PR, без релиза (едет со следующим)
 - M6 — ветка/PR + тег на каждую фичу (v0.6.0, v0.7.0, …)
 - Релизный ритуал: CHANGELOG `[Unreleased]` → `[X.Y.Z]`, bump в `pyproject.toml`, `manifest.json`,
@@ -81,32 +80,6 @@
       `idempotentHint` для update/move, additive-хинты для create/append
 - [x] Обновлены README/README_ru (`default_sort`); manifest.json не требует правок (имена тулзов не менялись)
 
-## M-docs — README-апгрейд (M)
-
-Цель — конверсия случайного посетителя в пользователя/звёздочку. Ветка docs/readme-overhaul.
-
-- [x] Переключатель языка первой строкой (EN | RU) в обоих README
-- [x] Бейджи: PyPI, Python versions, CI, License, ghcr (Python — через required-version-toml из pyproject:
-      pypi/pyversions требует classifiers в опубликованном пакете — показывал «missing»;
-      classifiers добавлены в pyproject и появятся на PyPI со следующим релизом)
-- [x] Hero-блок: одноабзацный value prop + 6 буллетов-хайлайтов
-- [x] Quick start: кнопки Cursor deeplink + VS Code install, `<details>`-сниппеты
-      под Claude Desktop/Claude Code/Docker, ссылка на гайд получения токена
-- [x] Секция «What can it do» — 6 примеров промптов
-- [x] Тулзы таблицами в три группы: Search & read (8) / Pages write (7) / Grids write (11, в `<details>`)
-- [x] Сравнительная таблица с ya-yandex-wiki-mcp и slartus/mcp-yandex-wiki + блок «прочие альтернативы»:
-      ya-wiki-mcp (PyPI), best-doctor (+форки), brekhov-ilya (npm), n-r-w/yandex-mcp (Go) —
-      все факты сверены с их README/PyPI 2026-07
-- [x] Единая таблица env-переменных + OAuth/Redis в `<details>`
-- [x] Mermaid-схема двух режимов деплоя, секция Security
-- [x] Глубокие заметки по API → `docs/api-notes.md` (тизер + ссылка из README); `docs/` — база для будущих ассетов
-- [x] README_ru — полное зеркало новой структуры; api-notes — только en, RU-зеркало не делаем (решение 2026-07-19)
-- [x] `mcp-name:` сохранён в обоих README (требование MCP Registry), переехал в футер
-- [ ] Демо-GIF в шапку (сценарий есть, нужна запись экрана — положить в `docs/assets/`)
-- [ ] В веб-UI GitHub (руками): description, topics (mcp, mcp-server, yandex-wiki, model-context-protocol,
-      claude, cursor, ai-agents), social preview картинка
-- [ ] Дистрибуция: сабмиты в awesome-mcp-servers / Glama / PulseMCP / mcp.so, пост на Хабр
-
 ## M5 — Тесты и CI (M)
 
 - [ ] Тесты OAuth-слоя (сейчас не покрыт совсем):
@@ -134,6 +107,9 @@
 - [ ] Версия сервера из `importlib.metadata` в `FastMCP` (клиент увидит её в initialize)
 - [ ] `stateless_http`/`json_response` вынести из хардкода в настройки
 - [ ] MCP prompts (например, «найди и суммаризируй по теме») — дифференциация от аналогов
+- [ ] YFM-хелперы (идея из ya-wiki-mcp): конвертер Markdown→YFM перед записью страниц
+      (таблицы, каты, callouts) и/или встроенный справочник YFM-синтаксиса (MCP resource/тулза);
+      в README-таблице сравнения обещано как «planned»
 
 ## Лог выполнения
 
@@ -151,5 +127,3 @@
 - 2026-07-19: PR #3 (M3+M4 + фиксы регрессий и pre-existing багов, 127 тестов) смержен в main;
   выпущен релиз v0.5.0.
 - 2026-07-19: по ретраям принято решение (мини-ретрай в `_request()`, без зависимостей) — в ветку M5.
-- 2026-07-19: M-docs — README/README_ru пересобраны (бейджи, кнопки установки, таблицы тулзов,
-  сравнение, mermaid), глубокие API-заметки → docs/api-notes.md. Ветка docs/readme-overhaul.

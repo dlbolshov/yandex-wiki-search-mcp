@@ -1,3 +1,5 @@
+**English** | [Русский](api-notes_ru.md)
+
 # Yandex Wiki API field notes
 
 Findings verified live against a production Yandex 360 organization. The org-neutral
