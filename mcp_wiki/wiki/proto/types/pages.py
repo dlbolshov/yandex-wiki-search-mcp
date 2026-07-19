@@ -28,12 +28,15 @@ class ResourceTypeEnum(StrEnum):
     GRID = "grid"
 
 
+UploadLocation = Literal["top", "bottom"]
+
+
 class WikiPage(BaseWikiModel):
     id: int
     slug: str | None = None
     title: str | None = None
     page_type: str | None = None
-    content: Any | None = None
+    content: Any = None
     attributes: dict[str, Any] | None = None
     breadcrumbs: list[dict[str, Any]] | None = None
     redirect: dict[str, Any] | None = None

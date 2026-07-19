@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `LOG_LEVEL` setting (default `INFO`): logging goes to stderr (stdio-safe); startup logs a secret-free config summary; `DEBUG` additionally logs every Wiki API request (method, path, status, duration — no headers or bodies)
+- `py.typed` marker so the package ships type information
+- `.env.example` documenting all supported environment variables
+
+### Changed
+- Secrets in `Settings` (`wiki_token`, `wiki_iam_token`, `oauth_client_secret`, `oauth_encryption_keys`, `redis_password`) are `SecretStr` — masked in `repr`/logs, unwrapped only at usage points
+- `YandexAuth.token` is excluded from the dataclass `repr`
+- `page_add_comment` validates `parent_id`/`thread_id` as positive integers (shared `CommentID` type)
+- `page_append_content.location` and `page_upload_attachment.append_location` are typed as `Literal["top", "bottom"]` end-to-end via the shared `UploadLocation` type
+- `WikiClient._build_headers` is synchronous (it never awaited anything)
+- Importing `mcp_wiki.__main__` no longer instantiates settings and the MCP server; they are created inside `main()`
+
+### Removed
+- Dead code: `WikiMCPError` (`mcp_wiki/mcp/errors.py`) and the unused `set_non_needed_fields_null` helper
+
 ## [0.3.0] - 2026-07-19
 
 ### Added

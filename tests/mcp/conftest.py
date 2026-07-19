@@ -10,7 +10,7 @@ from mcp.client.session import ClientSession
 from mcp.server import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import CallToolResult
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, SecretStr
 
 from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.server import Lifespan, create_mcp_server
@@ -55,7 +55,7 @@ def get_tool_result_text(result: CallToolResult) -> str:
 
 def create_test_settings(read_only: bool = False) -> Settings:
     return Settings.model_construct(
-        wiki_token="test-token",
+        wiki_token=SecretStr("test-token"),
         wiki_org_id="test-org",
         wiki_cloud_org_id=None,
         wiki_read_only=read_only,

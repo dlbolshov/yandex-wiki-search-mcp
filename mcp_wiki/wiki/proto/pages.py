@@ -18,6 +18,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     ResourcesResponse,
     SearchResponse,
     UploadAttachmentResult,
+    UploadLocation,
     UploadSessionResponse,
     WikiGrid,
     WikiPage,
@@ -242,7 +243,7 @@ class WikiProtocol(Protocol):
         page_id: int,
         *,
         content: str,
-        location: str = "bottom",
+        location: UploadLocation = "bottom",
         anchor: str | None = None,
         auth: YandexAuth | None = None,
     ) -> dict[str, Any]: ...
@@ -293,6 +294,6 @@ class WikiProtocol(Protocol):
         *,
         file_path: str,
         append_markup: bool = False,
-        append_location: str = "bottom",
+        append_location: UploadLocation = "bottom",
         auth: YandexAuth | None = None,
     ) -> UploadAttachmentResult: ...

@@ -1,10 +1,20 @@
+import asyncio
 import contextlib
 import json
+import logging
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal
 
-from aiohttp import ClientSession, ClientTimeout
+from aiohttp import (
+    ClientSession,
+    ClientTimeout,
+    TraceConfig,
+    TraceRequestEndParams,
+    TraceRequestExceptionParams,
+    TraceRequestStartParams,
+)
 
 from mcp_wiki.mcp.utils import normalize_slug
 from mcp_wiki.wiki.custom.errors import PageNotFound, WikiApiError
@@ -27,14 +37,58 @@ from mcp_wiki.wiki.proto.types.pages import (
     ResourcesResponse,
     SearchResponse,
     UploadAttachmentResult,
+    UploadLocation,
     UploadSessionResponse,
     WikiGrid,
     WikiPage,
 )
 
-UploadLocation = Literal["top", "bottom"]
-
 SEARCH_PAGE_SIZE_MAX = 50
+
+logger = logging.getLogger(__name__)
+
+
+def _build_trace_config() -> TraceConfig:
+    async def on_request_start(
+        _session: ClientSession,
+        ctx: SimpleNamespace,
+        _params: TraceRequestStartParams,
+    ) -> None:
+        ctx.start_time = asyncio.get_running_loop().time()
+
+    async def on_request_end(
+        _session: ClientSession,
+        ctx: SimpleNamespace,
+        params: TraceRequestEndParams,
+    ) -> None:
+        elapsed_ms = (asyncio.get_running_loop().time() - ctx.start_time) * 1000
+        logger.debug(
+            "%s %s -> %s (%.0f ms)",
+            params.method,
+            params.url.path,
+            params.response.status,
+            elapsed_ms,
+        )
+
+    async def on_request_exception(
+        _session: ClientSession,
+        ctx: SimpleNamespace,
+        params: TraceRequestExceptionParams,
+    ) -> None:
+        elapsed_ms = (asyncio.get_running_loop().time() - ctx.start_time) * 1000
+        logger.debug(
+            "%s %s -> %r (%.0f ms)",
+            params.method,
+            params.url.path,
+            params.exception,
+            elapsed_ms,
+        )
+
+    trace_config = TraceConfig()
+    trace_config.on_request_start.append(on_request_start)
+    trace_config.on_request_end.append(on_request_end)
+    trace_config.on_request_exception.append(on_request_exception)
+    return trace_config
 
 
 class WikiClient(WikiProtocol):
@@ -59,6 +113,7 @@ class WikiClient(WikiProtocol):
         self._session = ClientSession(
             base_url=base_url,
             timeout=ClientTimeout(total=timeout),
+            trace_configs=[_build_trace_config()],
         )
 
     async def prepare(self) -> None:
@@ -67,7 +122,7 @@ class WikiClient(WikiProtocol):
     async def close(self) -> None:
         await self._session.close()
 
-    async def _build_headers(self, auth: YandexAuth | None = None) -> dict[str, str]:
+    def _build_headers(self, auth: YandexAuth | None = None) -> dict[str, str]:
         if auth and auth.token:
             auth_header = f"{self._auth_scheme} {auth.token}"
         elif self._token:
@@ -174,7 +229,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.get(
             "v1/pages",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             params=params,
         ) as response:
             if response.status == 404:
@@ -195,7 +250,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.get(
             f"v1/pages/{page_id}",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             params=params if params else None,
         ) as response:
             if response.status == 404:
@@ -216,7 +271,7 @@ class WikiClient(WikiProtocol):
         }
         async with self._session.post(
             "v1/search",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=body,
         ) as response:
             if response.status >= 400:
@@ -242,7 +297,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.get(
             "v1/pages/descendants",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             params=params,
         ) as response:
             response.raise_for_status()
@@ -262,7 +317,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.get(
             f"v1/pages/{page_id}/comments",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             params=params,
         ) as response:
             if response.status == 404:
@@ -296,7 +351,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.get(
             f"v1/pages/{page_id}/resources",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             params=params,
         ) as response:
             if response.status == 404:
@@ -324,7 +379,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.get(
             f"v1/pages/{page_id}/grids",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             params=params,
         ) as response:
             if response.status == 404:
@@ -360,7 +415,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.get(
             f"v1/grids/{grid_id}",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             params=params if params else None,
         ) as response:
             response.raise_for_status()
@@ -374,7 +429,7 @@ class WikiClient(WikiProtocol):
     ) -> WikiGrid:
         async with self._session.post(
             "v1/grids",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=request.model_dump(exclude_none=True),
         ) as response:
             response.raise_for_status()
@@ -393,7 +448,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.post(
             f"v1/grids/{grid_id}",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=body,
         ) as response:
             response.raise_for_status()
@@ -420,7 +475,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.post(
             f"v1/grids/{grid_id}/rows",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=body,
         ) as response:
             response.raise_for_status()
@@ -434,7 +489,7 @@ class WikiClient(WikiProtocol):
     ) -> dict[str, Any]:
         async with self._session.delete(
             f"v1/grids/{grid_id}",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
         ) as response:
             return await self._read_json(response)
 
@@ -452,7 +507,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.post(
             f"v1/grids/{grid_id}/clone",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=body,
         ) as response:
             return GridOperationResponse.model_validate(await self._read_json(response))
@@ -466,7 +521,7 @@ class WikiClient(WikiProtocol):
     ) -> GridMutationResponse:
         async with self._session.post(
             f"v1/grids/{grid_id}/cells",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json={"cells": cells},
         ) as response:
             return GridMutationResponse.model_validate(await self._read_json(response))
@@ -481,7 +536,7 @@ class WikiClient(WikiProtocol):
     ) -> GridMutationResponse:
         async with self._session.delete(
             f"v1/grids/{grid_id}/rows",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json={"revision": revision, "row_ids": row_ids},
         ) as response:
             return GridMutationResponse.model_validate(await self._read_json(response))
@@ -504,7 +559,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.post(
             f"v1/grids/{grid_id}/columns",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=body,
         ) as response:
             return GridMutationResponse.model_validate(await self._read_json(response))
@@ -519,7 +574,7 @@ class WikiClient(WikiProtocol):
     ) -> GridMutationResponse:
         async with self._session.delete(
             f"v1/grids/{grid_id}/columns",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json={"revision": revision, "column_slugs": column_slugs},
         ) as response:
             return GridMutationResponse.model_validate(await self._read_json(response))
@@ -545,7 +600,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.post(
             f"v1/grids/{grid_id}/rows/move",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=body,
         ) as response:
             return GridMutationResponse.model_validate(await self._read_json(response))
@@ -561,7 +616,7 @@ class WikiClient(WikiProtocol):
     ) -> GridMutationResponse:
         async with self._session.post(
             f"v1/grids/{grid_id}/columns/move",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json={
                 "revision": revision,
                 "column_slug": column_slug,
@@ -584,7 +639,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.get(
             f"v1/pages/{page_id}/attachments",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             params=params,
         ) as response:
             if response.status == 404:
@@ -609,7 +664,7 @@ class WikiClient(WikiProtocol):
         }
         async with self._session.post(
             "v1/pages",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=body,
         ) as response:
             response.raise_for_status()
@@ -642,7 +697,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.post(
             f"v1/pages/{page_id}",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=body,
             params=params if params else None,
         ) as response:
@@ -656,7 +711,7 @@ class WikiClient(WikiProtocol):
         page_id: int,
         *,
         content: str,
-        location: str = "bottom",
+        location: UploadLocation = "bottom",
         anchor: str | None = None,
         auth: YandexAuth | None = None,
     ) -> dict[str, Any]:
@@ -668,7 +723,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.post(
             f"v1/pages/{page_id}/append-content",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=body,
         ) as response:
             if response.status == 404:
@@ -730,7 +785,7 @@ class WikiClient(WikiProtocol):
 
         async with self._session.post(
             f"v1/pages/{page_id}/comments",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json=request_body,
         ) as response:
             if response.status == 404:
@@ -746,7 +801,7 @@ class WikiClient(WikiProtocol):
     ) -> DeletePageResponse:
         async with self._session.delete(
             f"v1/pages/{page_id}",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
         ) as response:
             if response.status == 404:
                 raise PageNotFound(page_id)
@@ -761,7 +816,7 @@ class WikiClient(WikiProtocol):
     ) -> RecoverPageResponse:
         async with self._session.post(
             f"v1/recovery_tokens/{recovery_token}/recover",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
         ) as response:
             response.raise_for_status()
             return RecoverPageResponse.model_validate_json(await response.read())
@@ -775,7 +830,7 @@ class WikiClient(WikiProtocol):
     ) -> UploadSessionResponse:
         async with self._session.post(
             "v1/upload_sessions",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json={"file_name": file_name, "file_size": file_size},
         ) as response:
             response.raise_for_status()
@@ -789,7 +844,7 @@ class WikiClient(WikiProtocol):
         data: bytes,
         auth: YandexAuth | None = None,
     ) -> None:
-        headers = await self._build_headers(auth)
+        headers = self._build_headers(auth)
         headers["Content-Type"] = "application/octet-stream"
 
         async with self._session.put(
@@ -808,7 +863,7 @@ class WikiClient(WikiProtocol):
     ) -> None:
         async with self._session.post(
             f"v1/upload_sessions/{session_id}/finish",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
         ) as response:
             response.raise_for_status()
 
@@ -821,7 +876,7 @@ class WikiClient(WikiProtocol):
     ) -> AttachmentResultsResponse:
         async with self._session.post(
             f"v1/pages/{page_id}/attachments",
-            headers=await self._build_headers(auth),
+            headers=self._build_headers(auth),
             json={"upload_sessions": session_ids},
         ) as response:
             if response.status == 404:
@@ -835,7 +890,7 @@ class WikiClient(WikiProtocol):
         *,
         file_path: str,
         append_markup: bool = False,
-        append_location: str = "bottom",
+        append_location: UploadLocation = "bottom",
         auth: YandexAuth | None = None,
     ) -> UploadAttachmentResult:
         path = Path(file_path)
