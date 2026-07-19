@@ -16,6 +16,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     PageComment,
     RecoverPageResponse,
     ResourcesResponse,
+    SearchResponse,
     UploadAttachmentResult,
     UploadSessionResponse,
     WikiGrid,
@@ -42,6 +43,14 @@ class WikiProtocol(Protocol):
         fields: list[str] | None = None,
         auth: YandexAuth | None = None,
     ) -> WikiPage: ...
+
+    async def page_search(
+        self,
+        query: str,
+        *,
+        page_size: int = 10,
+        auth: YandexAuth | None = None,
+    ) -> SearchResponse: ...
 
     async def page_get_descendants(
         self,

@@ -25,6 +25,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     PageComment,
     RecoverPageResponse,
     ResourcesResponse,
+    SearchResponse,
     UploadAttachmentResult,
     UploadSessionResponse,
     WikiGrid,
@@ -32,6 +33,8 @@ from mcp_wiki.wiki.proto.types.pages import (
 )
 
 UploadLocation = Literal["top", "bottom"]
+
+SEARCH_PAGE_SIZE_MAX = 50
 
 
 class WikiClient(WikiProtocol):
@@ -197,6 +200,26 @@ class WikiClient(WikiProtocol):
                 raise PageNotFound(page_id)
             response.raise_for_status()
             return WikiPage.model_validate_json(await response.read())
+
+    async def page_search(
+        self,
+        query: str,
+        *,
+        page_size: int = 10,
+        auth: YandexAuth | None = None,
+    ) -> SearchResponse:
+        body = {
+            "query": query,
+            "page_size": max(1, min(page_size, SEARCH_PAGE_SIZE_MAX)),
+        }
+        async with self._session.post(
+            "v1/search",
+            headers=await self._build_headers(auth),
+            json=body,
+        ) as response:
+            if response.status >= 400:
+                await self._raise_api_error(response)
+            return SearchResponse.model_validate_json(await response.read())
 
     async def page_get_descendants(
         self,

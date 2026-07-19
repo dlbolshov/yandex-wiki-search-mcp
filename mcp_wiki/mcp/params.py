@@ -50,7 +50,8 @@ PageFields = Annotated[
     Field(
         description=(
             "Additional page fields to fetch. Supported values: "
-            "content, attributes, breadcrumbs, redirect. "
+            "content, attributes, breadcrumbs, redirect, "
+            "access_policy, access_lists, owner. "
             "Pass them as an array, for example ['content', 'breadcrumbs']."
         )
     ),
@@ -65,6 +66,23 @@ GridFields = Annotated[
         )
     ),
 ]
+SearchQuery = Annotated[
+    str,
+    Field(
+        description="Full-text search query over the whole Wiki. "
+        "Wrap a multi-word exact phrase in double quotes.",
+        min_length=1,
+    ),
+]
+SearchResultPageSize = Annotated[
+    int,
+    Field(
+        description="Number of search results to return (1-50). "
+        "Use 50 when combining with the client-side filters (slug_prefix/result_type).",
+        ge=1,
+        le=50,
+    ),
+]
 ResourceTypes = Annotated[
     list[ResourceTypeEnum] | None,
     Field(
@@ -77,6 +95,7 @@ ResourceTypes = Annotated[
 
 instructions = """Tools for interacting with Yandex Wiki.
 Use these tools to:
+- Discover pages across the whole Wiki with page_search, then open a result by its slug with page_get.
 - Read Wiki pages by slug or ID
 - Traverse a page subtree
 - Read comments, resources, and attachments

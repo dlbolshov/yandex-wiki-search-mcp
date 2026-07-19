@@ -2,11 +2,85 @@ from unittest.mock import AsyncMock
 
 from mcp.client.session import ClientSession
 
-from mcp_wiki.wiki.proto.types.pages import WikiGrid, WikiGridRow, WikiPage
+from mcp_wiki.wiki.proto.types.pages import (
+    SearchResponse,
+    SearchResultItem,
+    WikiGrid,
+    WikiGridRow,
+    WikiPage,
+)
 from tests.mcp.conftest import get_tool_result_content, get_tool_result_text
 
 
 class TestPageReadTools:
+    async def test_page_search(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
+            results=[
+                SearchResultItem.model_construct(slug="a/b", title="T", type="page"),
+                SearchResultItem.model_construct(slug="c/d", title="U", type="file"),
+            ],
+            total_documents=2,
+        )
+
+        result = await client_session.call_tool("page_search", {"query": "hello"})
+
+        content = get_tool_result_content(result)
+        assert content["results"][0]["slug"] == "a/b"
+        mock_wiki_protocol.page_search.assert_awaited_once()
+
+    async def test_page_search_result_type_filter(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
+            results=[
+                SearchResultItem.model_construct(slug="a/b", type="page"),
+                SearchResultItem.model_construct(slug="c/d", type="file"),
+            ],
+            total_documents=2,
+        )
+
+        result = await client_session.call_tool(
+            "page_search", {"query": "x", "result_type": "page"}
+        )
+
+        content = get_tool_result_content(result)
+        assert len(content["results"]) == 1
+        assert content["results"][0]["type"] == "page"
+        assert content["total_documents"] == 1
+
+    async def test_page_search_slug_prefix_filter_and_url_normalization(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
+            results=[
+                SearchResultItem.model_construct(
+                    slug="tech-doc/ml/page", url="/tech-doc/ml/page", type="page"
+                ),
+                SearchResultItem.model_construct(
+                    slug="tech-doc/mlops/page", url="/tech-doc/mlops/page", type="page"
+                ),
+            ],
+            total_documents=2,
+        )
+
+        result = await client_session.call_tool(
+            "page_search", {"query": "x", "slug_prefix": "/tech-doc/ml/"}
+        )
+
+        content = get_tool_result_content(result)
+        # segment-boundary match: 'tech-doc/mlops' must NOT pass; prefix got normalized
+        assert [r["slug"] for r in content["results"]] == ["tech-doc/ml/page"]
+        assert content["total_documents"] == 1
+        assert content["results"][0]["url"] == "https://wiki.yandex.ru/tech-doc/ml/page"
+
     async def test_page_get_by_slug(
         self,
         client_session: ClientSession,
