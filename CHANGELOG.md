@@ -20,6 +20,12 @@ All notable changes to this project are documented in this file.
 - Anchor fallback logic extracted from the client into `wiki/custom/anchors.py`
 - Tool layer deduplicated: shared `page_id`/`slug` params, `get_wiki()`/`resolve_page_id()`/`resolve_page_slug()` in `mcp/tools/common.py`
 
+### Fixed
+- Error responses with non-UTF-8 bodies (e.g. proxy HTML error pages) no longer crash with `UnicodeDecodeError` and produce a proper `WikiApiError`
+- `grid_update_cells` rejects empty/whitespace `row_id` instead of sending it to the API
+- `grid_add_rows.after_row_id` accepts numeric row IDs, consistent with `grid_move_rows`
+- `PageNotFound` for slug-based lookups reports the normalized slug instead of the raw input (URL, leading/trailing slashes)
+
 ## [0.4.0] - 2026-07-19
 
 ### Added

@@ -6,7 +6,7 @@ import pytest
 from aioresponses import aioresponses
 
 from mcp_wiki.wiki.custom.client import WikiClient
-from mcp_wiki.wiki.custom.errors import WikiApiError
+from mcp_wiki.wiki.custom.errors import PageNotFound, WikiApiError
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
     GridUpdateRequest,
@@ -735,3 +735,40 @@ class TestWikiClient:
             "# Root\n\n## Section {#release-notes}\n\nAppended under anchor.\n\nBody",
         )
         update_capture.last_request.assert_param("allow_merge", "true")
+
+    async def test_page_update_requires_title_or_content(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        with pytest.raises(ValueError, match="at least one of title or content"):
+            await wiki_client.page_update(10)
+
+    async def test_page_get_by_slug_not_found_reports_normalized_slug(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(status=404, payload={})
+        with aioresponses() as mocked:
+            mocked.get(
+                re.compile(r"https://api\.wiki\.yandex\.net/v1/pages.*"),
+                callback=capture.callback,
+            )
+            with pytest.raises(PageNotFound) as exc_info:
+                await wiki_client.page_get_by_slug("/users/test/page/")
+
+        assert exc_info.value.page_identifier == "users/test/page"
+
+    async def test_page_get_descendants_not_found_reports_normalized_slug(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(status=404, payload={})
+        with aioresponses() as mocked:
+            mocked.get(
+                re.compile(r"https://api\.wiki\.yandex\.net/v1/pages/descendants.*"),
+                callback=capture.callback,
+            )
+            with pytest.raises(PageNotFound) as exc_info:
+                await wiki_client.page_get_descendants("/users/test/page/")
+
+        assert exc_info.value.page_identifier == "users/test/page"

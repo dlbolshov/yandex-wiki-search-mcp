@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, BinaryIO, Literal
@@ -193,7 +194,7 @@ class WikiClient(WikiProtocol):
         json_body: Any = None,
         data: Any = None,
         content_type: str | None = None,
-        not_found: WikiError | None = None,
+        not_found: Callable[[], WikiError] | None = None,
         timeout: ClientTimeout | None = None,
     ) -> bytes:
         headers = self._build_headers(auth)
@@ -213,7 +214,7 @@ class WikiClient(WikiProtocol):
         async with self._http.request(method, path, **kwargs) as response:
             payload = await response.read()
             if response.status == 404 and not_found is not None:
-                raise not_found
+                raise not_found()
             if response.status >= 400:
                 raise build_api_error(response.status, payload)
             return payload
@@ -231,7 +232,8 @@ class WikiClient(WikiProtocol):
         fields: list[str] | None = None,
         auth: YandexAuth | None = None,
     ) -> WikiPage:
-        params: dict[str, Any] = {"slug": normalize_slug(slug)}
+        normalized_slug = normalize_slug(slug)
+        params: dict[str, Any] = {"slug": normalized_slug}
         if fields:
             params["fields"] = ",".join(fields)
 
@@ -240,7 +242,7 @@ class WikiClient(WikiProtocol):
             "v1/pages",
             params=params,
             auth=auth,
-            not_found=PageNotFound(slug),
+            not_found=lambda: PageNotFound(normalized_slug),
         )
         return WikiPage.model_validate_json(payload)
 
@@ -260,7 +262,7 @@ class WikiClient(WikiProtocol):
             f"v1/pages/{page_id}",
             params=params if params else None,
             auth=auth,
-            not_found=PageNotFound(page_id),
+            not_found=lambda: PageNotFound(page_id),
         )
         return WikiPage.model_validate_json(payload)
 
@@ -287,8 +289,9 @@ class WikiClient(WikiProtocol):
         cursor: str | None = None,
         auth: YandexAuth | None = None,
     ) -> DescendantsResponse:
+        normalized_slug = normalize_slug(slug)
         params: dict[str, Any] = {
-            "slug": normalize_slug(slug),
+            "slug": normalized_slug,
             "include_self": str(include_self).lower(),
             "page_size": page_size,
         }
@@ -300,7 +303,7 @@ class WikiClient(WikiProtocol):
             "v1/pages/descendants",
             params=params,
             auth=auth,
-            not_found=PageNotFound(slug),
+            not_found=lambda: PageNotFound(normalized_slug),
         )
         return DescendantsResponse.model_validate_json(payload)
 
@@ -321,7 +324,7 @@ class WikiClient(WikiProtocol):
             f"v1/pages/{page_id}/comments",
             params=params,
             auth=auth,
-            not_found=PageNotFound(page_id),
+            not_found=lambda: PageNotFound(page_id),
         )
         return CommentsResponse.model_validate_json(payload)
 
@@ -354,7 +357,7 @@ class WikiClient(WikiProtocol):
             f"v1/pages/{page_id}/resources",
             params=params,
             auth=auth,
-            not_found=PageNotFound(page_id),
+            not_found=lambda: PageNotFound(page_id),
         )
         return ResourcesResponse.model_validate_json(payload)
 
@@ -381,7 +384,7 @@ class WikiClient(WikiProtocol):
             f"v1/pages/{page_id}/grids",
             params=params,
             auth=auth,
-            not_found=PageNotFound(page_id),
+            not_found=lambda: PageNotFound(page_id),
         )
         return GridsResponse.model_validate_json(payload)
 
@@ -416,7 +419,7 @@ class WikiClient(WikiProtocol):
             f"v1/grids/{grid_id}",
             params=params if params else None,
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return WikiGrid.model_validate_json(payload)
 
@@ -450,7 +453,7 @@ class WikiClient(WikiProtocol):
             f"v1/grids/{grid_id}",
             json_body=body,
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return GridUpdateResponse.model_validate_json(payload)
 
@@ -478,7 +481,7 @@ class WikiClient(WikiProtocol):
             f"v1/grids/{grid_id}/rows",
             json_body=body,
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return GridMutationResponse.model_validate_json(payload)
 
@@ -492,7 +495,7 @@ class WikiClient(WikiProtocol):
             "DELETE",
             f"v1/grids/{grid_id}",
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return self._json_or_empty(payload)
 
@@ -513,7 +516,7 @@ class WikiClient(WikiProtocol):
             f"v1/grids/{grid_id}/clone",
             json_body=body,
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return GridOperationResponse.model_validate(self._json_or_empty(payload))
 
@@ -529,7 +532,7 @@ class WikiClient(WikiProtocol):
             f"v1/grids/{grid_id}/cells",
             json_body={"cells": cells},
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
@@ -546,7 +549,7 @@ class WikiClient(WikiProtocol):
             f"v1/grids/{grid_id}/rows",
             json_body={"revision": revision, "row_ids": row_ids},
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
@@ -571,7 +574,7 @@ class WikiClient(WikiProtocol):
             f"v1/grids/{grid_id}/columns",
             json_body=body,
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
@@ -588,7 +591,7 @@ class WikiClient(WikiProtocol):
             f"v1/grids/{grid_id}/columns",
             json_body={"revision": revision, "column_slugs": column_slugs},
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
@@ -616,7 +619,7 @@ class WikiClient(WikiProtocol):
             f"v1/grids/{grid_id}/rows/move",
             json_body=body,
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
@@ -638,7 +641,7 @@ class WikiClient(WikiProtocol):
                 "position": position,
             },
             auth=auth,
-            not_found=GridNotFound(grid_id),
+            not_found=lambda: GridNotFound(grid_id),
         )
         return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
@@ -659,7 +662,7 @@ class WikiClient(WikiProtocol):
             f"v1/pages/{page_id}/attachments",
             params=params,
             auth=auth,
-            not_found=PageNotFound(page_id),
+            not_found=lambda: PageNotFound(page_id),
         )
         return AttachmentListResponse.model_validate_json(payload)
 
@@ -691,6 +694,9 @@ class WikiClient(WikiProtocol):
         is_silent: bool = False,
         auth: YandexAuth | None = None,
     ) -> WikiPage:
+        if title is None and content is None:
+            raise ValueError("Provide at least one of title or content.")
+
         body: dict[str, Any] = {}
         if title is not None:
             body["title"] = title
@@ -709,7 +715,7 @@ class WikiClient(WikiProtocol):
             params=params if params else None,
             json_body=body,
             auth=auth,
-            not_found=PageNotFound(page_id),
+            not_found=lambda: PageNotFound(page_id),
         )
         return WikiPage.model_validate_json(payload)
 
@@ -734,7 +740,7 @@ class WikiClient(WikiProtocol):
                 f"v1/pages/{page_id}/append-content",
                 json_body=body,
                 auth=auth,
-                not_found=PageNotFound(page_id),
+                not_found=lambda: PageNotFound(page_id),
             )
         except WikiApiError as exc:
             if not (
@@ -779,7 +785,7 @@ class WikiClient(WikiProtocol):
             f"v1/pages/{page_id}/comments",
             json_body=request_body,
             auth=auth,
-            not_found=PageNotFound(page_id),
+            not_found=lambda: PageNotFound(page_id),
         )
         return PageComment.model_validate_json(payload)
 
@@ -793,7 +799,7 @@ class WikiClient(WikiProtocol):
             "DELETE",
             f"v1/pages/{page_id}",
             auth=auth,
-            not_found=PageNotFound(page_id),
+            not_found=lambda: PageNotFound(page_id),
         )
         return DeletePageResponse.model_validate_json(payload)
 
@@ -868,7 +874,7 @@ class WikiClient(WikiProtocol):
             f"v1/pages/{page_id}/attachments",
             json_body={"upload_sessions": session_ids},
             auth=auth,
-            not_found=PageNotFound(page_id),
+            not_found=lambda: PageNotFound(page_id),
         )
         return AttachmentResultsResponse.model_validate_json(payload)
 

@@ -129,6 +129,16 @@ class GridCellPatch(BaseModel):
         description="Column slug. Provide exactly one of column_id or column_slug.",
     )
 
+    @field_validator("row_id")
+    @classmethod
+    def _validate_row_id(cls, value: str | int) -> str | int:
+        if isinstance(value, int):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be empty")
+        return stripped
+
     @field_validator("column_id", "column_slug")
     @classmethod
     def _validate_column_ref_text(cls, value: str | None) -> str | None:

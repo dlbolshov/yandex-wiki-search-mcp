@@ -184,7 +184,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             ),
         ] = None,
         after_row_id: Annotated[
-            str | None,
+            str | int | None,
             Field(
                 description="Optional row ID after which to insert new rows. Mutually exclusive with position."
             ),
@@ -197,7 +197,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
         if position is not None and after_row_id is not None:
             raise ValueError("Provide either position or after_row_id, not both.")
         normalized_after_row_id = (
-            _require_non_empty_text(after_row_id, field_name="after_row_id")
+            _require_non_empty_text(str(after_row_id), field_name="after_row_id")
             if after_row_id is not None
             else None
         )

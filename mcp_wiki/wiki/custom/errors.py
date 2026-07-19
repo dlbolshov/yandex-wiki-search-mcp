@@ -55,7 +55,7 @@ def build_api_error(status: int, payload: bytes) -> WikiApiError:
     """
     details: dict[str, Any] | None = None
     if payload:
-        with contextlib.suppress(json.JSONDecodeError):
+        with contextlib.suppress(json.JSONDecodeError, UnicodeDecodeError):
             decoded = json.loads(payload)
             if isinstance(decoded, dict):
                 details = decoded
