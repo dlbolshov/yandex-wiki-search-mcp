@@ -1,13 +1,14 @@
 # CLAUDE.md
 
-This file provides guidance for working on the `ya-yandex-wiki-mcp` package.
+This file provides guidance for working on the `yandex-wiki-search-mcp` package.
 
 ## Project Overview
 
-`ya-yandex-wiki-mcp` is Yet Another Yandex Wiki MCP Server for the public Yandex Wiki API.
+`yandex-wiki-search-mcp` is an MCP server for the public Yandex Wiki API with full-text search.
 It exposes Wiki-oriented tools through FastMCP and keeps the code organized around a dedicated Wiki domain model.
 
 Main capabilities:
+- full-text search across the whole Wiki
 - read pages by `page_id` or `slug`
 - fetch descendants for page trees
 - read comments, resources, and attachments
@@ -25,7 +26,7 @@ task check        # Run Ruff, format check, mypy, and ty
 task test         # Run pytest
 task test-cov     # Run tests with HTML coverage report
 uv sync --dev     # Install dependencies
-uv run ya-yandex-wiki-mcp  # Run the server locally
+uv run yandex-wiki-search-mcp  # Run the server locally
 ```
 
 Before finalizing substantial code changes, run at least:
@@ -67,11 +68,14 @@ task test
 ## Tool Inventory
 
 Read-only tools:
+- `page_search`
 - `page_get`
 - `page_get_descendants`
 - `page_get_comments`
 - `page_get_resources`
 - `page_get_attachments`
+- `page_get_grids`
+- `grid_get`
 
 Write tools:
 - `page_create`
@@ -81,6 +85,17 @@ Write tools:
 - `page_delete`
 - `page_recover`
 - `page_upload_attachment`
+- `grid_create`
+- `grid_update`
+- `grid_delete`
+- `grid_copy`
+- `grid_add_rows`
+- `grid_delete_rows`
+- `grid_update_cells`
+- `grid_add_columns`
+- `grid_delete_columns`
+- `grid_move_rows`
+- `grid_move_columns`
 
 ## Testing
 

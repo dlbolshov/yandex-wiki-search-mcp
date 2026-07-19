@@ -1,21 +1,21 @@
 {
   "manifest_version": "0.4",
-  "name": "ya-yandex-wiki-mcp",
-  "display_name": "Yet Another Yandex Wiki MCP",
-  "version": "0.2.0",
-  "description": "Yet Another Yandex Wiki MCP Server",
+  "name": "yandex-wiki-search-mcp",
+  "display_name": "Yandex Wiki Search MCP",
+  "version": "0.3.0",
+  "description": "MCP server for Yandex Wiki with full-text search",
   "author": {
-    "name": "Aleksandr Ponkratov",
-    "email": "aleks.ponkratov@gmail.com"
+    "name": "David Bolshov",
+    "email": "dlbolshov@gmail.com"
   },
   "server": {
     "type": "uv",
-    "entry_point": "ya-yandex-wiki-mcp",
+    "entry_point": "yandex-wiki-search-mcp",
     "mcp_config": {
       "command": "uv",
       "args": [
         "run",
-        "ya-yandex-wiki-mcp"
+        "yandex-wiki-search-mcp"
       ],
       "env": {
         "PYTHONPATH": "${__dirname}",
@@ -34,6 +34,10 @@
     }
   },
   "tools": [
+    {
+      "name": "page_search",
+      "description": "Full-text search across the entire Yandex Wiki"
+    },
     {
       "name": "page_get_grids",
       "description": "Get dynamic tables attached to a Yandex Wiki page"
@@ -179,7 +183,8 @@
   },
   "keywords": [
     "yandex",
-    "yandex-wiki"
+    "yandex-wiki",
+    "search"
   ],
   "license": "Apache 2.0"
 }

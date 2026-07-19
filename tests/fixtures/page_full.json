@@ -1,0 +1,40 @@
+{
+  "id": 45000001,
+  "slug": "tech-doc/example/ml/pipeline-overview",
+  "title": "ML Pipeline Overview",
+  "page_type": "wysiwyg",
+  "content": "# Overview\n\nThe pipeline trains models and evaluates convergence.\n",
+  "attributes": {
+    "created_at": "2023-01-17T15:04:43.424Z",
+    "modified_at": "2026-02-23T02:41:31.292Z",
+    "lang": "",
+    "is_readonly": false,
+    "comments_count": 0,
+    "entity_links_count": 0,
+    "comments_enabled": true,
+    "is_collaborative": null,
+    "is_draft": false
+  },
+  "breadcrumbs": [
+    {"id": 45000000, "title": "Tech Docs", "slug": "tech-doc", "page_exists": true},
+    {"id": 45000001, "title": "ML Pipeline Overview", "slug": "tech-doc/example/ml/pipeline-overview", "page_exists": true}
+  ],
+  "redirect": null,
+  "access_policy": {
+    "access_type": "inherited",
+    "inherited_access_type": "all_staff",
+    "all_staff_role": "extra_editor",
+    "has_external": null,
+    "invite": null
+  },
+  "access_lists": {
+    "direct": [
+      {"id": "42000001", "created_at": "2026-01-15T18:09:53.633Z", "user": {"id": 78000001, "identity": {"uid": "1130000000000010", "cloud_uid": "aje000000000000000001"}, "username": "user1", "display_name": "User One", "is_dismissed": false, "affiliation": ""}, "group": null, "role": "author", "inheritance": "not_inherited"}
+    ],
+    "by_link": [],
+    "inherited": []
+  },
+  "owner": {
+    "user": {"id": 51000001, "identity": {"uid": "780000001", "cloud_uid": null}, "username": "wiki-robot", "display_name": "Wiki Robot", "is_dismissed": false, "affiliation": ""}
+  }
+}

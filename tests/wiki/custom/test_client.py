@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
 from aioresponses import aioresponses
 
 from mcp_wiki.wiki.custom.client import WikiClient
@@ -46,6 +47,98 @@ class TestWikiClient:
             }
         )
         capture.last_request.assert_params({"slug": "users/test/page"})
+
+    async def test_page_search(self, wiki_client: WikiClient) -> None:
+        capture = RequestCapture(
+            payload={
+                "results": [
+                    {
+                        "url": "/a/b",
+                        "slug": "a/b",
+                        "title": "T",
+                        "body": "snip",
+                        "type": "page",
+                        "modified_at": 1778104120,
+                    },
+                    {
+                        "url": "https://wiki.yandex.ru/a/b/.files/f.xlsx?download=1",
+                        "slug": "a/b",
+                        "title": "f.xlsx",
+                        "body": "",
+                        "type": "file",
+                        "modified_at": 1769154990,
+                    },
+                ],
+                "total_documents": 2,
+                "total_pages": 1,
+                "page_id": 1,
+                "search_client": "mailsearch",
+                "uid": "1",
+            }
+        )
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            result = await wiki_client.page_search("query text", page_size=50)
+
+        assert result.results[0].slug == "a/b"
+        assert result.results[1].type == "file"
+        capture.assert_called_once()
+        capture.last_request.assert_json_body({"query": "query text", "page_size": 50})
+
+    async def test_page_search_clamps_page_size(self, wiki_client: WikiClient) -> None:
+        capture = RequestCapture(
+            payload={"results": [], "total_documents": 0, "total_pages": 0}
+        )
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            await wiki_client.page_search("q", page_size=1000)
+        capture.last_request.assert_json_field("page_size", 50)
+
+    async def test_page_search_raises_api_error_with_list_message(
+        self, wiki_client: WikiClient
+    ) -> None:
+        capture = RequestCapture(
+            status=404,
+            payload={
+                "debug_message": "",
+                "error_code": "NOT_FOUND",
+                "level": "ERROR",
+                "message": ["Страница не найдена"],
+            },
+        )
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            with pytest.raises(WikiApiError) as exc_info:
+                await wiki_client.page_search("q")
+
+        assert exc_info.value.error_code == "NOT_FOUND"
+        assert exc_info.value.message == ["Страница не найдена"]
+        assert "message=Страница не найдена" in str(exc_info.value)
+
+    async def test_page_search_raises_api_error_on_non_dict_json_body(
+        self, wiki_client: WikiClient
+    ) -> None:
+        capture = RequestCapture(status=502, payload=["upstream error"])
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            with pytest.raises(WikiApiError) as exc_info:
+                await wiki_client.page_search("q")
+
+        assert exc_info.value.status == 502
+        assert exc_info.value.error_code is None
+        assert exc_info.value.message is None
 
     async def test_page_get_grids(
         self,

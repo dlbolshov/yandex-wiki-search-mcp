@@ -13,6 +13,9 @@ class PageFieldEnum(StrEnum):
     ATTRIBUTES = "attributes"
     BREADCRUMBS = "breadcrumbs"
     REDIRECT = "redirect"
+    ACCESS_POLICY = "access_policy"
+    ACCESS_LISTS = "access_lists"
+    OWNER = "owner"
 
 
 class GridFieldEnum(StrEnum):
@@ -36,6 +39,24 @@ class WikiPage(BaseWikiModel):
     redirect: dict[str, Any] | None = None
     created_at: str | None = None
     modified_at: str | None = None
+
+
+class SearchResultItem(BaseWikiModel):
+    url: str | None = None
+    slug: str | None = None
+    title: str | None = None
+    body: str | None = None
+    type: str | None = None
+    modified_at: int | None = None
+
+
+class SearchResponse(BaseWikiModel):
+    results: list[SearchResultItem] = Field(default_factory=list)
+    total_documents: int | None = None
+    total_pages: int | None = None
+    page_id: int | None = None
+    search_client: str | None = None
+    uid: str | None = None
 
 
 class PageComment(BaseWikiModel):

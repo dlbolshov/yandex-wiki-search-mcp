@@ -1,0 +1,50 @@
+{
+  "_comment": "Real error envelopes observed live. TWO shapes coexist (A: message string|null + details; B: message array + level). A robust client must parse both.",
+  "bad_request_page_size": {
+    "error_code": "BAD_REQUEST",
+    "debug_message": "page_size must be between 1 and 50",
+    "message": null,
+    "details": null
+  },
+  "bad_request_unknown_field": {
+    "error_code": "BAD_REQUEST",
+    "debug_message": "Unknown field foo; Allowed fields are redirect, breadcrumbs, attributes, content, access_policy, access_lists, owner",
+    "message": null,
+    "details": null
+  },
+  "bad_request_missing_query": {
+    "error_code": "BAD_REQUEST",
+    "debug_message": "query is required",
+    "message": null,
+    "details": null
+  },
+  "not_found_slug": {
+    "error_code": "NOT_FOUND",
+    "debug_message": "",
+    "message": "По этому адресу ничего нет",
+    "details": null
+  },
+  "not_found_id": {
+    "error_code": "NOT_FOUND",
+    "debug_message": "",
+    "message": null,
+    "details": null
+  },
+  "not_found_route": {
+    "debug_message": "Resource or it's component is missing",
+    "error_code": "NOT_FOUND",
+    "level": "ERROR",
+    "message": ["Страница не найдена"]
+  },
+  "forbidden_org": {
+    "debug_message": "Organization collab_id=None does not exist",
+    "error_code": "FORCED_SYNC_REQUIRED",
+    "level": "ERROR",
+    "message": ["You don't have permission to access the requested resource."]
+  },
+  "unauthorized": {
+    "debug_message": "IAM authentication required;[GET] - /v1/pages?slug=homepage",
+    "error_code": "UNAUTHORIZED",
+    "level": "ERROR"
+  }
+}

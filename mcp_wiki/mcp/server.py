@@ -56,7 +56,7 @@ def make_wiki_lifespan(settings: Settings) -> Lifespan:
         )
         try:
             await wiki.prepare()
-            yield AppContext(wiki=wiki)
+            yield AppContext(wiki=wiki, web_base_url=settings.wiki_web_base_url)
         finally:
             await wiki.close()
 
@@ -134,7 +134,7 @@ def create_mcp_server(
         )
 
     server = FastMCP(
-        name="Yet Another Yandex Wiki MCP Server",
+        name="Yandex Wiki Search MCP",
         instructions=instructions,
         host=settings.host,
         port=settings.port,

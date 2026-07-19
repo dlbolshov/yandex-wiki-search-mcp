@@ -44,7 +44,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN uv venv /venv && UV_PROJECT_ENVIRONMENT=/venv uv sync --locked
 
 FROM base as final
-LABEL io.modelcontextprotocol.server.name="io.github.APonkratov/ya-yandex-wiki-mcp"
+LABEL io.modelcontextprotocol.server.name="io.github.dlbolshov/yandex-wiki-search-mcp"
 
 ENV PATH=/venv/bin:$PATH
 COPY --from=builder /venv /venv

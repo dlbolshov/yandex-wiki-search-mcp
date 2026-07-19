@@ -168,3 +168,7 @@ requirements.txt
 .mcpregistry_github_token
 .mcpregistry_registry_token
 .serena
+
+# Live API probe output (real org data) - never commit
+raw/
+scripts/raw/

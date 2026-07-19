@@ -17,8 +17,14 @@ from mcp_wiki.mcp.params import (
     PageSize,
     PageSlug,
     ResourceTypes,
+    SearchQuery,
+    SearchResultPageSize,
 )
-from mcp_wiki.mcp.utils import get_yandex_auth, resolve_page_locator
+from mcp_wiki.mcp.utils import (
+    get_yandex_auth,
+    normalize_slug,
+    resolve_page_locator,
+)
 
 
 async def _resolve_page_id(
@@ -62,6 +68,63 @@ async def _resolve_page_slug(
 
 
 def register_page_read_tools(mcp: FastMCP[Any]) -> None:
+    @mcp.tool(
+        title="Search Wiki",
+        description=(
+            "Full-text search across the entire Yandex Wiki. Returns up to 50 results "
+            "(pages and files) ranked by relevance, each with a title, slug, url, and a "
+            "text snippet. Use this to DISCOVER pages, then call page_get with a result's "
+            "slug to read full content. Wrap multi-word exact phrases in double quotes. "
+            "Search is global: there is no server-side section filter. slug_prefix and "
+            "result_type are applied client-side AFTER fetching, so combine them with "
+            "page_size=50 to avoid missing matches."
+        ),
+        annotations=ToolAnnotations(readOnlyHint=True),
+    )
+    async def page_search(
+        ctx: Context[Any, AppContext, Request],
+        query: SearchQuery,
+        page_size: SearchResultPageSize = 10,
+        slug_prefix: Annotated[
+            str | None,
+            Field(
+                description="Optional client-side filter: keep only results whose slug "
+                "equals this prefix or lies under it as a path segment, "
+                "e.g. 'tech-doc/ml'."
+            ),
+        ] = None,
+        result_type: Annotated[
+            Literal["page", "file"] | None,
+            Field(description="Optional client-side filter by result type."),
+        ] = None,
+    ) -> Any:
+        app_context = ctx.request_context.lifespan_context
+        response = await app_context.wiki.page_search(
+            query,
+            page_size=page_size,
+            auth=get_yandex_auth(ctx),
+        )
+        if slug_prefix:
+            prefix = normalize_slug(slug_prefix).lower()
+            response.results = [
+                r
+                for r in response.results
+                if (slug := (r.slug or "").lower()) == prefix
+                or slug.startswith(prefix + "/")
+            ]
+        if result_type:
+            response.results = [r for r in response.results if r.type == result_type]
+        if slug_prefix or result_type:
+            # keep the fields' semantics: total_documents always equals the number
+            # of returned results and total_pages is 0 only when there are none
+            response.total_documents = len(response.results)
+            response.total_pages = 1 if response.results else 0
+        web_base_url = app_context.web_base_url.rstrip("/")
+        for r in response.results:
+            if r.url and r.url.startswith("/"):
+                r.url = web_base_url + r.url
+        return response
+
     @mcp.tool(
         title="Get Wiki Page",
         description="Get a Yandex Wiki page by page_id or slug.",
