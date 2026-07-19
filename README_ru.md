@@ -125,7 +125,7 @@ Docker, read-only (рекомендуется для агентов):
 - Там, где API требует optimistic locking, mutation tools принимают `revision`.
 - `grid_copy` возвращает metadata асинхронной операции, а не готовую копию таблицы.
 - Для `grid_add_columns` каждая колонка должна содержать поле `required`, потому что это требует реальный API Yandex Wiki.
-- `grid_update.default_sort` проверен на реальном API и должен передаваться как список одноэлементных словарей, например `[{"status": "asc"}, {"priority": "desc"}]`.
+- `grid_update.default_sort` принимает список объектов `{"column": ..., "direction": ...}`, например `[{"column": "status", "direction": "asc"}]`; сервер сам конвертирует их в одноэлементные словари, которые ожидает реальный API.
 
 Официальные материалы:
 

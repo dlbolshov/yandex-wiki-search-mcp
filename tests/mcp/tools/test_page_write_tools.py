@@ -50,7 +50,7 @@ class TestPageWriteTools:
                 "grid_id": "grid-1",
                 "revision": "7",
                 "title": "Updated roadmap",
-                "default_sort": [{"status": "asc"}],
+                "default_sort": [{"column": "status", "direction": "asc"}],
             },
         )
 
@@ -77,9 +77,7 @@ class TestPageWriteTools:
         )
 
         assert result.isError is True
-        assert "exactly one column slug to direction mapping" in get_tool_result_text(
-            result
-        )
+        assert "Extra inputs are not permitted" in get_tool_result_text(result)
 
     async def test_grid_add_rows(
         self,
@@ -127,6 +125,30 @@ class TestPageWriteTools:
 
         assert result.isError is True
         assert "either position or after_row_id" in get_tool_result_text(result)
+
+    async def test_grid_add_rows_accepts_numeric_after_row_id(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.grid_add_rows.return_value = {
+            "revision": "8",
+            "results": [],
+        }
+
+        result = await client_session.call_tool(
+            "grid_add_rows",
+            {
+                "grid_id": "grid-1",
+                "revision": "7",
+                "rows": [{"status": "todo"}],
+                "after_row_id": 5,
+            },
+        )
+
+        assert result.isError is False
+        args = mock_wiki_protocol.grid_add_rows.await_args
+        assert args.kwargs["after_row_id"] == "5"
 
     async def test_grid_delete(
         self,
@@ -219,6 +241,21 @@ class TestPageWriteTools:
 
         assert result.isError is True
         assert "exactly one of column_id or column_slug" in get_tool_result_text(result)
+
+    async def test_grid_update_cells_rejects_empty_row_id(
+        self,
+        client_session: ClientSession,
+    ) -> None:
+        result = await client_session.call_tool(
+            "grid_update_cells",
+            {
+                "grid_id": "grid-1",
+                "cells": [{"row_id": "  ", "column_slug": "status", "value": "done"}],
+            },
+        )
+
+        assert result.isError is True
+        assert "must not be empty" in get_tool_result_text(result)
 
     async def test_grid_delete_rows(
         self,

@@ -128,7 +128,7 @@ The toolset is based on the public Yandex Wiki API areas that are most useful in
 - Grid mutation tools use optimistic locking where the Wiki API requires `revision`.
 - `grid_copy` returns operation metadata from the Wiki API, not a ready copied grid object.
 - `grid_add_columns` requires `required` on every column because the real Wiki API validates it.
-- `grid_update.default_sort` is verified against the real API as a list of single-entry mappings, for example `[{"status": "asc"}, {"priority": "desc"}]`.
+- `grid_update.default_sort` takes a list of `{"column": ..., "direction": ...}` entries, for example `[{"column": "status", "direction": "asc"}]`; the server converts them to the single-entry mappings the real API expects.
 
 These areas are documented in the official Yandex Wiki API references and examples:
 

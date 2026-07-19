@@ -1,11 +1,10 @@
 import asyncio
-import contextlib
 import json
 import logging
-import re
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Any, BinaryIO, Literal
 
 from aiohttp import (
     ClientSession,
@@ -17,7 +16,14 @@ from aiohttp import (
 )
 
 from mcp_wiki.mcp.utils import normalize_slug
-from mcp_wiki.wiki.custom.errors import PageNotFound, WikiApiError
+from mcp_wiki.wiki.custom.anchors import append_content_to_anchor_source
+from mcp_wiki.wiki.custom.errors import (
+    GridNotFound,
+    PageNotFound,
+    WikiApiError,
+    WikiError,
+    build_api_error,
+)
 from mcp_wiki.wiki.proto.common import YandexAuth
 from mcp_wiki.wiki.proto.pages import WikiProtocol
 from mcp_wiki.wiki.proto.types.pages import (
@@ -46,6 +52,10 @@ from mcp_wiki.wiki.proto.types.pages import (
 SEARCH_PAGE_SIZE_MAX = 50
 
 logger = logging.getLogger(__name__)
+
+
+def _open_binary(path: Path) -> BinaryIO:
+    return path.open("rb")
 
 
 def _build_trace_config() -> TraceConfig:
@@ -104,23 +114,46 @@ class WikiClient(WikiProtocol):
         cloud_org_id: str | None = None,
         base_url: str = "https://api.wiki.yandex.net",
         timeout: float = 30,
+        upload_timeout: float = 300,
     ):
         self._token = token
         self._iam_token = iam_token
         self._auth_scheme = auth_scheme
         self._org_id = org_id
         self._cloud_org_id = cloud_org_id
-        self._session = ClientSession(
-            base_url=base_url,
-            timeout=ClientTimeout(total=timeout),
-            trace_configs=[_build_trace_config()],
-        )
+        self._base_url = base_url
+        self._timeout = ClientTimeout(total=timeout)
+        self._upload_timeout = ClientTimeout(total=upload_timeout)
+        self._session: ClientSession | None = None
 
     async def prepare(self) -> None:
-        return None
+        if self._session is None or self._session.closed:
+            self._session = ClientSession(
+                base_url=self._base_url,
+                timeout=self._timeout,
+                trace_configs=[_build_trace_config()],
+            )
 
     async def close(self) -> None:
-        await self._session.close()
+        if self._session is not None:
+            await self._session.close()
+            self._session = None
+
+    async def __aenter__(self) -> "WikiClient":
+        await self.prepare()
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self.close()
+
+    @property
+    def _http(self) -> ClientSession:
+        if self._session is None:
+            raise RuntimeError(
+                "WikiClient is not prepared. "
+                "Call prepare() or use 'async with WikiClient(...)'."
+            )
+        return self._session
 
     def _build_headers(self, auth: YandexAuth | None = None) -> dict[str, str]:
         if auth and auth.token:
@@ -151,70 +184,46 @@ class WikiClient(WikiProtocol):
             headers["X-Cloud-Org-Id"] = cloud_org_id
         return headers
 
-    async def _read_json(self, response: Any) -> Any:
-        response.raise_for_status()
-        payload = await response.read()
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        auth: YandexAuth | None = None,
+        params: dict[str, Any] | None = None,
+        json_body: Any = None,
+        data: Any = None,
+        content_type: str | None = None,
+        not_found: Callable[[], WikiError] | None = None,
+        timeout: ClientTimeout | None = None,
+    ) -> bytes:
+        headers = self._build_headers(auth)
+        if content_type:
+            headers["Content-Type"] = content_type
+
+        kwargs: dict[str, Any] = {"headers": headers}
+        if params is not None:
+            kwargs["params"] = params
+        if json_body is not None:
+            kwargs["json"] = json_body
+        if data is not None:
+            kwargs["data"] = data
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+
+        async with self._http.request(method, path, **kwargs) as response:
+            payload = await response.read()
+            if response.status == 404 and not_found is not None:
+                raise not_found()
+            if response.status >= 400:
+                raise build_api_error(response.status, payload)
+            return payload
+
+    @staticmethod
+    def _json_or_empty(payload: bytes) -> Any:
         if not payload:
             return {}
         return json.loads(payload)
-
-    async def _raise_api_error(self, response: Any) -> None:
-        payload = await response.read()
-        details: dict[str, Any] | None = None
-        if payload:
-            with contextlib.suppress(json.JSONDecodeError):
-                decoded = json.loads(payload)
-                if isinstance(decoded, dict):
-                    details = decoded
-        raise WikiApiError(
-            status=response.status,
-            error_code=details.get("error_code") if details else None,
-            debug_message=details.get("debug_message") if details else None,
-            message=details.get("message") if details else None,
-        )
-
-    def _append_content_to_anchor_source(
-        self,
-        page_content: str,
-        *,
-        appended_content: str,
-        anchor: str,
-    ) -> str | None:
-        anchor_id = anchor.lstrip("#")
-        escaped_anchor_id = re.escape(anchor_id)
-        patterns = [
-            re.compile(rf"(?m)^.*\{{#{escaped_anchor_id}\}}[ \t]*$"),
-            re.compile(
-                rf'(?m)^.*#\[[^\]]*\]\({escaped_anchor_id}(?:\s+"[^"]*")?\)[ \t]*$'
-            ),
-            re.compile(
-                rf'(?m)^.*\{{\{{(?:anchor|a)\s+href="{escaped_anchor_id}"[^}}]*\}}\}}[ \t]*$'
-            ),
-        ]
-        for pattern in patterns:
-            match = pattern.search(page_content)
-            if match is None:
-                continue
-            anchor_end = match.end()
-            insertion_point = anchor_end
-            while insertion_point < len(page_content) and page_content[
-                insertion_point
-            ] in ("\r", "\n"):
-                insertion_point += 1
-            separator = page_content[anchor_end:insertion_point]
-            suffix = page_content[insertion_point:]
-            if separator:
-                normalized_content = appended_content.strip("\r\n")
-                trailing_separator = separator if suffix else ""
-                return (
-                    f"{page_content[:anchor_end]}{separator}{normalized_content}"
-                    f"{trailing_separator}{suffix}"
-                )
-            return (
-                f"{page_content[:anchor_end]}{appended_content}"
-                f"{page_content[insertion_point:]}"
-            )
-        return None
 
     async def page_get_by_slug(
         self,
@@ -223,19 +232,19 @@ class WikiClient(WikiProtocol):
         fields: list[str] | None = None,
         auth: YandexAuth | None = None,
     ) -> WikiPage:
-        params: dict[str, str] = {"slug": normalize_slug(slug)}
+        normalized_slug = normalize_slug(slug)
+        params: dict[str, Any] = {"slug": normalized_slug}
         if fields:
             params["fields"] = ",".join(fields)
 
-        async with self._session.get(
+        payload = await self._request(
+            "GET",
             "v1/pages",
-            headers=self._build_headers(auth),
             params=params,
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(slug)
-            response.raise_for_status()
-            return WikiPage.model_validate_json(await response.read())
+            auth=auth,
+            not_found=lambda: PageNotFound(normalized_slug),
+        )
+        return WikiPage.model_validate_json(payload)
 
     async def page_get(
         self,
@@ -244,19 +253,18 @@ class WikiClient(WikiProtocol):
         fields: list[str] | None = None,
         auth: YandexAuth | None = None,
     ) -> WikiPage:
-        params: dict[str, str] = {}
+        params: dict[str, Any] = {}
         if fields:
             params["fields"] = ",".join(fields)
 
-        async with self._session.get(
+        payload = await self._request(
+            "GET",
             f"v1/pages/{page_id}",
-            headers=self._build_headers(auth),
             params=params if params else None,
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            response.raise_for_status()
-            return WikiPage.model_validate_json(await response.read())
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        return WikiPage.model_validate_json(payload)
 
     async def page_search(
         self,
@@ -269,14 +277,8 @@ class WikiClient(WikiProtocol):
             "query": query,
             "page_size": max(1, min(page_size, SEARCH_PAGE_SIZE_MAX)),
         }
-        async with self._session.post(
-            "v1/search",
-            headers=self._build_headers(auth),
-            json=body,
-        ) as response:
-            if response.status >= 400:
-                await self._raise_api_error(response)
-            return SearchResponse.model_validate_json(await response.read())
+        payload = await self._request("POST", "v1/search", json_body=body, auth=auth)
+        return SearchResponse.model_validate_json(payload)
 
     async def page_get_descendants(
         self,
@@ -287,21 +289,23 @@ class WikiClient(WikiProtocol):
         cursor: str | None = None,
         auth: YandexAuth | None = None,
     ) -> DescendantsResponse:
+        normalized_slug = normalize_slug(slug)
         params: dict[str, Any] = {
-            "slug": normalize_slug(slug),
+            "slug": normalized_slug,
             "include_self": str(include_self).lower(),
             "page_size": page_size,
         }
         if cursor:
             params["cursor"] = cursor
 
-        async with self._session.get(
+        payload = await self._request(
+            "GET",
             "v1/pages/descendants",
-            headers=self._build_headers(auth),
             params=params,
-        ) as response:
-            response.raise_for_status()
-            return DescendantsResponse.model_validate_json(await response.read())
+            auth=auth,
+            not_found=lambda: PageNotFound(normalized_slug),
+        )
+        return DescendantsResponse.model_validate_json(payload)
 
     async def page_get_comments(
         self,
@@ -315,15 +319,14 @@ class WikiClient(WikiProtocol):
         if cursor:
             params["cursor"] = cursor
 
-        async with self._session.get(
+        payload = await self._request(
+            "GET",
             f"v1/pages/{page_id}/comments",
-            headers=self._build_headers(auth),
             params=params,
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            response.raise_for_status()
-            return CommentsResponse.model_validate_json(await response.read())
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        return CommentsResponse.model_validate_json(payload)
 
     async def page_get_resources(
         self,
@@ -349,15 +352,14 @@ class WikiClient(WikiProtocol):
         if order_direction:
             params["order_direction"] = order_direction
 
-        async with self._session.get(
+        payload = await self._request(
+            "GET",
             f"v1/pages/{page_id}/resources",
-            headers=self._build_headers(auth),
             params=params,
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            response.raise_for_status()
-            return ResourcesResponse.model_validate_json(await response.read())
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        return ResourcesResponse.model_validate_json(payload)
 
     async def page_get_grids(
         self,
@@ -377,15 +379,14 @@ class WikiClient(WikiProtocol):
         if order_direction:
             params["order_direction"] = order_direction
 
-        async with self._session.get(
+        payload = await self._request(
+            "GET",
             f"v1/pages/{page_id}/grids",
-            headers=self._build_headers(auth),
             params=params,
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            response.raise_for_status()
-            return GridsResponse.model_validate_json(await response.read())
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        return GridsResponse.model_validate_json(payload)
 
     async def grid_get(
         self,
@@ -413,13 +414,14 @@ class WikiClient(WikiProtocol):
         if sort:
             params["sort"] = sort
 
-        async with self._session.get(
+        payload = await self._request(
+            "GET",
             f"v1/grids/{grid_id}",
-            headers=self._build_headers(auth),
             params=params if params else None,
-        ) as response:
-            response.raise_for_status()
-            return WikiGrid.model_validate_json(await response.read())
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return WikiGrid.model_validate_json(payload)
 
     async def grid_create(
         self,
@@ -427,13 +429,13 @@ class WikiClient(WikiProtocol):
         request: GridCreateRequest,
         auth: YandexAuth | None = None,
     ) -> WikiGrid:
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             "v1/grids",
-            headers=self._build_headers(auth),
-            json=request.model_dump(exclude_none=True),
-        ) as response:
-            response.raise_for_status()
-            return WikiGrid.model_validate_json(await response.read())
+            json_body=request.model_dump(exclude_none=True),
+            auth=auth,
+        )
+        return WikiGrid.model_validate_json(payload)
 
     async def grid_update(
         self,
@@ -446,13 +448,14 @@ class WikiClient(WikiProtocol):
         if not request.default_sort:
             body.pop("default_sort", None)
 
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/grids/{grid_id}",
-            headers=self._build_headers(auth),
-            json=body,
-        ) as response:
-            response.raise_for_status()
-            return GridUpdateResponse.model_validate_json(await response.read())
+            json_body=body,
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return GridUpdateResponse.model_validate_json(payload)
 
     async def grid_add_rows(
         self,
@@ -473,13 +476,14 @@ class WikiClient(WikiProtocol):
         if after_row_id is not None:
             body["after_row_id"] = after_row_id
 
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/grids/{grid_id}/rows",
-            headers=self._build_headers(auth),
-            json=body,
-        ) as response:
-            response.raise_for_status()
-            return GridMutationResponse.model_validate_json(await response.read())
+            json_body=body,
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return GridMutationResponse.model_validate_json(payload)
 
     async def grid_delete(
         self,
@@ -487,11 +491,13 @@ class WikiClient(WikiProtocol):
         *,
         auth: YandexAuth | None = None,
     ) -> dict[str, Any]:
-        async with self._session.delete(
+        payload = await self._request(
+            "DELETE",
             f"v1/grids/{grid_id}",
-            headers=self._build_headers(auth),
-        ) as response:
-            return await self._read_json(response)
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return self._json_or_empty(payload)
 
     async def grid_copy(
         self,
@@ -505,12 +511,14 @@ class WikiClient(WikiProtocol):
         if title is not None:
             body["title"] = title
 
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/grids/{grid_id}/clone",
-            headers=self._build_headers(auth),
-            json=body,
-        ) as response:
-            return GridOperationResponse.model_validate(await self._read_json(response))
+            json_body=body,
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return GridOperationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_update_cells(
         self,
@@ -519,12 +527,14 @@ class WikiClient(WikiProtocol):
         cells: list[dict[str, Any]],
         auth: YandexAuth | None = None,
     ) -> GridMutationResponse:
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/grids/{grid_id}/cells",
-            headers=self._build_headers(auth),
-            json={"cells": cells},
-        ) as response:
-            return GridMutationResponse.model_validate(await self._read_json(response))
+            json_body={"cells": cells},
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_delete_rows(
         self,
@@ -534,12 +544,14 @@ class WikiClient(WikiProtocol):
         row_ids: list[str],
         auth: YandexAuth | None = None,
     ) -> GridMutationResponse:
-        async with self._session.delete(
+        payload = await self._request(
+            "DELETE",
             f"v1/grids/{grid_id}/rows",
-            headers=self._build_headers(auth),
-            json={"revision": revision, "row_ids": row_ids},
-        ) as response:
-            return GridMutationResponse.model_validate(await self._read_json(response))
+            json_body={"revision": revision, "row_ids": row_ids},
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_add_columns(
         self,
@@ -557,12 +569,14 @@ class WikiClient(WikiProtocol):
         if position is not None:
             body["position"] = position
 
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/grids/{grid_id}/columns",
-            headers=self._build_headers(auth),
-            json=body,
-        ) as response:
-            return GridMutationResponse.model_validate(await self._read_json(response))
+            json_body=body,
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_delete_columns(
         self,
@@ -572,12 +586,14 @@ class WikiClient(WikiProtocol):
         column_slugs: list[str],
         auth: YandexAuth | None = None,
     ) -> GridMutationResponse:
-        async with self._session.delete(
+        payload = await self._request(
+            "DELETE",
             f"v1/grids/{grid_id}/columns",
-            headers=self._build_headers(auth),
-            json={"revision": revision, "column_slugs": column_slugs},
-        ) as response:
-            return GridMutationResponse.model_validate(await self._read_json(response))
+            json_body={"revision": revision, "column_slugs": column_slugs},
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_move_rows(
         self,
@@ -598,12 +614,14 @@ class WikiClient(WikiProtocol):
         if after_row_id is not None:
             body["after_row_id"] = after_row_id
 
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/grids/{grid_id}/rows/move",
-            headers=self._build_headers(auth),
-            json=body,
-        ) as response:
-            return GridMutationResponse.model_validate(await self._read_json(response))
+            json_body=body,
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_move_columns(
         self,
@@ -614,16 +632,18 @@ class WikiClient(WikiProtocol):
         position: int,
         auth: YandexAuth | None = None,
     ) -> GridMutationResponse:
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/grids/{grid_id}/columns/move",
-            headers=self._build_headers(auth),
-            json={
+            json_body={
                 "revision": revision,
                 "column_slug": column_slug,
                 "position": position,
             },
-        ) as response:
-            return GridMutationResponse.model_validate(await self._read_json(response))
+            auth=auth,
+            not_found=lambda: GridNotFound(grid_id),
+        )
+        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def page_get_attachments(
         self,
@@ -637,15 +657,14 @@ class WikiClient(WikiProtocol):
         if cursor:
             params["cursor"] = cursor
 
-        async with self._session.get(
+        payload = await self._request(
+            "GET",
             f"v1/pages/{page_id}/attachments",
-            headers=self._build_headers(auth),
             params=params,
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            response.raise_for_status()
-            return AttachmentListResponse.model_validate_json(await response.read())
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        return AttachmentListResponse.model_validate_json(payload)
 
     async def page_create(
         self,
@@ -662,13 +681,8 @@ class WikiClient(WikiProtocol):
             "content": content,
             "page_type": page_type,
         }
-        async with self._session.post(
-            "v1/pages",
-            headers=self._build_headers(auth),
-            json=body,
-        ) as response:
-            response.raise_for_status()
-            return WikiPage.model_validate_json(await response.read())
+        payload = await self._request("POST", "v1/pages", json_body=body, auth=auth)
+        return WikiPage.model_validate_json(payload)
 
     async def page_update(
         self,
@@ -689,22 +703,21 @@ class WikiClient(WikiProtocol):
         if content is not None:
             body["content"] = content
 
-        params: dict[str, str] = {}
+        params: dict[str, Any] = {}
         if allow_merge:
             params["allow_merge"] = "true"
         if is_silent:
             params["is_silent"] = "true"
 
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/pages/{page_id}",
-            headers=self._build_headers(auth),
-            json=body,
             params=params if params else None,
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            response.raise_for_status()
-            return WikiPage.model_validate_json(await response.read())
+            json_body=body,
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        return WikiPage.model_validate_json(payload)
 
     async def page_append_content(
         self,
@@ -721,52 +734,36 @@ class WikiClient(WikiProtocol):
         else:
             body["body"] = {"location": location}
 
-        async with self._session.post(
-            f"v1/pages/{page_id}/append-content",
-            headers=self._build_headers(auth),
-            json=body,
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            if response.status == 400:
-                payload = await response.read()
-                details: dict[str, Any] | None = None
-                if payload:
-                    with contextlib.suppress(json.JSONDecodeError):
-                        decoded = json.loads(payload)
-                        if isinstance(decoded, dict):
-                            details = decoded
-                if (
-                    anchor
-                    and details
-                    and details.get("error_code") == "ANCHOR_NOT_FOUND"
-                ):
-                    page = await self.page_get(
+        try:
+            payload = await self._request(
+                "POST",
+                f"v1/pages/{page_id}/append-content",
+                json_body=body,
+                auth=auth,
+                not_found=lambda: PageNotFound(page_id),
+            )
+        except WikiApiError as exc:
+            if not (
+                anchor and exc.status == 400 and exc.error_code == "ANCHOR_NOT_FOUND"
+            ):
+                raise
+            page = await self.page_get(page_id, fields=["content"], auth=auth)
+            if isinstance(page.content, str):
+                updated_content = append_content_to_anchor_source(
+                    page.content,
+                    appended_content=content,
+                    anchor=anchor,
+                )
+                if updated_content is not None:
+                    updated_page = await self.page_update(
                         page_id,
-                        fields=["content"],
+                        content=updated_content,
+                        allow_merge=True,
                         auth=auth,
                     )
-                    if isinstance(page.content, str):
-                        updated_content = self._append_content_to_anchor_source(
-                            page.content,
-                            appended_content=content,
-                            anchor=anchor,
-                        )
-                        if updated_content is not None:
-                            updated_page = await self.page_update(
-                                page_id,
-                                content=updated_content,
-                                allow_merge=True,
-                                auth=auth,
-                            )
-                            return json.loads(updated_page.model_dump_json())
-                raise WikiApiError(
-                    status=response.status,
-                    error_code=details.get("error_code") if details else None,
-                    debug_message=details.get("debug_message") if details else None,
-                    message=details.get("message") if details else None,
-                )
-            return await self._read_json(response)
+                    return json.loads(updated_page.model_dump_json())
+            raise
+        return self._json_or_empty(payload)
 
     async def page_add_comment(
         self,
@@ -783,15 +780,14 @@ class WikiClient(WikiProtocol):
         if thread_id is not None:
             request_body["thread_id"] = thread_id
 
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/pages/{page_id}/comments",
-            headers=self._build_headers(auth),
-            json=request_body,
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            response.raise_for_status()
-            return PageComment.model_validate_json(await response.read())
+            json_body=request_body,
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        return PageComment.model_validate_json(payload)
 
     async def page_delete(
         self,
@@ -799,14 +795,13 @@ class WikiClient(WikiProtocol):
         *,
         auth: YandexAuth | None = None,
     ) -> DeletePageResponse:
-        async with self._session.delete(
+        payload = await self._request(
+            "DELETE",
             f"v1/pages/{page_id}",
-            headers=self._build_headers(auth),
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            response.raise_for_status()
-            return DeletePageResponse.model_validate_json(await response.read())
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        return DeletePageResponse.model_validate_json(payload)
 
     async def page_recover(
         self,
@@ -814,12 +809,12 @@ class WikiClient(WikiProtocol):
         *,
         auth: YandexAuth | None = None,
     ) -> RecoverPageResponse:
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/recovery_tokens/{recovery_token}/recover",
-            headers=self._build_headers(auth),
-        ) as response:
-            response.raise_for_status()
-            return RecoverPageResponse.model_validate_json(await response.read())
+            auth=auth,
+        )
+        return RecoverPageResponse.model_validate_json(payload)
 
     async def upload_session_create(
         self,
@@ -828,13 +823,13 @@ class WikiClient(WikiProtocol):
         file_size: int,
         auth: YandexAuth | None = None,
     ) -> UploadSessionResponse:
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             "v1/upload_sessions",
-            headers=self._build_headers(auth),
-            json={"file_name": file_name, "file_size": file_size},
-        ) as response:
-            response.raise_for_status()
-            return UploadSessionResponse.model_validate_json(await response.read())
+            json_body={"file_name": file_name, "file_size": file_size},
+            auth=auth,
+        )
+        return UploadSessionResponse.model_validate_json(payload)
 
     async def _upload_part(
         self,
@@ -844,16 +839,15 @@ class WikiClient(WikiProtocol):
         data: bytes,
         auth: YandexAuth | None = None,
     ) -> None:
-        headers = self._build_headers(auth)
-        headers["Content-Type"] = "application/octet-stream"
-
-        async with self._session.put(
+        await self._request(
+            "PUT",
             f"v1/upload_sessions/{session_id}/upload_part",
-            headers=headers,
             params={"part_number": part_number},
             data=data,
-        ) as response:
-            response.raise_for_status()
+            content_type="application/octet-stream",
+            auth=auth,
+            timeout=self._upload_timeout,
+        )
 
     async def _finish_upload_session(
         self,
@@ -861,11 +855,12 @@ class WikiClient(WikiProtocol):
         *,
         auth: YandexAuth | None = None,
     ) -> None:
-        async with self._session.post(
+        await self._request(
+            "POST",
             f"v1/upload_sessions/{session_id}/finish",
-            headers=self._build_headers(auth),
-        ) as response:
-            response.raise_for_status()
+            auth=auth,
+            timeout=self._upload_timeout,
+        )
 
     async def page_attach_upload_sessions(
         self,
@@ -874,15 +869,14 @@ class WikiClient(WikiProtocol):
         session_ids: list[str],
         auth: YandexAuth | None = None,
     ) -> AttachmentResultsResponse:
-        async with self._session.post(
+        payload = await self._request(
+            "POST",
             f"v1/pages/{page_id}/attachments",
-            headers=self._build_headers(auth),
-            json={"upload_sessions": session_ids},
-        ) as response:
-            if response.status == 404:
-                raise PageNotFound(page_id)
-            response.raise_for_status()
-            return AttachmentResultsResponse.model_validate_json(await response.read())
+            json_body={"upload_sessions": session_ids},
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        return AttachmentResultsResponse.model_validate_json(payload)
 
     async def page_upload_attachment(
         self,
@@ -894,19 +888,21 @@ class WikiClient(WikiProtocol):
         auth: YandexAuth | None = None,
     ) -> UploadAttachmentResult:
         path = Path(file_path)
-        if not path.exists() or not path.is_file():
+        if not await asyncio.to_thread(path.is_file):
             raise FileNotFoundError(f"File not found: {file_path}")
 
+        stat_result = await asyncio.to_thread(path.stat)
         upload_session = await self.upload_session_create(
             file_name=path.name,
-            file_size=path.stat().st_size,
+            file_size=stat_result.st_size,
             auth=auth,
         )
 
-        with path.open("rb") as handle:
+        handle = await asyncio.to_thread(_open_binary, path)
+        try:
             part_number = 1
             while True:
-                chunk = handle.read(self.CHUNK_SIZE)
+                chunk = await asyncio.to_thread(handle.read, self.CHUNK_SIZE)
                 if not chunk:
                     break
                 await self._upload_part(
@@ -916,6 +912,8 @@ class WikiClient(WikiProtocol):
                     auth=auth,
                 )
                 part_number += 1
+        finally:
+            await asyncio.to_thread(handle.close)
 
         await self._finish_upload_session(upload_session.session_id, auth=auth)
         attachment_result = await self.page_attach_upload_sessions(

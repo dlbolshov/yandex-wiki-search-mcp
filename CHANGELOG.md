@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- All 26 tools now declare `outputSchema` (typed returns) and emit structured content
+- `ToolAnnotations` on write tools: `destructiveHint` for deletes, `idempotentHint` for updates/moves, additive hints for creates/appends
+- `WikiClient` supports `async with`; `GridNotFound` error for grid 404s
+- Separate (larger, default 300s) timeout for upload requests
+- Own test suite for the anchor fallback module
+
+### Changed
+- **Breaking (tool schema)**: `grid_update.default_sort` now takes `[{"column": ..., "direction": ...}]` objects instead of single-entry mappings
+- `grid_update_cells.cells` and `grid_add_columns.columns` are typed Pydantic models (`GridCellPatch`, `GridColumnSpec`) with real JSON schemas instead of free-form objects
+- Every Wiki API error is now raised as `WikiApiError` with the API's own message (both error envelope shapes parsed) instead of a raw `aiohttp.ClientResponseError`; 404s map to `PageNotFound`/`GridNotFound` consistently
+- `ClientSession` is created in `prepare()` instead of `__init__`
+- File reads in `page_upload_attachment` no longer block the event loop (`asyncio.to_thread`)
+- Anchor fallback logic extracted from the client into `wiki/custom/anchors.py`
+- Tool layer deduplicated: shared `page_id`/`slug` params, `get_wiki()`/`resolve_page_id()`/`resolve_page_slug()` in `mcp/tools/common.py`
+
+### Fixed
+- Error responses with non-UTF-8 bodies (e.g. proxy HTML error pages) no longer crash with `UnicodeDecodeError` and produce a proper `WikiApiError`
+- `grid_update_cells` rejects empty/whitespace `row_id` instead of sending it to the API
+- `grid_add_rows.after_row_id` accepts numeric row IDs, consistent with `grid_move_rows`
+- `PageNotFound` for slug-based lookups reports the normalized slug instead of the raw input (URL, leading/trailing slashes)
+
 ## [0.4.0] - 2026-07-19
 
 ### Added
