@@ -54,34 +54,30 @@
 
 Фундамент для M4 (HTTP-логирование уже сделано в M2 через TraceConfig — рефактор его не затрагивает).
 
-- [ ] Единый `_request()`-хелпер: заголовки, обработка статусов, парсинг обоих error-envelope
-      (`message` строка+`details` / список+`level`), `WikiApiError` для всех эндпоинтов
-      (сейчас — только `page_search` и частично `page_append_content`, остальные кидают сырой
-      `aiohttp.ClientResponseError`)
-- [ ] `PageNotFound` последовательно: 404 у grid-эндпоинтов сейчас не обрабатывается
-- [ ] Создание `ClientSession` перенести из `__init__` в `prepare()`; поддержать `async with WikiClient(...)`
-- [ ] Отдельный (увеличенный) таймаут для upload-методов — общий `total=30s` ломает большие файлы
-- [ ] Неблокирующее чтение файла в `page_upload_attachment` (`asyncio.to_thread` для `read`/`stat`)
-- [ ] Вынести anchor-fallback (`_append_content_to_anchor_source` + обработка `ANCHOR_NOT_FOUND`)
-      из клиента в отдельный модуль с собственными тестами
+- [x] Единый `_request()`-хелпер: заголовки, обработка статусов, парсинг обоих error-envelope
+      (`build_api_error` в `errors.py`), `WikiApiError` для всех эндпоинтов
+- [x] 404 последовательно: `PageNotFound` для page-эндпоинтов (вкл. descendants),
+      новый `GridNotFound` для grid-эндпоинтов
+- [x] `ClientSession` создаётся в `prepare()`; поддержан `async with WikiClient(...)`
+- [x] Отдельный таймаут для upload-запросов (`upload_timeout`, по умолчанию 300s)
+- [x] Неблокирующее чтение файла в `page_upload_attachment` (`asyncio.to_thread`)
+- [x] Anchor-fallback вынесен в `wiki/custom/anchors.py` + `tests/wiki/custom/test_anchors.py`
 - [ ] Обсудить: ретраи с backoff для идемпотентных GET (API не отдаёт Retry-After — только сеть/5xx)
+      — отложено, в M3 не реализовано
 
 ## M4 — Слой тулзов: схемы и типы (M)
 
 Лучше делать после M3.
 
-- [ ] Типизированные возвраты тулзов (модели уже есть в `wiki/proto/types/pages.py`) →
-      FastMCP сгенерирует `outputSchema` и structured content вместо `-> Any`
-- [ ] Pydantic-модели аргументов гридов: `GridCellPatch`, `GridColumnSpec`, `GridSortEntry`
-      вместо `list[dict[str, Any]]` + ~120 строк ручной валидации в `page_write.py`;
-      LLM-клиент получит настоящие JSON-схемы аргументов
-- [ ] Общая пара параметров `page_id`/`slug` в `params.py` (сейчас продублирована ~12 раз)
-- [ ] Хелпер `get_wiki(ctx)` вместо `ctx.request_context.lifespan_context.wiki` в каждом теле
-- [ ] `_resolve_page_id`/`_resolve_page_slug` → общий модуль (сейчас приватный импорт
-      из `page_read.py` в `page_write.py`)
-- [ ] `ToolAnnotations` для write-тулзов: `destructiveHint` (`page_delete`, `grid_delete`,
-      `grid_delete_rows`, `grid_delete_columns`), `idempotentHint` где уместно
-- [ ] Обновить README/README_ru/manifest.json после изменения схем
+- [x] Типизированные возвраты всех 26 тулзов → FastMCP генерирует `outputSchema` и structured content
+- [x] Pydantic-модели аргументов гридов: `GridCellPatch`, `GridColumnSpec`, `GridSortEntry`
+      в `params.py`; `default_sort` теперь `[{"column": ..., "direction": ...}]` (breaking для схемы тулза)
+- [x] Общая пара `OptionalPageID`/`OptionalPageSlug` в `params.py`
+- [x] Хелпер `get_wiki(ctx)` + `ToolContext` alias (`mcp/tools/common.py`)
+- [x] `resolve_page_id`/`resolve_page_slug` → `mcp/tools/common.py`, приватный кросс-импорт убран
+- [x] `ToolAnnotations` для всех write-тулзов: `destructiveHint` для удалений,
+      `idempotentHint` для update/move, additive-хинты для create/append
+- [x] Обновлены README/README_ru (`default_sort`); manifest.json не требует правок (имена тулзов не менялись)
 
 ## M5 — Тесты и CI (M)
 
@@ -121,3 +117,6 @@
   TraceConfig-лог HTTP, стартовый лог; живой смок на реальном .env — токен замаскирован.
   Ветка chore/m1-m2-hygiene-secrets-logging.
 - 2026-07-19: PR #2 (M1+M2) смержен в main; выпущен релиз v0.4.0.
+- 2026-07-19: M3+M4 завершены в ветке refactor/m3-m4-client-and-tool-schemas — клиент на едином
+  `_request()`, 26/26 тулзов с outputSchema, грид-аргументы на pydantic-моделях; 118 тестов зелёные.
+  Ретраи из M3 отложены (требуется обсуждение).

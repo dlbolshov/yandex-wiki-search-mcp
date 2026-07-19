@@ -1,70 +1,43 @@
 from typing import Annotated, Any, Literal
 
 from mcp.server import FastMCP
-from mcp.server.fastmcp import Context
 from mcp.types import ToolAnnotations
 from pydantic import Field
-from starlette.requests import Request
 
-from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.params import (
     Cursor,
     GridFields,
     GridID,
     GridPageSize,
+    OptionalPageID,
+    OptionalPageSlug,
     PageFields,
-    PageID,
     PageSize,
-    PageSlug,
     ResourceTypes,
     SearchQuery,
     SearchResultPageSize,
+)
+from mcp_wiki.mcp.tools.common import (
+    ToolContext,
+    get_wiki,
+    resolve_page_id,
+    resolve_page_slug,
 )
 from mcp_wiki.mcp.utils import (
     get_yandex_auth,
     normalize_slug,
     resolve_page_locator,
 )
-
-
-async def _resolve_page_id(
-    ctx: Context[Any, AppContext, Request],
-    *,
-    page_id: int | None,
-    slug: str | None,
-) -> int:
-    page_id, slug = resolve_page_locator(page_id=page_id, slug=slug)
-    if page_id is not None:
-        return page_id
-    if slug is None:
-        raise ValueError("Either page_id or slug must be provided.")
-
-    page = await ctx.request_context.lifespan_context.wiki.page_get_by_slug(
-        slug,
-        auth=get_yandex_auth(ctx),
-    )
-    return page.id
-
-
-async def _resolve_page_slug(
-    ctx: Context[Any, AppContext, Request],
-    *,
-    page_id: int | None,
-    slug: str | None,
-) -> str:
-    page_id, slug = resolve_page_locator(page_id=page_id, slug=slug)
-    if slug is not None:
-        return slug
-    if page_id is None:
-        raise ValueError("Either page_id or slug must be provided.")
-
-    page = await ctx.request_context.lifespan_context.wiki.page_get(
-        page_id,
-        auth=get_yandex_auth(ctx),
-    )
-    if not page.slug:
-        raise ValueError(f"Page {page_id} does not have a slug in the API response.")
-    return page.slug
+from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentListResponse,
+    CommentsResponse,
+    DescendantsResponse,
+    GridsResponse,
+    ResourcesResponse,
+    SearchResponse,
+    WikiGrid,
+    WikiPage,
+)
 
 
 def register_page_read_tools(mcp: FastMCP[Any]) -> None:
@@ -82,7 +55,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         annotations=ToolAnnotations(readOnlyHint=True),
     )
     async def page_search(
-        ctx: Context[Any, AppContext, Request],
+        ctx: ToolContext,
         query: SearchQuery,
         page_size: SearchResultPageSize = 10,
         slug_prefix: Annotated[
@@ -97,7 +70,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
             Literal["page", "file"] | None,
             Field(description="Optional client-side filter by result type."),
         ] = None,
-    ) -> Any:
+    ) -> SearchResponse:
         app_context = ctx.request_context.lifespan_context
         response = await app_context.wiki.page_search(
             query,
@@ -131,25 +104,17 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         annotations=ToolAnnotations(readOnlyHint=True),
     )
     async def page_get(
-        ctx: Context[Any, AppContext, Request],
-        page_id: Annotated[
-            PageID | None,
-            Field(description="Wiki page numeric ID. Provide either page_id or slug."),
-        ] = None,
-        slug: Annotated[
-            PageSlug | None,
-            Field(
-                description="Wiki page slug or full Wiki URL. Provide either page_id or slug."
-            ),
-        ] = None,
+        ctx: ToolContext,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
         fields: PageFields = None,
-    ) -> Any:
+    ) -> WikiPage:
         page_id, slug = resolve_page_locator(page_id=page_id, slug=slug)
         auth = get_yandex_auth(ctx)
         field_names = [field.value for field in fields] if fields else None
 
         if page_id is not None:
-            return await ctx.request_context.lifespan_context.wiki.page_get(
+            return await get_wiki(ctx).page_get(
                 page_id,
                 fields=field_names,
                 auth=auth,
@@ -157,7 +122,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         if slug is None:
             raise ValueError("Either page_id or slug must be provided.")
 
-        return await ctx.request_context.lifespan_context.wiki.page_get_by_slug(
+        return await get_wiki(ctx).page_get_by_slug(
             slug,
             fields=field_names,
             auth=auth,
@@ -169,17 +134,9 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         annotations=ToolAnnotations(readOnlyHint=True),
     )
     async def page_get_descendants(
-        ctx: Context[Any, AppContext, Request],
-        page_id: Annotated[
-            PageID | None,
-            Field(description="Wiki page numeric ID. Provide either page_id or slug."),
-        ] = None,
-        slug: Annotated[
-            PageSlug | None,
-            Field(
-                description="Wiki page slug or full Wiki URL. Provide either page_id or slug."
-            ),
-        ] = None,
+        ctx: ToolContext,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
         include_self: Annotated[
             bool,
             Field(
@@ -188,9 +145,9 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         ] = False,
         page_size: PageSize = 100,
         cursor: Cursor = None,
-    ) -> Any:
-        resolved_slug = await _resolve_page_slug(ctx, page_id=page_id, slug=slug)
-        return await ctx.request_context.lifespan_context.wiki.page_get_descendants(
+    ) -> DescendantsResponse:
+        resolved_slug = await resolve_page_slug(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_get_descendants(
             resolved_slug,
             include_self=include_self,
             page_size=page_size,
@@ -204,22 +161,14 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         annotations=ToolAnnotations(readOnlyHint=True),
     )
     async def page_get_comments(
-        ctx: Context[Any, AppContext, Request],
-        page_id: Annotated[
-            PageID | None,
-            Field(description="Wiki page numeric ID. Provide either page_id or slug."),
-        ] = None,
-        slug: Annotated[
-            PageSlug | None,
-            Field(
-                description="Wiki page slug or full Wiki URL. Provide either page_id or slug."
-            ),
-        ] = None,
+        ctx: ToolContext,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
         page_size: PageSize = 100,
         cursor: Cursor = None,
-    ) -> Any:
-        resolved_page_id = await _resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await ctx.request_context.lifespan_context.wiki.page_get_comments(
+    ) -> CommentsResponse:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_get_comments(
             resolved_page_id,
             page_size=page_size,
             cursor=cursor,
@@ -232,17 +181,9 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         annotations=ToolAnnotations(readOnlyHint=True),
     )
     async def page_get_resources(
-        ctx: Context[Any, AppContext, Request],
-        page_id: Annotated[
-            PageID | None,
-            Field(description="Wiki page numeric ID. Provide either page_id or slug."),
-        ] = None,
-        slug: Annotated[
-            PageSlug | None,
-            Field(
-                description="Wiki page slug or full Wiki URL. Provide either page_id or slug."
-            ),
-        ] = None,
+        ctx: ToolContext,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
         resource_types: ResourceTypes = None,
         search: Annotated[
             str | None,
@@ -258,9 +199,9 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
             Literal["asc", "desc"] | None,
             Field(description="Optional resource sorting direction."),
         ] = None,
-    ) -> Any:
-        resolved_page_id = await _resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await ctx.request_context.lifespan_context.wiki.page_get_resources(
+    ) -> ResourcesResponse:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_get_resources(
             resolved_page_id,
             resource_types=[resource_type.value for resource_type in resource_types]
             if resource_types
@@ -279,17 +220,9 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         annotations=ToolAnnotations(readOnlyHint=True),
     )
     async def page_get_grids(
-        ctx: Context[Any, AppContext, Request],
-        page_id: Annotated[
-            PageID | None,
-            Field(description="Wiki page numeric ID. Provide either page_id or slug."),
-        ] = None,
-        slug: Annotated[
-            PageSlug | None,
-            Field(
-                description="Wiki page slug or full Wiki URL. Provide either page_id or slug."
-            ),
-        ] = None,
+        ctx: ToolContext,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
         page_size: GridPageSize = 50,
         cursor: Cursor = None,
         order_by: Annotated[
@@ -300,9 +233,9 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
             Literal["asc", "desc"] | None,
             Field(description="Optional grid sorting direction."),
         ] = None,
-    ) -> Any:
-        resolved_page_id = await _resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await ctx.request_context.lifespan_context.wiki.page_get_grids(
+    ) -> GridsResponse:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_get_grids(
             resolved_page_id,
             page_size=page_size,
             cursor=cursor,
@@ -317,7 +250,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         annotations=ToolAnnotations(readOnlyHint=True),
     )
     async def grid_get(
-        ctx: Context[Any, AppContext, Request],
+        ctx: ToolContext,
         grid_id: GridID,
         fields: GridFields = None,
         filter: Annotated[
@@ -342,12 +275,12 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
             str | None,
             Field(description="Optional sort expression for grid rows."),
         ] = None,
-    ) -> Any:
+    ) -> WikiGrid:
         grid_id = grid_id.strip()
         if not grid_id:
             raise ValueError("grid_id must not be empty.")
 
-        return await ctx.request_context.lifespan_context.wiki.grid_get(
+        return await get_wiki(ctx).grid_get(
             grid_id,
             fields=[field.value for field in fields] if fields else None,
             filter=filter,
@@ -364,22 +297,14 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         annotations=ToolAnnotations(readOnlyHint=True),
     )
     async def page_get_attachments(
-        ctx: Context[Any, AppContext, Request],
-        page_id: Annotated[
-            PageID | None,
-            Field(description="Wiki page numeric ID. Provide either page_id or slug."),
-        ] = None,
-        slug: Annotated[
-            PageSlug | None,
-            Field(
-                description="Wiki page slug or full Wiki URL. Provide either page_id or slug."
-            ),
-        ] = None,
+        ctx: ToolContext,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
         page_size: PageSize = 100,
         cursor: Cursor = None,
-    ) -> Any:
-        resolved_page_id = await _resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await ctx.request_context.lifespan_context.wiki.page_get_attachments(
+    ) -> AttachmentListResponse:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_get_attachments(
             resolved_page_id,
             page_size=page_size,
             cursor=cursor,

@@ -50,7 +50,7 @@ class TestPageWriteTools:
                 "grid_id": "grid-1",
                 "revision": "7",
                 "title": "Updated roadmap",
-                "default_sort": [{"status": "asc"}],
+                "default_sort": [{"column": "status", "direction": "asc"}],
             },
         )
 
@@ -77,9 +77,7 @@ class TestPageWriteTools:
         )
 
         assert result.isError is True
-        assert "exactly one column slug to direction mapping" in get_tool_result_text(
-            result
-        )
+        assert "Extra inputs are not permitted" in get_tool_result_text(result)
 
     async def test_grid_add_rows(
         self,

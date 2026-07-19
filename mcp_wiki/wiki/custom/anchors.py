@@ -17,9 +17,7 @@ def append_content_to_anchor_source(
     escaped_anchor_id = re.escape(anchor_id)
     patterns = [
         re.compile(rf"(?m)^.*\{{#{escaped_anchor_id}\}}[ \t]*$"),
-        re.compile(
-            rf'(?m)^.*#\[[^\]]*\]\({escaped_anchor_id}(?:\s+"[^"]*")?\)[ \t]*$'
-        ),
+        re.compile(rf'(?m)^.*#\[[^\]]*\]\({escaped_anchor_id}(?:\s+"[^"]*")?\)[ \t]*$'),
         re.compile(
             rf'(?m)^.*\{{\{{(?:anchor|a)\s+href="{escaped_anchor_id}"[^}}]*\}}\}}[ \t]*$'
         ),
@@ -30,9 +28,10 @@ def append_content_to_anchor_source(
             continue
         anchor_end = match.end()
         insertion_point = anchor_end
-        while insertion_point < len(page_content) and page_content[
-            insertion_point
-        ] in ("\r", "\n"):
+        while insertion_point < len(page_content) and page_content[insertion_point] in (
+            "\r",
+            "\n",
+        ):
             insertion_point += 1
         separator = page_content[anchor_end:insertion_point]
         suffix = page_content[insertion_point:]

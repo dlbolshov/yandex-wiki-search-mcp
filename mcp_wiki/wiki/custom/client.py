@@ -3,7 +3,7 @@ import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Any, BinaryIO, Literal
 
 from aiohttp import (
     ClientSession,
@@ -51,6 +51,10 @@ from mcp_wiki.wiki.proto.types.pages import (
 SEARCH_PAGE_SIZE_MAX = 50
 
 logger = logging.getLogger(__name__)
+
+
+def _open_binary(path: Path) -> BinaryIO:
+    return path.open("rb")
 
 
 def _build_trace_config() -> TraceConfig:
@@ -888,7 +892,7 @@ class WikiClient(WikiProtocol):
             auth=auth,
         )
 
-        handle = await asyncio.to_thread(path.open, "rb")
+        handle = await asyncio.to_thread(_open_binary, path)
         try:
             part_number = 1
             while True:
