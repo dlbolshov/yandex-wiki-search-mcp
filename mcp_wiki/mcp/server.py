@@ -48,8 +48,12 @@ def make_wiki_lifespan(settings: Settings) -> Lifespan:
     async def wiki_lifespan(_server: FastMCP[Any]) -> AsyncIterator[AppContext]:
         wiki = WikiClient(
             base_url=settings.wiki_api_base_url,
-            token=settings.wiki_token,
-            iam_token=settings.wiki_iam_token,
+            token=settings.wiki_token.get_secret_value()
+            if settings.wiki_token
+            else None,
+            iam_token=settings.wiki_iam_token.get_secret_value()
+            if settings.wiki_iam_token
+            else None,
             auth_scheme=settings.wiki_auth_scheme,
             cloud_org_id=settings.wiki_cloud_org_id,
             org_id=settings.wiki_org_id,
@@ -82,7 +86,11 @@ def create_mcp_server(
         if settings.oauth_store == "memory":
             oauth_store = InMemoryOAuthStore()
         elif settings.oauth_store == "redis":
-            encryption_keys = _parse_encryption_keys(settings.oauth_encryption_keys)
+            encryption_keys = _parse_encryption_keys(
+                settings.oauth_encryption_keys.get_secret_value()
+                if settings.oauth_encryption_keys
+                else None
+            )
             if not encryption_keys:
                 raise ValueError(
                     "OAUTH_ENCRYPTION_KEYS must be set when using Redis OAuth store."
@@ -91,7 +99,9 @@ def create_mcp_server(
                 endpoint=settings.redis_endpoint,
                 port=settings.redis_port,
                 db=settings.redis_db,
-                password=settings.redis_password,
+                password=settings.redis_password.get_secret_value()
+                if settings.redis_password
+                else None,
                 pool_max_size=settings.redis_pool_max_size,
                 encryption_keys=encryption_keys,
             )
@@ -114,7 +124,7 @@ def create_mcp_server(
 
         auth_server_provider = YandexOAuthAuthorizationServerProvider(
             client_id=settings.oauth_client_id,
-            client_secret=settings.oauth_client_secret,
+            client_secret=settings.oauth_client_secret.get_secret_value(),
             server_url=yarl.URL(str(settings.mcp_server_public_url)),
             yandex_oauth_issuer=yarl.URL(str(settings.oauth_server_url)),
             store=oauth_store,
@@ -138,6 +148,7 @@ def create_mcp_server(
         instructions=instructions,
         host=settings.host,
         port=settings.port,
+        log_level=settings.log_level,
         lifespan=lifespan,
         auth_server_provider=auth_server_provider,
         stateless_http=True,

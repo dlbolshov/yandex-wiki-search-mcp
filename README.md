@@ -155,6 +155,7 @@ Optional:
 - `WIKI_API_BASE_URL=https://api.wiki.yandex.net`
 - `WIKI_WEB_BASE_URL=https://wiki.yandex.ru` (base for absolute page links in `page_search` results)
 - `WIKI_READ_ONLY=true|false`
+- `LOG_LEVEL=DEBUG|INFO|WARNING|ERROR|CRITICAL` (stderr; `DEBUG` additionally logs Wiki API requests, default `INFO`)
 
 ## Run locally
 

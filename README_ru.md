@@ -152,6 +152,7 @@ Docker, read-only (рекомендуется для агентов):
 - `WIKI_API_BASE_URL=https://api.wiki.yandex.net`
 - `WIKI_WEB_BASE_URL=https://wiki.yandex.ru` (база для абсолютных ссылок на страницы в результатах `page_search`)
 - `WIKI_READ_ONLY=true|false`
+- `LOG_LEVEL=DEBUG|INFO|WARNING|ERROR|CRITICAL` (в stderr; `DEBUG` дополнительно логирует запросы к Wiki API, по умолчанию `INFO`)
 
 ## Локальный запуск
 

@@ -1,10 +1,20 @@
+import asyncio
 import contextlib
 import json
+import logging
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal
 
-from aiohttp import ClientSession, ClientTimeout
+from aiohttp import (
+    ClientSession,
+    ClientTimeout,
+    TraceConfig,
+    TraceRequestEndParams,
+    TraceRequestExceptionParams,
+    TraceRequestStartParams,
+)
 
 from mcp_wiki.mcp.utils import normalize_slug
 from mcp_wiki.wiki.custom.errors import PageNotFound, WikiApiError
@@ -35,6 +45,51 @@ from mcp_wiki.wiki.proto.types.pages import (
 
 SEARCH_PAGE_SIZE_MAX = 50
 
+logger = logging.getLogger(__name__)
+
+
+def _build_trace_config() -> TraceConfig:
+    async def on_request_start(
+        _session: ClientSession,
+        ctx: SimpleNamespace,
+        _params: TraceRequestStartParams,
+    ) -> None:
+        ctx.start_time = asyncio.get_running_loop().time()
+
+    async def on_request_end(
+        _session: ClientSession,
+        ctx: SimpleNamespace,
+        params: TraceRequestEndParams,
+    ) -> None:
+        elapsed_ms = (asyncio.get_running_loop().time() - ctx.start_time) * 1000
+        logger.debug(
+            "%s %s -> %s (%.0f ms)",
+            params.method,
+            params.url.path,
+            params.response.status,
+            elapsed_ms,
+        )
+
+    async def on_request_exception(
+        _session: ClientSession,
+        ctx: SimpleNamespace,
+        params: TraceRequestExceptionParams,
+    ) -> None:
+        elapsed_ms = (asyncio.get_running_loop().time() - ctx.start_time) * 1000
+        logger.debug(
+            "%s %s -> %r (%.0f ms)",
+            params.method,
+            params.url.path,
+            params.exception,
+            elapsed_ms,
+        )
+
+    trace_config = TraceConfig()
+    trace_config.on_request_start.append(on_request_start)
+    trace_config.on_request_end.append(on_request_end)
+    trace_config.on_request_exception.append(on_request_exception)
+    return trace_config
+
 
 class WikiClient(WikiProtocol):
     CHUNK_SIZE = 5 * 1024 * 1024
@@ -58,6 +113,7 @@ class WikiClient(WikiProtocol):
         self._session = ClientSession(
             base_url=base_url,
             timeout=ClientTimeout(total=timeout),
+            trace_configs=[_build_trace_config()],
         )
 
     async def prepare(self) -> None:

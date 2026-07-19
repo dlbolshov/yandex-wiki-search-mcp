@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import AnyHttpUrl, model_validator
+from pydantic import AnyHttpUrl, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,11 +14,12 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     transport: Literal["stdio", "sse", "streamable-http"] = "stdio"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     wiki_api_base_url: str = "https://api.wiki.yandex.net"
     wiki_web_base_url: str = "https://wiki.yandex.ru"
-    wiki_token: str | None = None
-    wiki_iam_token: str | None = None
+    wiki_token: SecretStr | None = None
+    wiki_iam_token: SecretStr | None = None
     wiki_auth_scheme: Literal["OAuth", "Bearer"] = "OAuth"
     wiki_cloud_org_id: str | None = None
     wiki_org_id: str | None = None
@@ -29,14 +30,14 @@ class Settings(BaseSettings):
     oauth_server_url: AnyHttpUrl = AnyHttpUrl("https://oauth.yandex.ru")
     oauth_use_scopes: bool = True
     oauth_client_id: str | None = None
-    oauth_client_secret: str | None = None
+    oauth_client_secret: SecretStr | None = None
     mcp_server_public_url: AnyHttpUrl | None = None
-    oauth_encryption_keys: str | None = None
+    oauth_encryption_keys: SecretStr | None = None
 
     redis_endpoint: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
-    redis_password: str | None = None
+    redis_password: SecretStr | None = None
     redis_pool_max_size: int = 10
 
     @model_validator(mode="after")

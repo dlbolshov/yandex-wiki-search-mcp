@@ -41,16 +41,18 @@
 
 ## M2 — Секреты и логирование (S-M)
 
-- [ ] `SecretStr` в `Settings`: `wiki_token`, `wiki_iam_token`, `oauth_client_secret`, `redis_password`;
-      `.get_secret_value()` только в точках использования (создание `WikiClient`, OAuth-провайдер, Redis-стор)
-- [ ] `YandexAuth.token` — `field(repr=False)` (`mcp_wiki/wiki/proto/common.py`)
-- [ ] Настройка `LOG_LEVEL` + инициализация `logging` при старте (в stderr, дружелюбно к stdio-транспорту)
-- [ ] Debug-лог HTTP-запросов в `WikiClient`: метод, путь, статус, длительность — без заголовков и тел
-- [ ] Стартовый лог конфигурации: транспорт, base_url, org, read_only, oauth — без секретов
+- [x] `SecretStr` в `Settings`: `wiki_token`, `wiki_iam_token`, `oauth_client_secret`, `redis_password`
+      + `oauth_encryption_keys` (сверх плана — тоже секрет); `.get_secret_value()` только в точках
+      использования (lifespan `WikiClient`, OAuth-провайдер, Redis-стор, парсинг ключей)
+- [x] `YandexAuth.token` — `field(repr=False)` (`mcp_wiki/wiki/proto/common.py`)
+- [x] Настройка `LOG_LEVEL` + `logging.basicConfig` в stderr при старте; проброшена и в FastMCP
+- [x] Debug-лог HTTP-запросов в `WikiClient` через aiohttp `TraceConfig` (не трогая call-sites):
+      метод, путь, статус, длительность — без заголовков и тел
+- [x] Стартовый лог конфигурации в `main()`: транспорт, base_url, org, read_only, auth-режим — без секретов
 
 ## M3 — Рефактор WikiClient (M-L)
 
-Фундамент для M4; логирование из M2 встраивается сюда же.
+Фундамент для M4 (HTTP-логирование уже сделано в M2 через TraceConfig — рефактор его не затрагивает).
 
 - [ ] Единый `_request()`-хелпер: заголовки, обработка статусов, парсинг обоих error-envelope
       (`message` строка+`details` / список+`level`), `WikiApiError` для всех эндпоинтов
@@ -115,3 +117,6 @@
 - 2026-07-19: пересмотрены решения по мёртвому коду (`UploadLocation` и `CommentID` — применить,
   а не удалять); добавлен `.env.example`.
 - 2026-07-19: M1 завершён — ruff/ty/mypy чисто, 111 тестов зелёные, CHANGELOG (Unreleased) обновлён.
+- 2026-07-19: M2 завершён — SecretStr (+oauth_encryption_keys), repr-гигиена YandexAuth, LOG_LEVEL,
+  TraceConfig-лог HTTP, стартовый лог; живой смок на реальном .env — токен замаскирован.
+  Ветка chore/m1-m2-hygiene-secrets-logging.
