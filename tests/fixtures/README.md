@@ -2,7 +2,7 @@
 
 **Fully synthetic** JSON responses for `yandex-wiki-search-mcp` unit tests. They
 reproduce the *exact shape/keys/types* observed live against the Yandex Wiki API
-(see the "Notes on the Yandex Wiki API" section of the project README and the
+(see [`docs/api-notes.md`](../../docs/api-notes.md) and the
 probe scripts in `scripts/`), but every value — slugs, titles, uids, usernames,
 org ids — is fake. Safe to keep in a public repo.
 

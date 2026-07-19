@@ -1,78 +1,66 @@
+[English](README.md) | **Русский**
+
 # Yandex Wiki Search MCP
 
-MCP сервер для API Yandex Wiki с **полнотекстовым поиском**: страницы, комментарии, ресурсы, вложения и восстановление удалённых страниц.
-Это единственный MCP сервер для Yandex Wiki, сочетающий полнотекстовый поиск по контенту, серверный read-only режим и готовый Docker-образ.
-Набор инструментов также включает полноценную поддержку динамических таблиц Yandex Wiki ("grids").
+[![PyPI](https://img.shields.io/pypi/v/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
+[![CI](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml)
+[![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
+[![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
 
-Форк [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) (`ya-yandex-wiki-mcp`), см. [Благодарности](#благодарности).
+Подключите Claude, Cursor, Windsurf или любой MCP-клиент к **Яндекс Вики**: полнотекстовый
+поиск, страницы, комментарии, вложения и динамические таблицы («гриды») — **26 тулзов**
+с типизированными схемами.
 
-## Реализованные инструменты
+- 🔍 **Полнотекстовый поиск** по всей вики — тот же бэкенд, что у строки поиска в веб-интерфейсе, до 50 результатов за запрос
+- 📄 **Полный цикл работы со страницами** — создание, обновление, дозапись (верх / низ / якорь), удаление с токеном восстановления, комментарии, загрузка файлов
+- 📊 **Динамические таблицы (гриды)** — 11 write-тулзов: строки, колонки, ячейки, копирование, сортировка
+- 🔒 **Серверный read-only режим** — при `WIKI_READ_ONLY=true` write-тулзы просто не регистрируются, агент не сможет их вызвать
+- 🧩 **Типизированные тулзы** — у каждого есть JSON-схемы входа *и* выхода плюс аннотации безопасности (read-only / destructive / idempotent)
+- 🐳 **Работает где угодно** — stdio для десктопных клиентов, streamable-http + Docker (с опциональным многопользовательским OAuth) для команд
 
-- `page_search`: полнотекстовый поиск по всей Вики (главная фича)
-- `page_get_grids`: список таблиц на странице
-- `grid_get`: получение таблицы по `grid_id`
-- `page_get`: получение страницы по `page_id` или `slug`
-- `page_get_descendants`: получение поддерева страниц
-- `page_get_comments`: комментарии страницы
-- `page_get_resources`: ресурсы страницы, включая вложения и таблицы
-- `page_get_attachments`: вложения страницы
-- `grid_create`: создание таблицы на странице
-- `grid_update`: обновление заголовка и/или сортировки таблицы
-- `grid_delete`: удаление таблицы
-- `grid_copy`: копирование таблицы на существующую страницу
-- `grid_add_rows`: добавление строк в таблицу
-- `grid_delete_rows`: удаление строк из таблицы
-- `grid_update_cells`: обновление отдельных ячеек таблицы
-- `grid_add_columns`: добавление колонок в таблицу
-- `grid_delete_columns`: удаление колонок из таблицы
-- `grid_move_rows`: перемещение строки внутри таблицы
-- `grid_move_columns`: перемещение колонки внутри таблицы
-- `page_create`: создание страницы
-- `page_update`: обновление заголовка и/или полного содержимого страницы
-- `page_append_content`: добавление контента в начало, конец или к якорю
-- `page_add_comment`: добавление комментария или ответа
-- `page_delete`: удаление страницы с получением recovery token
-- `page_recover`: восстановление страницы по recovery token
-- `page_upload_attachment`: загрузка локального файла по частям и прикрепление к странице
+## Быстрый старт
 
-## Полнотекстовый поиск
+1. Получите OAuth-токен Яндекса с доступом к Вики ([официальная инструкция](https://yandex.ru/support/wiki/ru/api-ref/access)) и ID организации.
+2. Установите в свой клиент:
 
-`page_search` оборачивает недокументированный, но публичный endpoint `POST /v1/search` —
-тот же бэкенд, что и строка поиска в веб-интерфейсе Вики. Это точка входа для
-**обнаружения** контента: сначала поиск, затем открытие результата через `page_get` по его `slug`.
-Endpoint первым обнаружил и опубликовал [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki),
-что напрямую вдохновило этот инструмент; здесь находки независимо перепроверены и
-расширены (например, `page_size` принимает до 50, а не 10).
+[![Add to Cursor](https://img.shields.io/badge/Cursor-Add_MCP_Server-000000?logo=cursor&logoColor=white)](https://cursor.com/install-mcp?name=yandex-wiki-search&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJ5YW5kZXgtd2lraS1zZWFyY2gtbWNwIl0sImVudiI6eyJXSUtJX1RPS0VOIjoiWU9VUl9UT0tFTiIsIldJS0lfT1JHX0lEIjoiWU9VUl9PUkdfSUQiLCJXSUtJX1JFQURfT05MWSI6InRydWUifX0=)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_Server-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=yandex-wiki-search&config=%7B%22name%22%3A%22yandex-wiki-search%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22yandex-wiki-search-mcp%22%5D%2C%22env%22%3A%7B%22WIKI_TOKEN%22%3A%22YOUR_TOKEN%22%2C%22WIKI_ORG_ID%22%3A%22YOUR_ORG_ID%22%2C%22WIKI_READ_ONLY%22%3A%22true%22%7D%7D)
 
-- Возвращает до **50** результатов за вызов (`page_size` ограничивается диапазоном 1–50 на стороне клиента; иначе API отвечает HTTP 400).
-- Поиск **только глобальный** — серверной фильтрации по разделу или типу нет. Опциональные аргументы `slug_prefix` и `result_type` применяются **на стороне клиента после получения результатов**, поэтому используйте их вместе с `page_size=50`, чтобы не терять совпадения. `slug_prefix` сопоставляется по границам сегментов пути (`tech-doc/ml` не совпадает с `tech-doc/mlops`).
-- Результаты бывают двух типов: **`page`** (относительный url, нормализуется инструментом в абсолютную ссылку `https://wiki.yandex.ru/...`) и **`file`** (абсолютная ссылка на скачивание `...?download=1`).
-- Поиск точной фразы в кавычках `"..."` работает и возвращает фразовые совпадения.
-- `total_documents` всегда равен числу возвращённых результатов — это **не** глобальное количество совпадений.
+<details>
+<summary><b>Claude Desktop / Windsurf / любой клиент с JSON-конфигом (uvx)</b></summary>
 
-## Заметки об API Yandex Wiki
+```json
+{
+  "mcpServers": {
+    "yandex-wiki-search": {
+      "command": "uvx",
+      "args": ["yandex-wiki-search-mcp"],
+      "env": {
+        "WIKI_TOKEN": "YOUR_TOKEN",
+        "WIKI_ORG_ID": "YOUR_ORG_ID",
+        "WIKI_READ_ONLY": "true"
+      }
+    }
+  }
+}
+```
 
-Наблюдения проверены вживую на боевой организации Yandex 360 (см. скрипты в [`scripts/`](scripts/)):
+</details>
 
-- `POST /v1/search` не документирован; максимум `page_size` — 50 (0, отрицательные значения или >50 → HTTP 400); серверной пагинации и фильтрации нет — `page`/`offset`/`limit` и любые параметры раздела/типа в теле игнорируются, `total_pages` всегда 1 (или 0, если результатов нет).
-- **OAuth scopes API Вики не проверяет** — токен только с `wiki:read` всё равно может писать. Read-only гарантируется исключительно нерегистрацией write-инструментов (`WIKI_READ_ONLY=true`). *Благодарность: впервые публично сообщил [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki), здесь подтверждено независимо.*
-- **HTTP 403 — про права пользователя**, а не про скоупы токена — например, readonly-системные страницы с владельцем `yandex360-wiki` (наблюдение slartus, см. выше).
-- **Любой `POST /pages/{id}` бампает `modified_at`**, даже с пустым телом — страница помечается как изменённая (наблюдение slartus, см. выше).
-- Поиск точной фразы в кавычках работает; `-минус` и булевы операторы игнорируются.
-- API ревизий/истории/обратных ссылок **не существует** — сценарии "кто ссылается сюда" невозможны.
-- `created_at`/`modified_at`/`comments_count`/`is_readonly` — не top-level поля страницы; получайте их через `page_get` с `fields=["attributes"]`.
-- Ответы об ошибках приходят в **двух форматах конверта** (`message` как строка-или-null плюс `details`, либо как список плюс `level`); клиент разбирает оба.
-- Заголовки rate limit не отдаются (`X-RateLimit-*`/`Retry-After` отсутствуют).
-- `GET /pages/{id}/resources?q=` — единственный серверный *текстовый* фильтр во всём API (поиск по названиям вложений/таблиц одной страницы) — доступен через `page_get_resources`.
+<details>
+<summary><b>Claude Code (CLI)</b></summary>
 
-Орг-нейтральные скрипты в [`scripts/`](scripts/) (`probe_api*.sh`, `smoke.sh`) — живая
-документация этого поведения, их можно перезапускать на своей организации
-(секреты через переменные окружения или файл `$SECRETS`; вывод проб пишется в `raw/`,
-который в `.gitignore`, потому что содержит реальные данные организации).
+```bash
+claude mcp add yandex-wiki-search \
+  -e WIKI_TOKEN=YOUR_TOKEN -e WIKI_ORG_ID=YOUR_ORG_ID -e WIKI_READ_ONLY=true \
+  -- uvx yandex-wiki-search-mcp
+```
 
-## Быстрый старт (Claude Desktop / Cursor / Windsurf)
+</details>
 
-Docker, read-only (рекомендуется для агентов):
+<details>
+<summary><b>Docker (Python не нужен)</b></summary>
 
 ```json
 {
@@ -82,131 +70,186 @@ Docker, read-only (рекомендуется для агентов):
       "args": ["run","--rm","-i",
         "-e","WIKI_TOKEN","-e","WIKI_ORG_ID","-e","WIKI_READ_ONLY=true",
         "ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest"],
-      "env": {"WIKI_TOKEN":"...","WIKI_ORG_ID":"..."}
+      "env": {"WIKI_TOKEN":"YOUR_TOKEN","WIKI_ORG_ID":"YOUR_ORG_ID"}
     }
   }
 }
 ```
 
-`uvx` (PyPI):
+</details>
 
-```json
-{
-  "mcpServers": {
-    "yandex-wiki-search": {
-      "command": "uvx",
-      "args": ["yandex-wiki-search-mcp"],
-      "env": {
-        "WIKI_TOKEN": "...",
-        "WIKI_ORG_ID": "...",
-        "WIKI_READ_ONLY": "true"
-      }
-    }
-  }
-}
+> [!TIP]
+> Начните с `WIKI_READ_ONLY=true` — сервер даже не зарегистрирует write-тулзы.
+> Переключите в `false`, когда будете доверять агенту правки.
+
+3. Спросите агента — примеры ниже.
+
+## Что он умеет
+
+> *«Найди наши доки по онбордингу и суммаризируй ключевые шаги»*
+>
+> *«Что у нас есть про incident response? Открой самую релевантную страницу»*
+>
+> *«Создай страницу `team/weekly-notes` и допиши туда итоги сегодняшнего стендапа»*
+>
+> *«Добавь строку в таблицу дежурств: alice, следующая неделя»*
+>
+> *«Залей этот PDF на страницу проекта и поставь ссылку внизу»*
+>
+> *«Удали черновик, но сохрани токен восстановления — вдруг передумаю»*
+
+## Тулзы
+
+26 тулзов. Все write-тулзы исчезают при `WIKI_READ_ONLY=true`.
+
+### Поиск и чтение (8)
+
+| Тулза | Что делает |
+|---|---|
+| `page_search` | Полнотекстовый поиск по всей Вики (страницы и файлы), до 50 ранжированных результатов со сниппетами |
+| `page_get` | Страница по `page_id` или `slug` (полные URL Вики тоже принимаются) |
+| `page_get_descendants` | Обход поддерева страниц с пагинацией |
+| `page_get_comments` | Комментарии страницы |
+| `page_get_resources` | Ресурсы страницы (вложения + гриды) с серверным поиском по названию |
+| `page_get_attachments` | Вложения страницы |
+| `page_get_grids` | Гриды, прикреплённые к странице |
+| `grid_get` | Грид по `grid_id` с фильтрами строк/колонок/ревизий |
+
+### Страницы: запись (7)
+
+| Тулза | Что делает |
+|---|---|
+| `page_create` | Создать страницу |
+| `page_update` | Обновить заголовок и/или полное содержимое |
+| `page_append_content` | Дописать контент в начало, конец или к именованному якорю |
+| `page_add_comment` | Добавить комментарий или ответ в тред |
+| `page_delete` | Удалить страницу и получить токен восстановления |
+| `page_recover` | Восстановить удалённую страницу по токену |
+| `page_upload_attachment` | Загрузить локальный файл по частям и прикрепить к странице |
+
+### Гриды: запись (11)
+
+<details>
+<summary>Развернуть таблицу</summary>
+
+| Тулза | Что делает |
+|---|---|
+| `grid_create` | Создать грид на странице |
+| `grid_update` | Обновить заголовок и/или сортировку по умолчанию |
+| `grid_copy` | Скопировать грид на существующую страницу (асинхронная операция) |
+| `grid_delete` | Удалить грид |
+| `grid_add_rows` | Добавить строки на позицию или после указанной строки |
+| `grid_update_cells` | Обновить отдельные ячейки по строке + колонке |
+| `grid_delete_rows` | Удалить строки |
+| `grid_move_rows` | Переместить строку |
+| `grid_add_columns` | Добавить типизированные колонки |
+| `grid_delete_columns` | Удалить колонки по slug |
+| `grid_move_columns` | Переместить колонку |
+
+Особенности гридов:
+
+- Мутации используют optimistic locking — сначала получите грид и передайте актуальную `revision`.
+- `grid_update.default_sort` принимает записи вида `[{"column": "status", "direction": "asc"}]`; сервер сам конвертирует их в формат, который ожидает API.
+- `grid_add_columns` требует `required` у каждой колонки — реальный API это валидирует.
+- `grid_copy` возвращает метаданные операции, а не готовую копию грида.
+
+</details>
+
+## Сравнение с аналогами
+
+| | **yandex-wiki-search-mcp** | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) |
+|---|---|---|---|
+| Полнотекстовый поиск | ✅ до 50 результатов, клиентские фильтры | ❌ | ✅ до 10 результатов |
+| Страницы: create / update / append / recover | ✅ | ✅ | частично (нет append/recover) |
+| Гриды: write-тулзы | ✅ 11 тулзов | ✅ | ❌ только чтение |
+| Комментарии, загрузка вложений | ✅ | ✅ | ❌ |
+| Серверный read-only режим | ✅ | ✅ | ❌ |
+| Типизированные output-схемы + аннотации | ✅ | ❌ | ❌ |
+| Структурированные ошибки API (оба формата) | ✅ | ❌ | ❌ |
+| Docker-образ / PyPI / MCP Registry | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ | ❌ (ручная установка) |
+| Многопользовательский OAuth для HTTP | ✅ | ✅ | ❌ |
+
+Проект — форк `ya-yandex-wiki-mcp`, поиск построен на находках `slartus/mcp-yandex-wiki` —
+см. [Благодарности](#благодарности).
+
+## Полнотекстовый поиск
+
+`page_search` оборачивает недокументированный, но публичный эндпоинт `POST /v1/search` —
+тот же бэкенд, что у строки поиска в веб-интерфейсе Вики. Сначала ищите, потом открывайте
+результат через `page_get` по его `slug`.
+
+- До **50** результатов за вызов (`page_size` ограничивается 1–50; остальное API отклоняет).
+- Поиск **только глобальный** — фильтры `slug_prefix` и `result_type` применяются на клиенте после получения, поэтому сочетайте их с `page_size=50`, чтобы не терять совпадения.
+- Запросы `"в кавычках"` дают фразовый поиск; результаты-`page` получают абсолютные ссылки `https://wiki.yandex.ru/...`, результаты-`file` — прямые ссылки на скачивание.
+
+Больше проверенного поведения API (скоупы, семантика 403, форматы ошибок, лимиты):
+[docs/api-notes.md](docs/api-notes.md) (en).
+
+## Конфигурация
+
+| Переменная | Обязательна | По умолчанию | Описание |
+|---|---|---|---|
+| `WIKI_TOKEN` | одна из двух | — | OAuth-токен Яндекса (приоритетнее, если заданы оба) |
+| `WIKI_IAM_TOKEN` | | — | IAM-токен (организации Yandex Cloud) |
+| `WIKI_ORG_ID` | ровно одна из двух | — | ID организации Яндекс 360 (`X-Org-Id`) |
+| `WIKI_CLOUD_ORG_ID` | | — | ID организации Yandex Cloud (`X-Cloud-Org-Id`) |
+| `WIKI_READ_ONLY` | нет | `false` | `true` отключает все write-тулзы на сервере |
+| `TRANSPORT` | нет | `stdio` | `stdio` \| `sse` \| `streamable-http` |
+| `HOST` / `PORT` | нет | `0.0.0.0` / `8000` | Только для HTTP-транспортов |
+| `LOG_LEVEL` | нет | `INFO` | Логи в stderr; `DEBUG` дополнительно логирует запросы к API (метод, путь, статус, длительность — без заголовков и тел) |
+| `WIKI_API_BASE_URL` | нет | `https://api.wiki.yandex.net` | Эндпоинт Wiki API |
+| `WIKI_WEB_BASE_URL` | нет | `https://wiki.yandex.ru` | База для абсолютных ссылок в результатах `page_search` |
+| `WIKI_AUTH_SCHEME` | нет | `OAuth` | Схема заголовка `Authorization` для `WIKI_TOKEN` (`OAuth` \| `Bearer`) |
+
+<details>
+<summary><b>Многопользовательский OAuth + Redis (только HTTP-деплой)</b></summary>
+
+При `OAUTH_ENABLED=true` сервер становится OAuth-провайдером: каждый пользователь MCP
+авторизуется своим аккаунтом Яндекса, и запросы к Wiki API идут с его личным токеном.
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `OAUTH_ENABLED` | `false` | Включить OAuth-провайдер |
+| `OAUTH_STORE` | `memory` | `memory` \| `redis` |
+| `OAUTH_SERVER_URL` | `https://oauth.yandex.ru` | OAuth-сервер Яндекса |
+| `OAUTH_USE_SCOPES` | `true` | Запрашивать Wiki-скоупы при авторизации |
+| `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | — | Данные вашего OAuth-приложения Яндекса |
+| `MCP_SERVER_PUBLIC_URL` | — | Публичный URL этого сервера (OAuth-коллбэки) |
+| `OAUTH_ENCRYPTION_KEYS` | — | base64-ключи по 32 байта через запятую (обязательно для `redis`) |
+| `REDIS_ENDPOINT` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PASSWORD` / `REDIS_POOL_MAX_SIZE` | `localhost` / `6379` / `0` / — / `10` | Подключение к Redis |
+
+Полный аннотированный список — в [`.env.example`](.env.example), база для Redis — в [`compose.yaml`](compose.yaml).
+
+</details>
+
+## Деплой
+
+```mermaid
+flowchart LR
+    C["MCP-клиент<br/>Claude / Cursor / Windsurf / VS Code"]
+    S["yandex-wiki-search-mcp"]
+    W["Yandex Wiki API"]
+    R[("Redis<br/>опциональное хранилище OAuth-токенов")]
+    C -- "stdio (локально, один пользователь)" --> S
+    C -- "streamable-http (+ OAuth, много пользователей)" --> S
+    S --> W
+    S -.-> R
 ```
 
-## Почему именно этот набор
-
-Набор инструментов основан на областях публичного API Yandex Wiki, наиболее полезных в MCP-сценариях:
-
-- полнотекстовое обнаружение страниц и файлов
-- чтение и изменение страниц
-- чтение и изменение динамических таблиц
-- обход поддерева документации
-- работа с комментариями
-- работа с ресурсами и вложениями
-- безопасное удаление и восстановление
-- multipart upload локальных файлов с прикреплением к странице
-
-## Особенности grids
-
-- При `WIKI_READ_ONLY=true` скрываются все non-read tools, а не только grid-операции.
-- Там, где API требует optimistic locking, mutation tools принимают `revision`.
-- `grid_copy` возвращает metadata асинхронной операции, а не готовую копию таблицы.
-- Для `grid_add_columns` каждая колонка должна содержать поле `required`, потому что это требует реальный API Yandex Wiki.
-- `grid_update.default_sort` принимает список объектов `{"column": ..., "direction": ...}`, например `[{"column": "status", "direction": "asc"}]`; сервер сам конвертирует их в одноэлементные словари, которые ожидает реальный API.
-
-Официальные материалы:
-
-- обзор API: `https://yandex.ru/support/wiki/en/api-ref/about`
-- примеры API: `https://yandex.ru/support/wiki/ru/api-ref/examples`
-- ресурсы страниц: `https://yandex.ru/support/wiki/ru/api-ref/pagesresources/pagesresources__resources`
-- индекс API по таблицам: `https://yandex.ru/support/wiki/ru/api-ref/grids/`
-
-## Переменные окружения
-
-Нужен один из токенов:
-
-- `WIKI_TOKEN`
-- `WIKI_IAM_TOKEN`
-
-И ровно один идентификатор организации:
-
-- `WIKI_ORG_ID`
-- `WIKI_CLOUD_ORG_ID`
-
-Опционально:
-
-- `TRANSPORT=stdio|sse|streamable-http`
-- `WIKI_API_BASE_URL=https://api.wiki.yandex.net`
-- `WIKI_WEB_BASE_URL=https://wiki.yandex.ru` (база для абсолютных ссылок на страницы в результатах `page_search`)
-- `WIKI_READ_ONLY=true|false`
-- `LOG_LEVEL=DEBUG|INFO|WARNING|ERROR|CRITICAL` (в stderr; `DEBUG` дополнительно логирует запросы к Wiki API, по умолчанию `INFO`)
-
-## Локальный запуск
+**HTTP-сервер через Docker** (MCP-эндпоинт — `http://localhost:8000/mcp`):
 
 ```bash
-uv sync --dev
-uv run yandex-wiki-search-mcp
+docker run --env-file .env -e TRANSPORT=streamable-http -p 8000:8000 \
+  ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
 ```
 
-## Docker deployment
-
-Docker-образ требует те же базовые переменные окружения, что и локальный запуск:
-
-- один из `WIKI_TOKEN` или `WIKI_IAM_TOKEN`
-- ровно один из `WIKI_ORG_ID` или `WIKI_CLOUD_ORG_ID`
-- `TRANSPORT=streamable-http` для HTTP deployment
-
-Опционально:
-
-- `HOST=0.0.0.0`
-- `PORT=8000`
-- `WIKI_API_BASE_URL=https://api.wiki.yandex.net`
-- `WIKI_READ_ONLY=true|false`
-
-## Использование готового образа (рекомендуется)
-
-```bash
-# Используя файл окружения
-docker run --env-file .env -p 8000:8000 ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
-
-# С встроенными переменными окружения
-docker run -e WIKI_TOKEN=ваш_токен \
-           -e WIKI_ORG_ID=ваш_org_id \
-           -e TRANSPORT=streamable-http \
-           -p 8000:8000 \
-           ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
-```
-
-MCP endpoint будет доступен по адресу `http://localhost:8000/mcp`.
-
-## Сборка образа локально
-
-```bash
-docker build -t yandex-wiki-search-mcp .
-```
-
-## Docker Compose
-
-**Используя готовый образ:**
+<details>
+<summary><b>Docker Compose</b></summary>
 
 ```yaml
-version: '3.8'
 services:
   mcp-wiki:
-    image: ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
+    image: ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest  # или: build: .
     ports:
       - "8000:8000"
     environment:
@@ -215,43 +258,42 @@ services:
       - TRANSPORT=streamable-http
 ```
 
-**Сборка локально:**
+Для OAuth-хранилища на Redis используйте существующий [`compose.yaml`](compose.yaml) как базу.
 
-```yaml
-version: '3.8'
-services:
-  mcp-wiki:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - WIKI_TOKEN=${WIKI_TOKEN}
-      - WIKI_ORG_ID=${WIKI_ORG_ID}
-      - TRANSPORT=streamable-http
-```
+</details>
 
-Если позже понадобится Redis-backed OAuth storage, текущий [`compose.yaml`](compose.yaml) можно использовать как основу для Redis сервиса.
+## Безопасность
+
+- **Read-only работает на сервере**: при `WIKI_READ_ONLY=true` write-тулзы не регистрируются — запутавшемуся агенту просто нечего вызывать.
+- **Wiki API не проверяет OAuth-скоупы** (проверено живьём — см. [docs/api-notes.md](docs/api-notes.md)): токен с `wiki:read` может писать, поэтому полагайтесь на read-only режим, а не на скоупы.
+- Секреты — `SecretStr` по всему коду: замаскированы в логах и `repr`; `DEBUG`-логирование HTTP никогда не пишет заголовки и тела.
+- Удаление обратимо: `page_delete` возвращает токен восстановления для `page_recover`.
 
 ## Разработка
 
-Перед коммитом и перед созданием или обновлением merge request нужно прогонять полный локальный набор проверок из [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Тесты
-
 ```bash
-uv run pytest
+uv sync --dev
+uv run yandex-wiki-search-mcp   # локальный запуск
+uv run pytest                   # тесты
 ```
+
+Перед коммитом прогоните полный набор проверок из [CONTRIBUTING.md](CONTRIBUTING.md).
+Проверенное поведение API и probe-скрипты описаны в [docs/api-notes.md](docs/api-notes.md).
 
 ## Благодарности
 
-Проект является форком [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
-(`ya-yandex-wiki-mcp`) Александра Понкратова — отличного, хорошо протестированного Python MCP
-сервера для API Yandex Wiki под лицензией Apache-2.0. Форк добавляет полнотекстовый поиск
-(`page_search`) и ребрендинг; исходный копирайт и лицензия сохранены
-(см. [LICENSE](LICENSE) и [NOTICE](NOTICE)).
+Проект — форк [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
+(`ya-yandex-wiki-mcp`) Александра Понкратова — отличного, хорошо протестированного Python
+MCP-сервера для Yandex Wiki API под лицензией Apache-2.0. Форк добавляет полнотекстовый
+поиск (`page_search`), типизированные схемы тулзов и многое другое; оригинальные копирайт
+и лицензия сохранены (см. [LICENSE](LICENSE) и [NOTICE](NOTICE)).
 
 Идея и ключевые находки по API для полнотекстового поиска — из
 [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) (JavaScript, MIT):
-он первым обнаружил недокументированный endpoint `POST /v1/search` и сообщил, что
-OAuth-скоупы не проверяются. Код оттуда не брался — только находки и идеи,
+он первым обнаружил недокументированный эндпоинт `POST /v1/search` и сообщил, что
+OAuth-скоупы не проверяются. Код оттуда не заимствовался — только находки и идеи,
 независимо перепроверенные на живой организации и расширенные здесь.
+
+---
+
+`mcp-name: io.github.dlbolshov/yandex-wiki-search-mcp`

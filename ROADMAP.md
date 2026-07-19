@@ -16,7 +16,8 @@
 
 - M1 + M2 — одна ветка/PR → релиз v0.4.0
 - M3 + M4 — одна ветка/PR → релиз v0.5.0
-- M5 — отдельная ветка/PR, без релиза (едет со следующим)
+- README-апгрейд (M-docs) — отдельная ветка/PR (docs/readme-overhaul), без релиза
+- M5 + ретраи из M3 — одна ветка/PR, без релиза (едет со следующим)
 - M6 — ветка/PR + тег на каждую фичу (v0.6.0, v0.7.0, …)
 - Релизный ритуал: CHANGELOG `[Unreleased]` → `[X.Y.Z]`, bump в `pyproject.toml`, `manifest.json`,
   `server.json` (3 места) + `uv lock`, commit `Release vX.Y.Z`, тег `vX.Y.Z` → CI публикует
@@ -62,8 +63,9 @@
 - [x] Отдельный таймаут для upload-запросов (`upload_timeout`, по умолчанию 300s)
 - [x] Неблокирующее чтение файла в `page_upload_attachment` (`asyncio.to_thread`)
 - [x] Anchor-fallback вынесен в `wiki/custom/anchors.py` + `tests/wiki/custom/test_anchors.py`
-- [ ] Обсудить: ретраи с backoff для идемпотентных GET (API не отдаёт Retry-After — только сеть/5xx)
-      — отложено, в M3 не реализовано
+- [ ] Ретраи с backoff (решение 2026-07-19, делаем в ветке M5): мини-ретрай в `_request()` без зависимостей —
+      connection-ошибки + 502/503/504/429, `retryable=True` для GET + `page_search` + `upload_part`,
+      2 ретрая с jitter (≤1.5s суммарно), таймауты не ретраим, `Retry-After` уважаем если появится
 
 ## M4 — Слой тулзов: схемы и типы (M)
 
@@ -78,6 +80,28 @@
 - [x] `ToolAnnotations` для всех write-тулзов: `destructiveHint` для удалений,
       `idempotentHint` для update/move, additive-хинты для create/append
 - [x] Обновлены README/README_ru (`default_sort`); manifest.json не требует правок (имена тулзов не менялись)
+
+## M-docs — README-апгрейд (M)
+
+Цель — конверсия случайного посетителя в пользователя/звёздочку. Ветка docs/readme-overhaul.
+
+- [x] Переключатель языка первой строкой (EN | RU) в обоих README
+- [x] Бейджи: PyPI, Python versions, CI, License, ghcr
+- [x] Hero-блок: одноабзацный value prop + 6 буллетов-хайлайтов
+- [x] Quick start: кнопки Cursor deeplink + VS Code install, `<details>`-сниппеты
+      под Claude Desktop/Claude Code/Docker, ссылка на гайд получения токена
+- [x] Секция «What can it do» — 6 примеров промптов
+- [x] Тулзы таблицами в три группы: Search & read (8) / Pages write (7) / Grids write (11, в `<details>`)
+- [x] Сравнительная таблица с ya-yandex-wiki-mcp и slartus/mcp-yandex-wiki (факты сверены с их README)
+- [x] Единая таблица env-переменных + OAuth/Redis в `<details>`
+- [x] Mermaid-схема двух режимов деплоя, секция Security
+- [x] Глубокие заметки по API → `docs/api-notes.md` (тизер + ссылка из README); `docs/` — база для будущих ассетов
+- [x] README_ru — полное зеркало новой структуры (api-notes пока только en)
+- [x] `mcp-name:` сохранён в обоих README (требование MCP Registry), переехал в футер
+- [ ] Демо-GIF в шапку (сценарий есть, нужна запись экрана — положить в `docs/assets/`)
+- [ ] В веб-UI GitHub (руками): description, topics (mcp, mcp-server, yandex-wiki, model-context-protocol,
+      claude, cursor, ai-agents), social preview картинка
+- [ ] Дистрибуция: сабмиты в awesome-mcp-servers / Glama / PulseMCP / mcp.so, пост на Хабр
 
 ## M5 — Тесты и CI (M)
 
@@ -122,3 +146,6 @@
   Ретраи из M3 отложены (требуется обсуждение).
 - 2026-07-19: PR #3 (M3+M4 + фиксы регрессий и pre-existing багов, 127 тестов) смержен в main;
   выпущен релиз v0.5.0.
+- 2026-07-19: по ретраям принято решение (мини-ретрай в `_request()`, без зависимостей) — в ветку M5.
+- 2026-07-19: M-docs — README/README_ru пересобраны (бейджи, кнопки установки, таблицы тулзов,
+  сравнение, mermaid), глубокие API-заметки → docs/api-notes.md. Ветка docs/readme-overhaul.

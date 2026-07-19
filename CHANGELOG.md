@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- README overhauled (docs-only): language switcher, badges, one-click install for Cursor/VS Code plus per-client snippets, example prompts, read/write tool tables, comparison with alternatives, single env-var table, mermaid deployment diagram, Security section; deep API findings moved to `docs/api-notes.md`; `README_ru.md` mirrors the new structure
+
 ## [0.5.0] - 2026-07-19
 
 ### Added
