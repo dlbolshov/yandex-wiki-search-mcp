@@ -22,11 +22,16 @@ def main() -> None:
         stream=sys.stderr,
         format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
     )
-    auth_mode = (
-        "oauth"
-        if settings.oauth_enabled
-        else ("token" if settings.wiki_token else "iam_token")
-    )
+    token_mode: str | None = None
+    if settings.wiki_token:
+        token_mode = "token"
+    elif settings.wiki_iam_token:
+        token_mode = "iam_token"
+
+    if settings.oauth_enabled:
+        auth_mode = f"oauth+{token_mode}" if token_mode else "oauth"
+    else:
+        auth_mode = token_mode or "none"
     logger.info(
         "starting: transport=%s api=%s web=%s org_id=%s cloud_org_id=%s read_only=%s auth=%s oauth_store=%s log_level=%s",
         settings.transport,
