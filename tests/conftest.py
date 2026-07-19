@@ -8,23 +8,21 @@ from mcp_wiki.wiki.proto.common import YandexAuth
 
 @pytest.fixture
 async def wiki_client() -> AsyncGenerator[WikiClient, None]:
-    client = WikiClient(
+    async with WikiClient(
         token="test-token",
         org_id="test-org",
         base_url="https://api.wiki.yandex.net",
-    )
-    yield client
-    await client.close()
+    ) as client:
+        yield client
 
 
 @pytest.fixture
 async def wiki_client_no_org() -> AsyncGenerator[WikiClient, None]:
-    client = WikiClient(
+    async with WikiClient(
         token="test-token",
         base_url="https://api.wiki.yandex.net",
-    )
-    yield client
-    await client.close()
+    ) as client:
+        yield client
 
 
 @pytest.fixture
