@@ -165,3 +165,7 @@
   CI: lint/test разделены, coverage gate 80% (branch), Codecov, dependabot. Ruff/mypy ужесточены.
   Для Codecov нужен секрет `CODECOV_TOKEN` в настройках репы (codecov.io → логин через GitHub →
   токен репозитория → Settings → Secrets → Actions).
+- 2026-07-27: PR #5 (M5 + ретраи, 11 чеков) смержен в main. Следом на main: фикс гонки сохранения
+  uv-кэша между lint и test-джобой (`cache-suffix: lint` — у них совпадал ключ кэша);
+  выпущен релиз v0.6.0 (minor, а не patch: в релизе новые фичи — ретраи, `WIKI_MAX_RETRIES`,
+  `revoke_token`).
