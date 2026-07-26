@@ -1,5 +1,15 @@
+import importlib.metadata
+from typing import Any
+from unittest.mock import AsyncMock
+
 import pytest
 from mcp.client.session import ClientSession
+from mcp.server import FastMCP
+from starlette.testclient import TestClient
+
+from mcp_wiki.mcp.context import AppContext
+from mcp_wiki.mcp.server import create_mcp_server
+from tests.mcp.conftest import create_test_settings, make_test_lifespan
 
 READ_ONLY_TOOL_NAMES = [
     "page_search",
@@ -94,3 +104,36 @@ class TestServerConfiguration:
     ) -> None:
         result = await client_session.initialize()
         assert result.instructions
+
+    async def test_initialize_reports_package_version(
+        self,
+        client_session: ClientSession,
+    ) -> None:
+        result = await client_session.initialize()
+        expected = importlib.metadata.version("yandex-wiki-search-mcp")
+        assert result.serverInfo.version == expected
+
+
+class TestHealthz:
+    def test_healthz_returns_200(self, mcp_server: FastMCP[Any]) -> None:
+        app = mcp_server.streamable_http_app()
+        with TestClient(app) as client:
+            response = client.get("/healthz")
+        assert response.status_code == 200
+        assert response.text == "ok"
+
+
+class TestHttpTransportSettings:
+    @pytest.mark.parametrize("flag", [True, False])
+    def test_stateless_http_and_json_response_follow_settings(self, flag: bool) -> None:
+        settings = create_test_settings()
+        settings.stateless_http = flag
+        settings.json_response = flag
+
+        server = create_mcp_server(
+            settings=settings,
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        assert server.settings.stateless_http is flag
+        assert server.settings.json_response is flag

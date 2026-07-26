@@ -1,4 +1,5 @@
 import base64
+import importlib.metadata
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
@@ -6,6 +7,8 @@ from typing import Any
 import yarl
 from mcp.server import FastMCP
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
 from mcp_wiki.mcp.context import AppContext
@@ -20,6 +23,17 @@ from mcp_wiki.settings import Settings
 from mcp_wiki.wiki.custom.client import WikiClient
 
 Lifespan = Callable[[FastMCP[Any]], AbstractAsyncContextManager[AppContext]]
+
+
+def server_version() -> str:
+    try:
+        return importlib.metadata.version("yandex-wiki-search-mcp")
+    except importlib.metadata.PackageNotFoundError:
+        return "dev"
+
+
+async def healthz(_request: Request) -> PlainTextResponse:
+    return PlainTextResponse("ok")
 
 
 def _parse_encryption_keys(keys_str: str | None) -> list[bytes] | None:
@@ -155,9 +169,19 @@ def create_mcp_server(
         log_level=settings.log_level,
         lifespan=lifespan,
         auth_server_provider=auth_server_provider,
-        stateless_http=True,
-        json_response=True,
+        stateless_http=settings.stateless_http,
+        json_response=settings.json_response,
         auth=auth_settings,
+    )
+    server._mcp_server.version = server_version()
+
+    server._custom_starlette_routes.append(
+        Route(
+            path="/healthz",
+            endpoint=healthz,
+            methods=["GET"],
+            name="healthz",
+        )
     )
 
     if auth_server_provider is not None:

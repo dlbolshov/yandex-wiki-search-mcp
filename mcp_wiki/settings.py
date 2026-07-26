@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"  # noqa: S104
     port: int = 8000
     transport: Literal["stdio", "sse", "streamable-http"] = "stdio"
+    stateless_http: bool = True
+    json_response: bool = True
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
     wiki_api_base_url: str = "https://api.wiki.yandex.net"

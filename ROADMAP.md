@@ -111,16 +111,34 @@
 
 ### v0.7.0 — YFM-справочник + мелочи для HTTP-деплоя
 
-- [ ] YFM-справочник: выжимка YFM-синтаксиса как MCP resource + подсказка в description
-      write-тулзов («content — это YFM, см. ресурс»). Конвертер Markdown→YFM решено НЕ делать:
-      молчаливая трансформация чужого контента, edge cases (`{%` в код-блоках), нужна
-      идемпотентность (LLM может уже писать YFM); опционально позже — `yfm_validate`
-      (проверка типовых поломок без трансформации). Закрывает «planned» из README-сравнения
-- [ ] `/healthz` route (custom route, как OAuth callback). Liveness-only: всегда 200, без похода
+- [ ] YFM-хелперы (концепция дообсуждена 2026-07-27: «дефолт — маркдаун, ноль принуждения»;
+      YFM — надмножество CommonMark, рендерер фиксирован платформой, ванильный md уже валиден):
+  - [ ] Живой смок в личном разделе (до кода!): допустимые `page_type` при создании (`wysiwyg`/`md`/
+        ошибка?), `page_type` legacy-страниц, рендер `{% note %}`/`{% cut %}`/табов/`#|`-таблиц
+        на API-созданной странице, судьба GFM-измов (`> [!NOTE]`, `<details>`, task-lists,
+        pipe-таблицы), `append-content` с anchor внутри YFM-блока
+  - [ ] Справочник как MCP resource: маппинг GFM-привычек → YFM-эквиваленты
+        (`> [!NOTE]` → `{% note %}`, `<details>` → `{% cut %}`, pipe- vs `#|`-таблицы), якоря, табы
+  - [ ] Wording в description write-тулзов БЕЗ принуждения: «plain Markdown works as-is;
+        GitHub-specific extensions won't render; see resource for YFM equivalents»
+  - [ ] Inline-валидатор warnings-only (модуль `yfm.py`, fence-aware): уровень-1 «сломано»
+        (незакрытые `{% %}`-блоки/`#|`-таблицы/код-фенсы, неизвестные директивы ≈ YFM004/005/020
+        из @diplodoc/yfmlint), уровень-2 «отрендерится не так» (GFM-измы, одной строкой).
+        Опциональное поле `yfm_warnings` в ответах page_create/page_update/page_append_content
+        (схема-аддитивно). Запись НЕ блокировать. `{%` внутри код-фенсов — не ошибка
+  - [ ] page_type-защита: legacy-страница → предупреждение в `yfm_warnings`, но только там,
+        где страница уже фетчится (резолв slug); лишний GET на id-пути не добавлять
+  - Отдельная тулза `yfm_validate` — НЕ в v0.7.0 (риск путаницы агента, inline покрывает флоу;
+    вернуться после живых тестов). Конвертер Markdown→YFM — НЕ делать (молчаливая трансформация
+    чужого контента, edge cases, идемпотентность). Готовые линтеры (@diplodoc/yfmlint,
+    @diplodoc/transform) — Node-only, зависимость от Node убивает uvx/MCPB-установку.
+    Закрывает «planned» из README-сравнения
+- [x] `/healthz` route (custom route, как OAuth callback). Liveness-only: всегда 200, без похода
       в Wiki API — падение апстрима не должно ронять под в restart loop, а healthcheck — спамить API
-- [ ] Версия сервера из `importlib.metadata` в `FastMCP` (fallback `"dev"` при `PackageNotFoundError`;
-      проверить, принимает ли FastMCP версию напрямую или пробрасывать в низкоуровневый Server)
-- [ ] `stateless_http`/`json_response` → настройки (дефолты текущие: true/true)
+- [x] Версия сервера из `importlib.metadata`: FastMCP версию не принимает и без неё репортил версию
+      библиотеки `mcp` — ставим через `server._mcp_server.version` (прецедент приватного доступа —
+      `_custom_starlette_routes` для OAuth callback); fallback `"dev"` при `PackageNotFoundError`
+- [x] `stateless_http`/`json_response` → настройки (дефолты текущие: true/true) + `.env.example`
 
 ### v0.8.0 — Экономия токенов LLM
 
