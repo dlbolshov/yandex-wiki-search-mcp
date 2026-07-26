@@ -79,9 +79,12 @@ def create_mcp_server(
     auth_settings: AuthSettings | None = None
 
     if settings.oauth_enabled:
-        assert settings.oauth_client_id, "OAuth client ID must be set."
-        assert settings.oauth_client_secret, "OAuth client secret must be set."
-        assert settings.mcp_server_public_url, "MCP server public url must be set."
+        if not settings.oauth_client_id:
+            raise ValueError("OAuth client ID must be set.")
+        if not settings.oauth_client_secret:
+            raise ValueError("OAuth client secret must be set.")
+        if not settings.mcp_server_public_url:
+            raise ValueError("MCP server public url must be set.")
 
         oauth_store: OAuthStore
         if settings.oauth_store == "memory":

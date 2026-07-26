@@ -24,9 +24,9 @@ def main() -> None:
     )
     token_mode: str | None = None
     if settings.wiki_token:
-        token_mode = "token"
+        token_mode = "token"  # noqa: S105
     elif settings.wiki_iam_token:
-        token_mode = "iam_token"
+        token_mode = "iam_token"  # noqa: S105
 
     if settings.oauth_enabled:
         auth_mode = f"oauth+{token_mode}" if token_mode else "oauth"

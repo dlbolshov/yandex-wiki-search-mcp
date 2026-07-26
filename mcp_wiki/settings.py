@@ -11,7 +11,7 @@ class Settings(BaseSettings):
         str_strip_whitespace=True,
     )
 
-    host: str = "0.0.0.0"
+    host: str = "0.0.0.0"  # noqa: S104
     port: int = 8000
     transport: Literal["stdio", "sse", "streamable-http"] = "stdio"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

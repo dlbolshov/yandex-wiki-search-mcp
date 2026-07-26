@@ -68,7 +68,7 @@ def _open_binary(path: Path) -> BinaryIO:
 def _backoff_delay(attempt: int) -> float:
     """Exponential backoff with equal jitter: [0.5x, 1.0x] of the nominal delay."""
     nominal = RETRY_BASE_DELAY * 2 ** (attempt - 1)
-    return nominal * (0.5 + random.random() * 0.5)
+    return nominal * (0.5 + random.random() * 0.5)  # noqa: S311
 
 
 def _retry_delay(attempt: int, retry_after: str | None) -> float | None:
@@ -229,7 +229,7 @@ class WikiClient(WikiProtocol):
         data: Any = None,
         content_type: str | None = None,
         not_found: Callable[[], WikiError] | None = None,
-        timeout: ClientTimeout | None = None,
+        timeout: ClientTimeout | None = None,  # noqa: ASYNC109
         retryable: bool | None = None,
     ) -> bytes:
         """Perform a Wiki API request.
