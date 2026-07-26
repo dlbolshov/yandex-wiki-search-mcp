@@ -26,8 +26,8 @@ class RedisOAuthStore(OAuthStore):
     _CLIENT_KEY_PREFIX = "oauth:client:"
     _STATE_KEY_PREFIX = "oauth:state:"
     _AUTH_CODE_KEY_PREFIX = "oauth:authcode:"
-    _ACCESS_TOKEN_KEY_PREFIX = "oauth:access:"
-    _REFRESH_TOKEN_KEY_PREFIX = "oauth:refresh:"
+    _ACCESS_TOKEN_KEY_PREFIX = "oauth:access:"  # noqa: S105
+    _REFRESH_TOKEN_KEY_PREFIX = "oauth:refresh:"  # noqa: S105
     _MAPPING_KEY_PREFIX = "oauth:mapping:"
 
     def __init__(
@@ -92,7 +92,8 @@ class RedisOAuthStore(OAuthStore):
 
     async def save_client(self, client: OAuthClientInformationFull) -> None:
         """Save a client to Redis."""
-        assert client.client_id is not None, "client_id must be provided"
+        if client.client_id is None:
+            raise ValueError("client_id must be provided")
         await self._cache.set(self._client_key(client.client_id), client)
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -138,7 +139,8 @@ class RedisOAuthStore(OAuthStore):
         self, token: OAuthToken, client_id: str, scopes: list[str], resource: str | None
     ) -> None:
         """Save an OAuth token and its metadata."""
-        assert token.expires_in is not None, "expires_in must be provided"
+        if token.expires_in is None:
+            raise ValueError("expires_in must be provided")
 
         current_time = int(time.time())
         expires_at = current_time + token.expires_in
@@ -174,7 +176,9 @@ class RedisOAuthStore(OAuthStore):
             # Map refresh token to access token hash for cleanup
             # Store the hash (not raw token) to avoid exposing tokens in Redis
             await self._cache.set(
-                self._mapping_key(token.refresh_token), hash_token(token.access_token)
+                self._mapping_key(token.refresh_token),
+                hash_token(token.access_token),
+                ttl=self._refresh_token_ttl,
             )
 
     async def get_access_token(self, token: str) -> AccessToken | None:
@@ -208,3 +212,7 @@ class RedisOAuthStore(OAuthStore):
             await self._cache.delete(
                 f"{self._ACCESS_TOKEN_KEY_PREFIX}{access_token_hash}"
             )
+
+    async def revoke_access_token(self, token: str) -> None:
+        """Delete an access token; the refresh token (if any) stays valid."""
+        await self._cache.delete(self._access_token_key(token))
