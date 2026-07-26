@@ -5,11 +5,19 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- OAuth token revocation: `revoke_token` is implemented (the revocation endpoint returned 500 before); revoking a refresh token also revokes the paired access token, revoking an access token keeps the refresh token valid
+- Test suite for the OAuth layer (provider flow, in-memory and Redis stores via fakeredis, Fernet crypto with key rotation, serializers) and for `Settings` validators — coverage 73% → 88%, gated in CI at 85%
+- Codecov upload + coverage badge; `dependabot.yml` for uv, GitHub Actions and Docker
 - Retries with jittered backoff in `WikiClient`: dropped connections (a long-lived stdio server loses its keep-alive connection while idle) and `429`/`502`/`503`/`504` responses are retried twice, adding at most ~0.9s. Only requests that are safe to repeat are retried — all reads, `page_search` and upload parts; write requests still fail fast, because a 5xx can arrive after the write was applied. Timeouts are never retried. `Retry-After` is honored when it asks for 3s or less, otherwise the error is raised right away
 - `WIKI_MAX_RETRIES` setting (default `2`, `0` disables retries)
 
 ### Changed
+- CI split into a single `lint` job (ruff, format, ty, mypy on Python 3.11) and the test matrix (3 OS × 3 Python, pytest + coverage); concurrent runs on the same ref are cancelled
+- Ruff rule sets expanded (`UP`, `SIM`, `RUF`, `PTH`, `ASYNC`, `PERF`, `TRY`, `S`); mypy config tightened (`disallow_untyped_defs`, targeted overrides instead of blanket `ignore_missing_imports`); production asserts converted to explicit raises
 - Docs: README/README_ru rebuilt (install buttons, tool tables, comparison with alternatives); deep API notes moved to `docs/api-notes.md` (+ Russian mirror)
+
+### Fixed
+- `RedisOAuthStore`: the refresh→access token mapping key is now saved with a TTL — previously it never expired and leaked one Redis key per login
 
 ## [0.5.0] - 2026-07-19
 
