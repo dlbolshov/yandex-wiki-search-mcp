@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 - OAuth token revocation: `revoke_token` is implemented (the revocation endpoint returned 500 before); revoking a refresh token also revokes the paired access token, revoking an access token keeps the refresh token valid
-- Test suite for the OAuth layer (provider flow, in-memory and Redis stores via fakeredis, Fernet crypto with key rotation, serializers) and for `Settings` validators — coverage 73% → 88%, gated in CI at 85%
+- Test suite for the OAuth layer (provider flow, in-memory and Redis stores via fakeredis, Fernet crypto with key rotation, serializers) and for `Settings` validators — line coverage 73% → 88% (branch 83%), gated in CI at 80% branch coverage
 - Codecov upload + coverage badge; `dependabot.yml` for uv, GitHub Actions and Docker
 - Retries with jittered backoff in `WikiClient`: dropped connections (a long-lived stdio server loses its keep-alive connection while idle) and `429`/`502`/`503`/`504` responses are retried twice, adding at most ~0.9s. Only requests that are safe to repeat are retried — all reads, `page_search` and upload parts; write requests still fail fast, because a 5xx can arrive after the write was applied. Timeouts are never retried. `Retry-After` is honored when it asks for 3s or less, otherwise the error is raised right away
 - `WIKI_MAX_RETRIES` setting (default `2`, `0` disables retries)

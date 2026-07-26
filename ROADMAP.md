@@ -92,7 +92,9 @@
 - [x] Реализовать `revoke_token` в OAuth-провайдере (сейчас `NotImplementedError` → 500 на revocation endpoint):
       диспатч по типу токена, в `OAuthStore` добавлен `revoke_access_token`; refresh отзывается каскадно
 - [x] Тесты валидаторов `Settings` (сейчас `model_construct` в conftest обходит валидацию)
-- [x] Coverage gate в CI: `--cov-fail-under=85` (факт после M5 — 88%, было 73%) + Codecov (PR-комменты, бейдж)
+- [x] Coverage gate в CI: `--cov-branch --cov-fail-under=80` (факт после M5 — 83% branch / 88% line,
+      было 73% line) + Codecov (PR-комменты, бейдж); `task test-cov` починен (без `--cov` он не собирал
+      coverage вообще) и зеркалит CI-гейт + HTML-отчёт
 - [x] Ruff: добавлены `UP`, `SIM`, `RUF`, `PTH`, `ASYNC`, `S` (bandit), `TRY`, `PERF`;
       `E501` оставлен в ignore (переносами правит ruff format, падать на URL глупо);
       ignore `TRY003` (осмысленные сообщения в raise), `RUF029`/`RUF067` (framework-контракты);
@@ -160,6 +162,6 @@
   чтобы таймауты не начали ретраиться, если в `ClientTimeout` когда-нибудь добавят `sock_read`.
 - 2026-07-26: M5 завершён — `revoke_token` + фикс TTL у mapping в Redis, 65 новых тестов
   (OAuth-слой целиком + валидаторы Settings), всего 206 зелёных, покрытие 73% → 88%.
-  CI: lint/test разделены, coverage gate 85%, Codecov, dependabot. Ruff/mypy ужесточены.
+  CI: lint/test разделены, coverage gate 80% (branch), Codecov, dependabot. Ruff/mypy ужесточены.
   Для Codecov нужен секрет `CODECOV_TOKEN` в настройках репы (codecov.io → логин через GitHub →
   токен репозитория → Settings → Secrets → Actions).
