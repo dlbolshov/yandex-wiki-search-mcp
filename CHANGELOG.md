@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Retries with jittered backoff in `WikiClient`: dropped connections (a long-lived stdio server loses its keep-alive connection while idle) and `429`/`502`/`503`/`504` responses are retried twice, adding at most ~0.9s. Only requests that are safe to repeat are retried — all reads, `page_search` and upload parts; write requests still fail fast, because a 5xx can arrive after the write was applied. Timeouts are never retried. `Retry-After` is honored when it asks for 3s or less, otherwise the error is raised right away
+- `WIKI_MAX_RETRIES` setting (default `2`, `0` disables retries)
+
 ### Changed
 - Docs: README/README_ru rebuilt (install buttons, tool tables, comparison with alternatives); deep API notes moved to `docs/api-notes.md` (+ Russian mirror)
 

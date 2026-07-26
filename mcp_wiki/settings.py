@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import AnyHttpUrl, SecretStr, model_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     wiki_cloud_org_id: str | None = None
     wiki_org_id: str | None = None
     wiki_read_only: bool = False
+    wiki_max_retries: int = Field(default=2, ge=0)
 
     oauth_enabled: bool = False
     oauth_store: Literal["redis", "memory"] = "memory"

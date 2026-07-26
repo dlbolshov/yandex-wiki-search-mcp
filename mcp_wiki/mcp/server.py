@@ -57,6 +57,7 @@ def make_wiki_lifespan(settings: Settings) -> Lifespan:
             auth_scheme=settings.wiki_auth_scheme,
             cloud_org_id=settings.wiki_cloud_org_id,
             org_id=settings.wiki_org_id,
+            max_retries=settings.wiki_max_retries,
         )
         try:
             await wiki.prepare()

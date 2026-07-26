@@ -212,6 +212,7 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 | `WIKI_API_BASE_URL` | no | `https://api.wiki.yandex.net` | Wiki API endpoint |
 | `WIKI_WEB_BASE_URL` | no | `https://wiki.yandex.ru` | Base for absolute page links in `page_search` results |
 | `WIKI_AUTH_SCHEME` | no | `OAuth` | `Authorization` header scheme for `WIKI_TOKEN` (`OAuth` \| `Bearer`) |
+| `WIKI_MAX_RETRIES` | no | `2` | Retries for dropped connections and `429`/`502`/`503`/`504` on read requests; `0` disables them |
 
 <details>
 <summary><b>Multi-user OAuth + Redis (HTTP deployments only)</b></summary>
