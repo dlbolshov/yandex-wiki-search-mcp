@@ -222,6 +222,11 @@ class TestRetryAfter:
         assert exc_info.value.status == 429
         assert sleep_calls == []
 
+    def test_retry_after_nan_fails_fast(self) -> None:
+        # float("nan") parses fine but fails every comparison; without the
+        # "not <=" guard it would leak into asyncio.sleep(nan).
+        assert _retry_delay(1, "nan") is None
+
     def test_retry_after_http_date_falls_back_to_backoff(self) -> None:
         delay = _retry_delay(1, "Wed, 21 Oct 2015 07:28:00 GMT")
 

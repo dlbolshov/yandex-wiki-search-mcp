@@ -84,7 +84,7 @@ def _retry_delay(attempt: int, retry_after: str | None) -> float | None:
         except ValueError:
             # HTTP-date form: fall back to the regular backoff.
             return _backoff_delay(attempt)
-        if requested > RETRY_AFTER_MAX:
+        if not requested <= RETRY_AFTER_MAX:  # "not <=" so that nan also fails fast
             return None
         return max(requested, 0.0)
     return _backoff_delay(attempt)
