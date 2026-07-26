@@ -114,6 +114,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S104", "S105", "S106"]
+"scripts/**" = ["T201", "RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
