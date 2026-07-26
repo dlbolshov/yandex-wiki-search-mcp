@@ -62,9 +62,11 @@
 - [x] Отдельный таймаут для upload-запросов (`upload_timeout`, по умолчанию 300s)
 - [x] Неблокирующее чтение файла в `page_upload_attachment` (`asyncio.to_thread`)
 - [x] Anchor-fallback вынесен в `wiki/custom/anchors.py` + `tests/wiki/custom/test_anchors.py`
-- [ ] Ретраи с backoff (решение 2026-07-19, делаем в ветке M5): мини-ретрай в `_request()` без зависимостей —
-      connection-ошибки + 502/503/504/429, `retryable=True` для GET + `page_search` + `upload_part`,
-      2 ретрая с jitter (≤1.5s суммарно), таймауты не ретраим, `Retry-After` уважаем если появится
+- [x] Ретраи с backoff (решение 2026-07-19, сделано в ветке M5): мини-ретрай в `_request()` без зависимостей —
+      connection-ошибки (`ClientConnectionError`/`ClientPayloadError`) + 502/503/504/429, `retryable`
+      по умолчанию = GET, явный `retryable=True` для `page_search` и `_upload_part`, 2 ретрая с equal
+      jitter (≤0.9s суммарно), таймауты не ретраим, `Retry-After` уважаем с потолком 3s (больше — сразу
+      ошибка, чтобы тулза не залипала); knob `WIKI_MAX_RETRIES` (default 2, 0 выключает)
 
 ## M4 — Слой тулзов: схемы и типы (M)
 
@@ -82,17 +84,28 @@
 
 ## M5 — Тесты и CI (M)
 
-- [ ] Тесты OAuth-слоя (сейчас не покрыт совсем):
-  - [ ] `YandexOAuthAuthorizationServerProvider`: authorize → callback → exchange → refresh
-  - [ ] `InMemoryOAuthStore`: TTL, single-use состояний/кодов, revoke-цепочка
-  - [ ] `RedisOAuthStore` (fakeredis или мок `aiocache`), `crypto`/`serializers` — roundtrip с ротацией ключей
-- [ ] Реализовать `revoke_token` в OAuth-провайдере (сейчас `NotImplementedError` → 500 на revocation endpoint)
-- [ ] Тесты валидаторов `Settings` (сейчас `model_construct` в conftest обходит валидацию)
-- [ ] Coverage gate в CI: `--cov --cov-fail-under=N` (стартовать с фактического уровня, не задирать)
-- [ ] Ruff: добавить наборы `UP`, `SIM`, `RUF`, `PTH`, `ASYNC`, `S` (bandit), `TRY`, `PERF`;
-      решить судьбу `E501` (line-length vs осознанный ignore)
-- [ ] mypy: ужесточить конфиг (сейчас `ignore_missing_imports` на всё) или оставить один из mypy/ty
-- [ ] `dependabot.yml`: uv, github-actions, docker
+- [x] Тесты OAuth-слоя (сейчас не покрыт совсем):
+  - [x] `YandexOAuthAuthorizationServerProvider`: authorize → callback → exchange → refresh
+  - [x] `InMemoryOAuthStore`: TTL, single-use состояний/кодов, revoke-цепочка
+  - [x] `RedisOAuthStore` (выбран fakeredis: гоняет полный путь aiocache → serializer → redis-клиент),
+        `crypto`/`serializers` — roundtrip с ротацией ключей
+- [x] Реализовать `revoke_token` в OAuth-провайдере (сейчас `NotImplementedError` → 500 на revocation endpoint):
+      диспатч по типу токена, в `OAuthStore` добавлен `revoke_access_token`; refresh отзывается каскадно
+- [x] Тесты валидаторов `Settings` (сейчас `model_construct` в conftest обходит валидацию)
+- [x] Coverage gate в CI: `--cov-branch --cov-fail-under=80` (факт после M5 — 83% branch / 88% line,
+      было 73% line) + Codecov (PR-комменты, бейдж); `task test-cov` починен (без `--cov` он не собирал
+      coverage вообще) и зеркалит CI-гейт + HTML-отчёт
+- [x] Ruff: добавлены `UP`, `SIM`, `RUF`, `PTH`, `ASYNC`, `S` (bandit), `TRY`, `PERF`;
+      `E501` оставлен в ignore (переносами правит ruff format, падать на URL глупо);
+      ignore `TRY003` (осмысленные сообщения в raise), `RUF029`/`RUF067` (framework-контракты);
+      прод-asserts переведены в явные raise, в тестах asserts узаконены per-file-ignores
+- [x] mypy: ужесточён (`disallow_untyped_defs`, `python_version=3.11`, точечные overrides для
+      aiocache/aioresponses вместо одеяла); ty оставлен вторым мнением — пересмотреть на 1.0
+- [x] `dependabot.yml`: uv, github-actions, docker
+- [x] (сверх плана) CI разделён: `lint`-job (ubuntu, py3.11) + матрица тестов 3 ОС × 3 Python;
+      `concurrency` с cancel-in-progress
+- [x] (сверх плана) Фикс утечки в `RedisOAuthStore`: mapping refresh→access писался без TTL —
+      один вечный ключ в Redis на каждый логин; теперь TTL = 31 день (как у refresh) + регрессионный тест
 
 ## M6 — Функциональные идеи (обсудить каждую перед реализацией)
 
@@ -127,3 +140,28 @@
 - 2026-07-19: PR #3 (M3+M4 + фиксы регрессий и pre-existing багов, 127 тестов) смержен в main;
   выпущен релиз v0.5.0.
 - 2026-07-19: по ретраям принято решение (мини-ретрай в `_request()`, без зависимостей) — в ветку M5.
+- 2026-07-26: ветка `chore/m5-tests-ci-and-retries`; ретраи из M3 реализованы (консервативная область:
+  write-запросы не ретраятся, т.к. 5xx может прийти уже после применения записи; `Retry-After` с
+  потолком 3s; `WIKI_MAX_RETRIES`). 13 новых тестов, всего 140 зелёных.
+  Разбор расширения ретраев на мутации (2026-07-26) — решено НЕ делать:
+  - `ClientPayloadError` означает, что ответ уже начал приходить → сервер отработал; ретрай мутации
+    здесь гарантированно дублирует запись;
+  - `ServerDisconnectedError` неразличимо схлопывает «коннект был мёртв» и «бэкенд применил запись
+    и умер до ответа» — развести их на клиенте нечем;
+  - остаются только `ClientConnectorError`/`ClientConnectionResetError`, где «запрос не ушёл»
+    доказуемо, но они означают недоступность API, и повтор через 0.3s её не лечит → пользы ~0.
+  Конкретные риски дубля, если бы делали: `page_append_content`/`page_add_comment` — тихий дубль
+  контента; `page_delete` — потеря `recovery_token` из первого ответа (откатить удаление нечем);
+  `page_create` — конфликт слага на успешно созданной странице (LLM пойдёт создавать вторую);
+  `grid_*` защищены `revision`, `page_update` идемпотентен по контенту.
+
+  Проверено по aiohttp 3.13.3: `TCPConnector.keepalive_timeout = 15s`, т.е. idle-коннекты клиент
+  закрывает сам и «простой между вызовами тулзов» почти не создаёт обрывов — основную работу
+  в ретраях делают 5xx/429, а не транспортные ошибки. Там же: `ServerTimeoutError` наследуется
+  и от `ClientConnectionError`, и от `asyncio.TimeoutError` — в `_request()` стоит явная проверка,
+  чтобы таймауты не начали ретраиться, если в `ClientTimeout` когда-нибудь добавят `sock_read`.
+- 2026-07-26: M5 завершён — `revoke_token` + фикс TTL у mapping в Redis, 65 новых тестов
+  (OAuth-слой целиком + валидаторы Settings), всего 206 зелёных, покрытие 73% → 88%.
+  CI: lint/test разделены, coverage gate 80% (branch), Codecov, dependabot. Ruff/mypy ужесточены.
+  Для Codecov нужен секрет `CODECOV_TOKEN` в настройках репы (codecov.io → логин через GitHub →
+  токен репозитория → Settings → Secrets → Actions).

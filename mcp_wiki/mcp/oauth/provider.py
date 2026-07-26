@@ -98,7 +98,8 @@ class YandexOAuthAuthorizationServerProvider(
                 " ".join(params.scopes) if params.scopes else None
             )
 
-        assert client.client_id is not None, "Client ID not provided."
+        if client.client_id is None:
+            raise ValueError("Client ID not provided.")
         await self._store.save_state(
             YandexOAuthState(
                 redirect_uri=redirect_uri,
@@ -138,15 +139,16 @@ class YandexOAuthAuthorizationServerProvider(
         form.add_field("client_secret", self._client_secret)
         form.add_field("redirect_uri", str(self._server_url / "oauth/yandex/callback"))
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                self._yandex_oauth_issuer / "token", data=form
-            ) as response:
-                if response.status != 200:
-                    raise ValueError("Failed to exchange authorization code")
-                token = OAuthToken.model_validate_json(await response.read())
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(self._yandex_oauth_issuer / "token", data=form) as response,
+        ):
+            if response.status != 200:
+                raise ValueError("Failed to exchange authorization code")
+            token = OAuthToken.model_validate_json(await response.read())
 
-        assert client.client_id is not None, "client_id must be provided"
+        if client.client_id is None:
+            raise ValueError("client_id must be provided")
         await self._store.save_oauth_token(
             token=token,
             client_id=client.client_id,
@@ -172,16 +174,17 @@ class YandexOAuthAuthorizationServerProvider(
         form.add_field("client_id", self._client_id)
         form.add_field("client_secret", self._client_secret)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                self._yandex_oauth_issuer / "token", data=form
-            ) as response:
-                if response.status != 200:
-                    raise ValueError("Failed to refresh token")
-                token = OAuthToken.model_validate_json(await response.read())
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(self._yandex_oauth_issuer / "token", data=form) as response,
+        ):
+            if response.status != 200:
+                raise ValueError("Failed to refresh token")
+            token = OAuthToken.model_validate_json(await response.read())
 
         await self._store.revoke_refresh_token(refresh_token.token)
-        assert client.client_id is not None, "client_id must be provided"
+        if client.client_id is None:
+            raise ValueError("client_id must be provided")
         await self._store.save_oauth_token(
             token=token,
             client_id=client.client_id,
@@ -194,4 +197,7 @@ class YandexOAuthAuthorizationServerProvider(
         return await self._store.get_access_token(token)
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
-        raise NotImplementedError()
+        if isinstance(token, RefreshToken):
+            await self._store.revoke_refresh_token(token.token)
+        else:
+            await self._store.revoke_access_token(token.token)

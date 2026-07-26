@@ -6,6 +6,7 @@
 [![PyPI](https://img.shields.io/pypi/v/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fdlbolshov%2Fyandex-wiki-search-mcp%2Fmain%2Fpyproject.toml)](https://pypi.org/project/yandex-wiki-search-mcp/)
 [![CI](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/dlbolshov/yandex-wiki-search-mcp/graph/badge.svg)](https://codecov.io/gh/dlbolshov/yandex-wiki-search-mcp)
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
 
@@ -212,6 +213,7 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 | `WIKI_API_BASE_URL` | no | `https://api.wiki.yandex.net` | Wiki API endpoint |
 | `WIKI_WEB_BASE_URL` | no | `https://wiki.yandex.ru` | Base for absolute page links in `page_search` results |
 | `WIKI_AUTH_SCHEME` | no | `OAuth` | `Authorization` header scheme for `WIKI_TOKEN` (`OAuth` \| `Bearer`) |
+| `WIKI_MAX_RETRIES` | no | `2` | Retries for dropped connections and `429`/`502`/`503`/`504` on read requests; `0` disables them |
 
 <details>
 <summary><b>Multi-user OAuth + Redis (HTTP deployments only)</b></summary>

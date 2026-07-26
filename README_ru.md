@@ -6,6 +6,7 @@
 [![PyPI](https://img.shields.io/pypi/v/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
 [![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fdlbolshov%2Fyandex-wiki-search-mcp%2Fmain%2Fpyproject.toml)](https://pypi.org/project/yandex-wiki-search-mcp/)
 [![CI](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/dlbolshov/yandex-wiki-search-mcp/graph/badge.svg)](https://codecov.io/gh/dlbolshov/yandex-wiki-search-mcp)
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
 
@@ -214,6 +215,7 @@ claude mcp add yandex-wiki-search \
 | `WIKI_API_BASE_URL` | нет | `https://api.wiki.yandex.net` | Эндпоинт Wiki API |
 | `WIKI_WEB_BASE_URL` | нет | `https://wiki.yandex.ru` | База для абсолютных ссылок в результатах `page_search` |
 | `WIKI_AUTH_SCHEME` | нет | `OAuth` | Схема заголовка `Authorization` для `WIKI_TOKEN` (`OAuth` \| `Bearer`) |
+| `WIKI_MAX_RETRIES` | нет | `2` | Ретраи на обрыв соединения и `429`/`502`/`503`/`504` для читающих запросов; `0` выключает |
 
 <details>
 <summary><b>Многопользовательский OAuth + Redis (только HTTP-деплой)</b></summary>

@@ -1,4 +1,4 @@
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 import pytest
 
@@ -8,10 +8,24 @@ from mcp_wiki.wiki.proto.common import YandexAuth
 
 @pytest.fixture
 async def wiki_client() -> AsyncGenerator[WikiClient, None]:
+    # Retries off by default so that error-path tests stay deterministic and fast;
+    # use wiki_client_retrying to exercise them.
     async with WikiClient(
         token="test-token",
         org_id="test-org",
         base_url="https://api.wiki.yandex.net",
+        max_retries=0,
+    ) as client:
+        yield client
+
+
+@pytest.fixture
+async def wiki_client_retrying() -> AsyncGenerator[WikiClient, None]:
+    async with WikiClient(
+        token="test-token",
+        org_id="test-org",
+        base_url="https://api.wiki.yandex.net",
+        max_retries=2,
     ) as client:
         yield client
 
@@ -21,6 +35,7 @@ async def wiki_client_no_org() -> AsyncGenerator[WikiClient, None]:
     async with WikiClient(
         token="test-token",
         base_url="https://api.wiki.yandex.net",
+        max_retries=0,
     ) as client:
         yield client
 

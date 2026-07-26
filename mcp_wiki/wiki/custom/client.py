@@ -1,12 +1,15 @@
 import asyncio
 import json
 import logging
+import random
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, BinaryIO, Literal
 
 from aiohttp import (
+    ClientConnectionError,
+    ClientPayloadError,
     ClientSession,
     ClientTimeout,
     TraceConfig,
@@ -51,11 +54,40 @@ from mcp_wiki.wiki.proto.types.pages import (
 
 SEARCH_PAGE_SIZE_MAX = 50
 
+RETRY_STATUSES = frozenset({429, 502, 503, 504})
+RETRY_BASE_DELAY = 0.3
+RETRY_AFTER_MAX = 3.0
+
 logger = logging.getLogger(__name__)
 
 
 def _open_binary(path: Path) -> BinaryIO:
     return path.open("rb")
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Exponential backoff with equal jitter: [0.5x, 1.0x] of the nominal delay."""
+    nominal = RETRY_BASE_DELAY * 2 ** (attempt - 1)
+    return nominal * (0.5 + random.random() * 0.5)  # noqa: S311
+
+
+def _retry_delay(attempt: int, retry_after: str | None) -> float | None:
+    """Delay before the next attempt, or None when the request must not be retried.
+
+    A ``Retry-After`` header wins over the backoff, but only within
+    ``RETRY_AFTER_MAX`` — when the server asks to wait longer, the caller gets the
+    error right away instead of a tool call hanging on a sleep.
+    """
+    if retry_after is not None:
+        try:
+            requested = float(retry_after)
+        except ValueError:
+            # HTTP-date form: fall back to the regular backoff.
+            return _backoff_delay(attempt)
+        if not requested <= RETRY_AFTER_MAX:  # "not <=" so that nan also fails fast
+            return None
+        return max(requested, 0.0)
+    return _backoff_delay(attempt)
 
 
 def _build_trace_config() -> TraceConfig:
@@ -115,6 +147,7 @@ class WikiClient(WikiProtocol):
         base_url: str = "https://api.wiki.yandex.net",
         timeout: float = 30,
         upload_timeout: float = 300,
+        max_retries: int = 2,
     ):
         self._token = token
         self._iam_token = iam_token
@@ -124,6 +157,7 @@ class WikiClient(WikiProtocol):
         self._base_url = base_url
         self._timeout = ClientTimeout(total=timeout)
         self._upload_timeout = ClientTimeout(total=upload_timeout)
+        self._max_retries = max(max_retries, 0)
         self._session: ClientSession | None = None
 
     async def prepare(self) -> None:
@@ -195,8 +229,15 @@ class WikiClient(WikiProtocol):
         data: Any = None,
         content_type: str | None = None,
         not_found: Callable[[], WikiError] | None = None,
-        timeout: ClientTimeout | None = None,
+        timeout: ClientTimeout | None = None,  # noqa: ASYNC109
+        retryable: bool | None = None,
     ) -> bytes:
+        """Perform a Wiki API request.
+
+        ``retryable`` marks the call as safe to repeat; it defaults to GET. Only such
+        calls are retried, because a 5xx may well arrive after the write has been
+        applied — repeating a page creation or an append would duplicate content.
+        """
         headers = self._build_headers(auth)
         if content_type:
             headers["Content-Type"] = content_type
@@ -211,13 +252,54 @@ class WikiClient(WikiProtocol):
         if timeout is not None:
             kwargs["timeout"] = timeout
 
-        async with self._http.request(method, path, **kwargs) as response:
-            payload = await response.read()
-            if response.status == 404 and not_found is not None:
+        can_retry = method == "GET" if retryable is None else retryable
+        attempts = self._max_retries + 1 if can_retry else 1
+
+        for attempt in range(1, attempts + 1):
+            try:
+                async with self._http.request(method, path, **kwargs) as response:
+                    status = response.status
+                    retry_after = response.headers.get("Retry-After")
+                    payload = await response.read()
+            except (ClientConnectionError, ClientPayloadError) as exc:
+                # ServerTimeoutError subclasses both ClientConnectionError and
+                # asyncio.TimeoutError; timeouts are never retried.
+                if isinstance(exc, asyncio.TimeoutError) or attempt == attempts:
+                    raise
+                delay = _backoff_delay(attempt)
+                logger.warning(
+                    "%s %s failed with %r, retrying in %.2fs (attempt %d/%d)",
+                    method,
+                    path,
+                    exc,
+                    delay,
+                    attempt + 1,
+                    attempts,
+                )
+                await asyncio.sleep(delay)
+                continue
+
+            if status == 404 and not_found is not None:
                 raise not_found()
-            if response.status >= 400:
-                raise build_api_error(response.status, payload)
+            if status in RETRY_STATUSES and attempt < attempts:
+                status_delay = _retry_delay(attempt, retry_after)
+                if status_delay is not None:
+                    logger.warning(
+                        "%s %s returned %d, retrying in %.2fs (attempt %d/%d)",
+                        method,
+                        path,
+                        status,
+                        status_delay,
+                        attempt + 1,
+                        attempts,
+                    )
+                    await asyncio.sleep(status_delay)
+                    continue
+            if status >= 400:
+                raise build_api_error(status, payload)
             return payload
+
+        raise RuntimeError("unreachable: request loop exited without a result")
 
     @staticmethod
     def _json_or_empty(payload: bytes) -> Any:
@@ -277,7 +359,13 @@ class WikiClient(WikiProtocol):
             "query": query,
             "page_size": max(1, min(page_size, SEARCH_PAGE_SIZE_MAX)),
         }
-        payload = await self._request("POST", "v1/search", json_body=body, auth=auth)
+        payload = await self._request(
+            "POST",
+            "v1/search",
+            json_body=body,
+            auth=auth,
+            retryable=True,
+        )
         return SearchResponse.model_validate_json(payload)
 
     async def page_get_descendants(
@@ -847,6 +935,8 @@ class WikiClient(WikiProtocol):
             content_type="application/octet-stream",
             auth=auth,
             timeout=self._upload_timeout,
+            # Re-uploading a part by its number within a session overwrites it.
+            retryable=True,
         )
 
     async def _finish_upload_session(

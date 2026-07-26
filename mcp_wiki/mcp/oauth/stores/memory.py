@@ -32,7 +32,8 @@ class InMemoryOAuthStore(OAuthStore):
 
     async def save_client(self, client: OAuthClientInformationFull) -> None:
         """Save a client to the in-memory store."""
-        assert client.client_id is not None, "client_id must be provided"
+        if client.client_id is None:
+            raise ValueError("client_id must be provided")
         self._dynamic_clients[client.client_id] = client
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -50,12 +51,14 @@ class InMemoryOAuthStore(OAuthStore):
     async def get_state(self, state_id: str) -> YandexOAuthState | None:
         """Get and remove an OAuth state if it exists and hasn't expired."""
         # Check expiry
-        if state_id in self._state_expiry:
-            if time.time() > self._state_expiry[state_id]:
-                # Expired - clean up
-                del self._states[state_id]
-                del self._state_expiry[state_id]
-                return None
+        if (
+            state_id in self._state_expiry
+            and time.time() > self._state_expiry[state_id]
+        ):
+            # Expired - clean up
+            del self._states[state_id]
+            del self._state_expiry[state_id]
+            return None
 
         # Return and remove state (states are single-use)
         state = self._states.get(state_id)
@@ -76,12 +79,14 @@ class InMemoryOAuthStore(OAuthStore):
     async def get_auth_code(self, code_id: str) -> YandexOauthAuthorizationCode | None:
         """Get and remove an authorization code if it exists and hasn't expired."""
         # Check expiry
-        if code_id in self._auth_code_expiry:
-            if time.time() > self._auth_code_expiry[code_id]:
-                # Expired - clean up
-                del self._auth_codes[code_id]
-                del self._auth_code_expiry[code_id]
-                return None
+        if (
+            code_id in self._auth_code_expiry
+            and time.time() > self._auth_code_expiry[code_id]
+        ):
+            # Expired - clean up
+            del self._auth_codes[code_id]
+            del self._auth_code_expiry[code_id]
+            return None
 
         # Return and remove auth code (auth codes are single-use)
         auth_code = self._auth_codes.get(code_id)
@@ -95,7 +100,8 @@ class InMemoryOAuthStore(OAuthStore):
         self, token: OAuthToken, client_id: str, scopes: list[str], resource: str | None
     ) -> None:
         """Save an OAuth token and its metadata."""
-        assert token.expires_in is not None, "expires_in must be provided"
+        if token.expires_in is None:
+            raise ValueError("expires_in must be provided")
 
         access_token_hash = hash_token(token.access_token)
 
@@ -169,3 +175,7 @@ class InMemoryOAuthStore(OAuthStore):
             # Delete associated access token
             if access_token_hash and access_token_hash in self._tokens:
                 del self._tokens[access_token_hash]
+
+    async def revoke_access_token(self, token: str) -> None:
+        """Delete an access token; the refresh token (if any) stays valid."""
+        self._tokens.pop(hash_token(token), None)

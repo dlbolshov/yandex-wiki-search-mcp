@@ -51,6 +51,7 @@ Issues = "https://github.com/dlbolshov/yandex-wiki-search-mcp/issues"
 [dependency-groups]
 dev = [
     "aioresponses>=0.7.7",
+    "fakeredis>=2.37.0",
     "mypy>=1.8.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -63,13 +64,16 @@ dev = [
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]
-exclude = []
+python_version = "3.11"
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_configs = true
+enable_error_code = ["ignore-without-code"]
 
 [[tool.mypy.overrides]]
-module = "*.*"
+module = ["aiocache.*", "aioresponses.*"]
 ignore_missing_imports = true
-check_untyped_defs = true
-enable_error_code = "ignore-without-code"
 
 [tool.ruff]
 
@@ -90,12 +94,26 @@ select = [
     "C",
     "B",
     "T20",
+    "UP",
+    "SIM",
+    "RUF",
+    "PTH",
+    "ASYNC",
+    "PERF",
+    "TRY",
+    "S",
 ]
 ignore = [
     "E501",
     "B008",
     "C901",
+    "TRY003",
+    "RUF029",
+    "RUF067",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S104", "S105", "S106"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

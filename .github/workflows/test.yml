@@ -8,7 +8,41 @@ on:
       - main
       - master
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.11"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - name: Install dependencies
+      run: uv sync --dev
+
+    - name: Run ruff check
+      run: uv run ruff check .
+
+    - name: Run ruff format check
+      run: uv run ruff format --check .
+
+    - name: Run ty
+      run: uv run ty check .
+
+    - name: Run mypy
+      run: uv run mypy .
+
   test:
     strategy:
       fail-fast: false
@@ -33,17 +67,12 @@ jobs:
     - name: Install dependencies
       run: uv sync --dev
 
-    - name: Run ruff check
-      run: uv run ruff check .
-
-    - name: Run ruff format check
-      run: uv run ruff format --check .
-
-    - name: Run ty
-      run: uv run ty check .
-
-    - name: Run mypy
-      run: uv run mypy .
-
     - name: Run tests
-      run: uv run pytest .
+      run: uv run pytest --cov=mcp_wiki --cov-branch --cov-report=xml --cov-fail-under=80 .
+
+    - name: Upload coverage to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: coverage.xml
