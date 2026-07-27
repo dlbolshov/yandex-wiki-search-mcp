@@ -1,7 +1,8 @@
 """Check that the package version matches across all release metadata files.
 
 Sources: pyproject.toml, uv.lock, manifest.json and server.json (top-level
-version, pypi package version, OCI image tag). Optionally validates a git tag
+version, pypi package version, OCI image tag). CHANGELOG.md must contain a
+'## [X.Y.Z]' section for the package version. Optionally validates a git tag
 ref (refs/tags/vX.Y.Z) against the package version; non-tag refs are ignored.
 
 Runs in CI on every pull request (test.yml) and again on release tags
@@ -71,6 +72,13 @@ def main() -> int:
         raise SystemExit("Version mismatch across package metadata files.")
 
     project_version = versions["pyproject.toml"]
+
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    if f"## [{project_version}]" not in changelog:
+        raise SystemExit(
+            f"CHANGELOG.md: no '## [{project_version}]' section for the "
+            "package version"
+        )
 
     if args.tag and args.tag.startswith("refs/tags/v"):
         tag_version = args.tag.removeprefix("refs/tags/v")
