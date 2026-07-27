@@ -76,8 +76,7 @@ def main() -> int:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     if f"## [{project_version}]" not in changelog:
         raise SystemExit(
-            f"CHANGELOG.md: no '## [{project_version}]' section for the "
-            "package version"
+            f"CHANGELOG.md: no '## [{project_version}]' section for the package version"
         )
 
     if args.tag and args.tag.startswith("refs/tags/v"):
