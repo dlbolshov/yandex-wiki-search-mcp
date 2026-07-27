@@ -20,55 +20,7 @@ jobs:
 
       - name: Validate package metadata versions
         shell: bash
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import pathlib
-          import sys
-          import tomllib
-
-          root = pathlib.Path(".")
-
-          pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-          manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-          server = json.loads((root / "server.json").read_text(encoding="utf-8"))
-
-          project_version = pyproject["project"]["version"]
-          manifest_version = manifest["version"]
-          server_version = server["version"]
-          pypi_package_version = server["packages"][0]["version"]
-          oci_identifier = server["packages"][1]["identifier"]
-          expected_oci_suffix = f":{project_version}"
-
-          versions = {
-              "pyproject.toml": project_version,
-              "manifest.json": manifest_version,
-              "server.json": server_version,
-              "server.json[pypi package]": pypi_package_version,
-          }
-
-          unique_versions = set(versions.values())
-          if len(unique_versions) != 1:
-              for source, version in versions.items():
-                  print(f"{source}: {version}")
-              raise SystemExit("Version mismatch across package metadata files.")
-
-          if not oci_identifier.endswith(expected_oci_suffix):
-              raise SystemExit(
-                  f"OCI identifier version mismatch: {oci_identifier} does not end with {expected_oci_suffix}"
-              )
-
-          ref = os.environ.get("GITHUB_REF", "")
-          if ref.startswith("refs/tags/v"):
-              tag_version = ref.removeprefix("refs/tags/v")
-              if tag_version != project_version:
-                  raise SystemExit(
-                      f"Git tag version {tag_version} does not match package version {project_version}"
-                  )
-
-          print(f"Validated package version: {project_version}")
-          PY
+        run: python scripts/check_versions.py --tag "$GITHUB_REF"
 
   build-python:
     needs: validate-metadata

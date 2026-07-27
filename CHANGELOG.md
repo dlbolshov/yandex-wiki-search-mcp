@@ -14,6 +14,10 @@ All notable changes to this project are documented in this file.
 - `/healthz` liveness endpoint for HTTP deployments — always answers `200 ok` without calling the Wiki API, so an upstream outage cannot fail container health checks
 - The server now reports its real package version to MCP clients in `initialize` (previously the version of the `mcp` library was reported)
 - `STATELESS_HTTP` and `JSON_RESPONSE` settings for the `streamable-http` transport (previously hardcoded to `true`/`true`, which stay the defaults)
+- CI guard for release metadata (`scripts/check_versions.py`): version consistency across `pyproject.toml`, `uv.lock`, `manifest.json` and `server.json` is now checked on every PR, not only by the release workflow at tag time
+
+### Changed
+- `page_update` now requires at least one of `title`/`content` — the Wiki API bumps `modified_at` even on an empty POST, so accidental no-op calls used to mutate the page
 
 ## [0.6.0] - 2026-07-27
 
