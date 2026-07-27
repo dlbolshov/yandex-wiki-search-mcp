@@ -46,6 +46,18 @@ class TestCleanContent:
         content = f"{FENCE}\n{{% note %}}\n{FENCE}`"
         assert validate_yfm(content) == []
 
+    def test_tilde_line_does_not_close_backtick_fence(self) -> None:
+        content = f"{FENCE}\n~~~\n{{% note %}}\n{FENCE}"
+        assert validate_yfm(content) == []
+
+    def test_shorter_run_does_not_close_fence(self) -> None:
+        content = f"{FENCE}`\n{FENCE}\n{{% note %}}\n{FENCE}`"
+        assert validate_yfm(content) == []
+
+    def test_info_string_line_does_not_close_fence(self) -> None:
+        content = f"{FENCE}\n{FENCE}python\n{{% note %}}\n{FENCE}"
+        assert validate_yfm(content) == []
+
     def test_html_inside_code_span_ignored(self) -> None:
         assert validate_yfm("Use `<br>` for line breaks in HTML.") == []
 
