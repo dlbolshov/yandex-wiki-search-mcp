@@ -71,9 +71,15 @@ def _with_yfm_warnings(page: WikiPage, warnings: list[str]) -> PageWriteResponse
     )
 
 
-def _legacy_page_warnings(page_type: str | None) -> list[str]:
+def _page_type_warnings(page_type: str | None) -> list[str]:
     if page_type is None or page_type == "wysiwyg":
         return []
+    if page_type == "grid":
+        return [
+            "this page is a grid (dynamic table), not a Markdown page — "
+            "page content writes may not apply; use the grid_* tools to "
+            "edit its rows and columns"
+        ]
     return [
         f"this page has page_type={page_type!r} (not the modern 'wysiwyg' "
         "format) — YFM directives may not render on legacy pages"
@@ -579,9 +585,9 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             is_silent=is_silent,
             auth=get_yandex_auth(ctx),
         )
-        warnings = _legacy_page_warnings(resolved_page_type)
+        warnings: list[str] = []
         if content is not None:
-            warnings += validate_yfm(content)
+            warnings = _page_type_warnings(resolved_page_type) + validate_yfm(content)
         return _with_yfm_warnings(page, warnings)
 
     @mcp.tool(
@@ -620,7 +626,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             anchor=anchor,
             auth=get_yandex_auth(ctx),
         )
-        warnings = _legacy_page_warnings(resolved_page_type) + validate_yfm(content)
+        warnings = _page_type_warnings(resolved_page_type) + validate_yfm(content)
         if warnings:
             result = {**result, "yfm_warnings": warnings}
         return result

@@ -9,7 +9,7 @@ All notable changes to this project are documented in this file.
   - `wiki-mcp://yfm-cheatsheet` resource — which Markdown/GFM habits render as-is (pipe tables and task lists do!), which break (raw HTML, `> [!NOTE]` alerts), and the YFM equivalents
   - warnings-only markup check (`mcp_wiki/yfm.py`, fence-aware, dependency-free): unclosed `{% note/cut/list %}` blocks, `#|` tables and code fences; GFM alerts and raw HTML that render as literal text. Writes are never blocked
   - `yfm_warnings` field in `page_create`/`page_update` responses (schema-additive) and key in `page_append_content` responses; warnings are capped at 10 per call
-  - legacy-page guard: updating/appending by slug warns when the fetched page has a non-`wysiwyg` `page_type`; no extra GET on the id path
+  - page-type guard: writing content by slug to a non-`wysiwyg` page warns — grid pages get a dedicated message pointing to the `grid_*` tools, other types get a legacy-format warning; title-only updates stay silent, no extra GET on the id path
   - YFM note in the three write tool descriptions and server instructions
 - `/healthz` liveness endpoint for HTTP deployments — always answers `200 ok` without calling the Wiki API, so an upstream outage cannot fail container health checks
 - The server now reports its real package version to MCP clients in `initialize` (previously the version of the `mcp` library was reported)

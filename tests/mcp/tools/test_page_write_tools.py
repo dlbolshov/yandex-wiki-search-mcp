@@ -531,6 +531,67 @@ class TestPageWriteTools:
         assert len(warnings) == 1
         assert "page_type='wiki'" in warnings[0]
 
+    async def test_page_update_by_slug_warns_on_grid_page(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
+            {"id": 10, "page_type": "grid"}
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "title": "Updated"}
+        )
+
+        result = await client_session.call_tool(
+            "page_update",
+            {"slug": "users/test/grid-page", "content": "new content"},
+        )
+
+        warnings = get_tool_result_content(result)["yfm_warnings"]
+        assert len(warnings) == 1
+        assert "grid" in warnings[0]
+        assert "grid_* tools" in warnings[0]
+        assert "legacy" not in warnings[0]
+
+    async def test_page_update_title_only_skips_page_type_warning(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
+            {"id": 10, "page_type": "grid"}
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "title": "Renamed"}
+        )
+
+        result = await client_session.call_tool(
+            "page_update",
+            {"slug": "users/test/grid-page", "title": "Renamed"},
+        )
+
+        assert not get_tool_result_content(result).get("yfm_warnings")
+
+    async def test_page_append_content_warns_on_grid_page(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
+            {"id": 10, "page_type": "grid"}
+        )
+        mock_wiki_protocol.page_append_content.return_value = {"status": "ok"}
+
+        result = await client_session.call_tool(
+            "page_append_content",
+            {"slug": "users/test/grid-page", "content": "plain text"},
+        )
+
+        warnings = get_tool_result_content(result)["yfm_warnings"]
+        assert len(warnings) == 1
+        assert "grid_* tools" in warnings[0]
+
     async def test_page_update_by_id_skips_legacy_check(
         self,
         client_session: ClientSession,
