@@ -40,7 +40,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiGridPageRef,
     WikiPage,
 )
-from mcp_wiki.yfm import validate_yfm
+from mcp_wiki.yfm import MAX_WARNINGS, validate_yfm
 
 ADDITIVE = ToolAnnotations(destructiveHint=False)
 ADDITIVE_IDEMPOTENT = ToolAnnotations(destructiveHint=False, idempotentHint=True)
@@ -84,6 +84,12 @@ def _page_type_warnings(page_type: str | None) -> list[str]:
         f"this page has page_type={page_type!r} (not the modern 'wysiwyg' "
         "format) — YFM directives may not render on legacy pages"
     ]
+
+
+def _content_warnings(page_type: str | None, content: str) -> list[str]:
+    """Combine page-type and markup warnings within the shared MAX_WARNINGS cap."""
+    warnings = _page_type_warnings(page_type)
+    return warnings + validate_yfm(content, max_warnings=MAX_WARNINGS - len(warnings))
 
 
 def _require_non_empty_text(value: str, *, field_name: str) -> str:
@@ -574,6 +580,8 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             ),
         ] = False,
     ) -> PageWriteResponse:
+        if title is None and content is None:
+            raise ValueError("Provide at least one of title or content.")
         resolved_page_id, resolved_page_type = await resolve_page_id_and_type(
             ctx, page_id=page_id, slug=slug
         )
@@ -587,7 +595,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
         )
         warnings: list[str] = []
         if content is not None:
-            warnings = _page_type_warnings(resolved_page_type) + validate_yfm(content)
+            warnings = _content_warnings(resolved_page_type, content)
         return _with_yfm_warnings(page, warnings)
 
     @mcp.tool(
@@ -626,7 +634,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             anchor=anchor,
             auth=get_yandex_auth(ctx),
         )
-        warnings = _page_type_warnings(resolved_page_type) + validate_yfm(content)
+        warnings = _content_warnings(resolved_page_type, content)
         if warnings:
             result = {**result, "yfm_warnings": warnings}
         return result

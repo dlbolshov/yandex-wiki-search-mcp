@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 from mcp.client.session import ClientSession
 
 from mcp_wiki.wiki.proto.types.pages import WikiPage
+from mcp_wiki.yfm import MAX_WARNINGS
 from tests.mcp.conftest import get_tool_result_content, get_tool_result_text
 
 
@@ -553,6 +554,44 @@ class TestPageWriteTools:
         assert "grid" in warnings[0]
         assert "grid_* tools" in warnings[0]
         assert "legacy" not in warnings[0]
+
+    async def test_page_update_rejects_missing_title_and_content(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        result = await client_session.call_tool(
+            "page_update",
+            {"slug": "users/test/page", "is_silent": True},
+        )
+
+        assert result.isError is True
+        assert "at least one of title or content" in get_tool_result_text(result)
+        mock_wiki_protocol.page_get_by_slug.assert_not_awaited()
+        mock_wiki_protocol.page_update.assert_not_awaited()
+
+    async def test_page_update_warnings_capped_including_page_type(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
+            {"id": 10, "page_type": "grid"}
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "title": "Updated"}
+        )
+        noisy_content = "\n\n".join("> [!NOTE]" for _ in range(30))
+
+        result = await client_session.call_tool(
+            "page_update",
+            {"slug": "users/test/grid-page", "content": noisy_content},
+        )
+
+        warnings = get_tool_result_content(result)["yfm_warnings"]
+        assert "grid_* tools" in warnings[0]
+        assert "suppressed" in warnings[-1]
+        assert len(warnings) == MAX_WARNINGS + 1
 
     async def test_page_update_title_only_skips_page_type_warning(
         self,
