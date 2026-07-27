@@ -25,6 +25,9 @@ jobs:
       with:
         python-version: "3.11"
 
+    - name: Check version consistency across release metadata
+      run: python scripts/check_versions.py
+
     - name: Install uv
       uses: astral-sh/setup-uv@v7
       with:

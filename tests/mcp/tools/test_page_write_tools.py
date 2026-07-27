@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 from mcp.client.session import ClientSession
 
 from mcp_wiki.wiki.proto.types.pages import WikiPage
+from mcp_wiki.yfm import MAX_WARNINGS
 from tests.mcp.conftest import get_tool_result_content, get_tool_result_text
 
 
@@ -442,11 +443,13 @@ class TestPageWriteTools:
         client_session: ClientSession,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_create.return_value = {
-            "id": 10,
-            "slug": "users/test/page",
-            "title": "Created page",
-        }
+        mock_wiki_protocol.page_create.return_value = WikiPage.model_validate(
+            {
+                "id": 10,
+                "slug": "users/test/page",
+                "title": "Created page",
+            }
+        )
 
         result = await client_session.call_tool(
             "page_create",
@@ -457,8 +460,33 @@ class TestPageWriteTools:
             },
         )
 
-        assert get_tool_result_content(result)["title"] == "Created page"
+        content = get_tool_result_content(result)
+        assert content["title"] == "Created page"
+        assert not content.get("yfm_warnings")
         mock_wiki_protocol.page_create.assert_awaited_once()
+
+    async def test_page_create_returns_yfm_warnings(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_create.return_value = WikiPage.model_validate(
+            {"id": 10, "slug": "users/test/page", "title": "Created page"}
+        )
+
+        result = await client_session.call_tool(
+            "page_create",
+            {
+                "slug": "users/test/page",
+                "title": "Created page",
+                "content": "> [!NOTE]\n> GFM alert\n\n{% note %}\nunclosed",
+            },
+        )
+
+        warnings = get_tool_result_content(result)["yfm_warnings"]
+        assert len(warnings) == 2
+        assert "[!NOTE]" in warnings[0]
+        assert "{% endnote %}" in warnings[1]
 
     async def test_page_update_by_slug(
         self,
@@ -468,19 +496,193 @@ class TestPageWriteTools:
         mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
             id=10
         )
-        mock_wiki_protocol.page_update.return_value = {
-            "id": 10,
-            "title": "Updated",
-        }
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "title": "Updated"}
+        )
 
         result = await client_session.call_tool(
             "page_update",
             {"slug": "users/test/page", "content": "new content"},
         )
 
-        assert get_tool_result_content(result)["title"] == "Updated"
+        content = get_tool_result_content(result)
+        assert content["title"] == "Updated"
+        assert not content.get("yfm_warnings")
         mock_wiki_protocol.page_get_by_slug.assert_awaited_once()
         mock_wiki_protocol.page_update.assert_awaited_once()
+
+    async def test_page_update_by_slug_warns_on_legacy_page_type(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
+            {"id": 10, "page_type": "wiki"}
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "title": "Updated"}
+        )
+
+        result = await client_session.call_tool(
+            "page_update",
+            {"slug": "users/test/page", "content": "new content"},
+        )
+
+        warnings = get_tool_result_content(result)["yfm_warnings"]
+        assert len(warnings) == 1
+        assert "page_type='wiki'" in warnings[0]
+
+    async def test_page_update_by_slug_warns_on_grid_page(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
+            {"id": 10, "page_type": "grid"}
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "title": "Updated"}
+        )
+
+        result = await client_session.call_tool(
+            "page_update",
+            {"slug": "users/test/grid-page", "content": "new content"},
+        )
+
+        warnings = get_tool_result_content(result)["yfm_warnings"]
+        assert len(warnings) == 1
+        assert "grid" in warnings[0]
+        assert "grid_* tools" in warnings[0]
+        assert "legacy" not in warnings[0]
+
+    async def test_page_update_rejects_missing_title_and_content(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        result = await client_session.call_tool(
+            "page_update",
+            {"slug": "users/test/page", "is_silent": True},
+        )
+
+        assert result.isError is True
+        assert "at least one of title or content" in get_tool_result_text(result)
+        mock_wiki_protocol.page_get_by_slug.assert_not_awaited()
+        mock_wiki_protocol.page_update.assert_not_awaited()
+
+    async def test_page_update_warnings_capped_including_page_type(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
+            {"id": 10, "page_type": "grid"}
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "title": "Updated"}
+        )
+        noisy_content = "\n\n".join("> [!NOTE]" for _ in range(30))
+
+        result = await client_session.call_tool(
+            "page_update",
+            {"slug": "users/test/grid-page", "content": noisy_content},
+        )
+
+        warnings = get_tool_result_content(result)["yfm_warnings"]
+        assert "grid_* tools" in warnings[0]
+        assert "suppressed" in warnings[-1]
+        assert len(warnings) == MAX_WARNINGS + 1
+
+    async def test_page_update_title_only_skips_page_type_warning(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
+            {"id": 10, "page_type": "grid"}
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "title": "Renamed"}
+        )
+
+        result = await client_session.call_tool(
+            "page_update",
+            {"slug": "users/test/grid-page", "title": "Renamed"},
+        )
+
+        assert not get_tool_result_content(result).get("yfm_warnings")
+
+    async def test_page_append_content_warns_on_grid_page(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
+            {"id": 10, "page_type": "grid"}
+        )
+        mock_wiki_protocol.page_append_content.return_value = {"status": "ok"}
+
+        result = await client_session.call_tool(
+            "page_append_content",
+            {"slug": "users/test/grid-page", "content": "plain text"},
+        )
+
+        warnings = get_tool_result_content(result)["yfm_warnings"]
+        assert len(warnings) == 1
+        assert "grid_* tools" in warnings[0]
+
+    async def test_page_update_by_id_skips_legacy_check(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "title": "Updated"}
+        )
+
+        result = await client_session.call_tool(
+            "page_update",
+            {"page_id": 10, "title": "Updated"},
+        )
+
+        assert not get_tool_result_content(result).get("yfm_warnings")
+        mock_wiki_protocol.page_get_by_slug.assert_not_awaited()
+
+    async def test_page_append_content_adds_yfm_warnings_key(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_append_content.return_value = {"status": "ok"}
+
+        result = await client_session.call_tool(
+            "page_append_content",
+            {
+                "page_id": 10,
+                "content": "<details><summary>x</summary>y</details>",
+            },
+        )
+
+        content = get_tool_result_content(result)
+        assert content["status"] == "ok"
+        assert len(content["yfm_warnings"]) == 1
+        assert "{% cut" in content["yfm_warnings"][0]
+
+    async def test_page_append_content_clean_has_no_warnings_key(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_append_content.return_value = {"status": "ok"}
+
+        result = await client_session.call_tool(
+            "page_append_content",
+            {"page_id": 10, "content": "## New section\n\nplain text"},
+        )
+
+        content = get_tool_result_content(result)
+        assert content["status"] == "ok"
+        assert "yfm_warnings" not in content
 
     async def test_page_upload_attachment(
         self,

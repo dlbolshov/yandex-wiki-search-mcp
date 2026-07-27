@@ -170,7 +170,7 @@ Facts verified against the alternatives' docs and published code, July 2026.
 | Comments, attachment upload | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Server-side read-only mode | ✅ | ✅ | ❌ | ✅ separate `-ro` entry point | ❌ |
 | Typed output schemas + tool annotations | ✅ | ❌ | ❌ | ❌ | ❌ tools return plain strings |
-| YFM helpers (Markdown→YFM converter, syntax guide) | planned ([ROADMAP](ROADMAP.md)) | ❌ | ❌ | ❌ | ✅ + page-tree cache, prompt templates |
+| YFM helpers | ✅ syntax cheat sheet resource + `yfm_warnings` in write tools | ❌ | ❌ | ❌ | ✅ Markdown→YFM converter + page-tree cache, prompt templates |
 | Docker / PyPI / MCP Registry | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ | ❌ manual install | PyPI only | PyPI only; no source repo linked |
 | Multi-user OAuth for HTTP deployments | ✅ | ✅ | ❌ | ❌ | ❌ |
 

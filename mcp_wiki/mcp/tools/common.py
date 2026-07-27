@@ -20,9 +20,26 @@ async def resolve_page_id(
     page_id: int | None,
     slug: str | None,
 ) -> int:
+    resolved_page_id, _ = await resolve_page_id_and_type(
+        ctx, page_id=page_id, slug=slug
+    )
+    return resolved_page_id
+
+
+async def resolve_page_id_and_type(
+    ctx: ToolContext,
+    *,
+    page_id: int | None,
+    slug: str | None,
+) -> tuple[int, str | None]:
+    """Resolve a page locator to its numeric ID.
+
+    page_type is returned only when the page was fetched during slug
+    resolution; the ID path stays free of extra GET requests and yields None.
+    """
     page_id, slug = resolve_page_locator(page_id=page_id, slug=slug)
     if page_id is not None:
-        return page_id
+        return page_id, None
     if slug is None:
         raise ValueError("Either page_id or slug must be provided.")
 
@@ -30,7 +47,7 @@ async def resolve_page_id(
         slug,
         auth=get_yandex_auth(ctx),
     )
-    return page.id
+    return page.id, page.page_type
 
 
 async def resolve_page_slug(
