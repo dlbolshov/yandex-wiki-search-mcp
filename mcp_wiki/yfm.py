@@ -75,8 +75,7 @@ Table with multiline cells (regular pipe tables also work):
 """
 
 _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})\s*(.*)$")
-_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
-_DIRECTIVE_OPEN_RE = re.compile(r"\{%\s*(note|cut|list)\b[^%}]*%\}")
+_DIRECTIVE_OPEN_RE = re.compile(r"\{%\s*(note|cut|list)\b[^}]*%\}")
 _DIRECTIVE_END_RE = re.compile(r"\{%\s*end(note|cut|list)\s*%\}")
 _GFM_ALERT_RE = re.compile(
     r"^ {0,3}>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]", re.IGNORECASE
@@ -88,6 +87,8 @@ _HTML_TAG_RE = re.compile(
     re.IGNORECASE,
 )
 
+_SHORT_HTML_TAGS = frozenset("abipsu")
+
 _HTML_HINTS = {
     "details": "use '{% cut \"Title\" %}...{% endcut %}' instead",
     "summary": "use '{% cut \"Title\" %}...{% endcut %}' instead",
@@ -96,6 +97,62 @@ _HTML_HINTS = {
     "a": "use Markdown link syntax '[text](url)' instead",
     "table": "use a Markdown pipe table or a '#|' multiline table instead",
 }
+
+
+def _is_prose_not_html(line: str, match: re.Match[str]) -> bool:
+    """Tell a single-letter HTML tag apart from its homonyms in prose.
+
+    ``<a>``, ``<b>``, ``<i>``, ``<p>``, ``<s>`` and ``<u>`` are also how generic
+    type parameters (``Vec<a>``) and comparisons (``a<b and b>c``) look. A
+    closing tag or an ``attr=value`` pair is decisive markup evidence — prose
+    never produces either. Everything else that hangs off a word is prose.
+    """
+    tag = match.group(0)
+    if tag.startswith("</") or "=" in tag:
+        return False
+    if match.group(1).lower() not in _SHORT_HTML_TAGS:
+        return False
+    return match.start() > 0 and line[match.start() - 1].isalnum()
+
+
+def _strip_code_spans(line: str) -> str:
+    """Remove inline code spans the way CommonMark parses them.
+
+    A span opens with a backtick run and closes with the next run of exactly
+    the same length (a double-backtick span may contain single backticks).
+    Runs without a matching closer stay literal text. Each span is replaced
+    with a single space so that removal cannot glue the surrounding text into
+    new markup.
+    """
+    runs: list[tuple[int, int]] = []
+    position = 0
+    while (start := line.find("`", position)) != -1:
+        end = start
+        while end < len(line) and line[end] == "`":
+            end += 1
+        runs.append((start, end - start))
+        position = end
+    if not runs:
+        return line
+
+    parts: list[str] = []
+    copied_up_to = 0
+    index = 0
+    while index < len(runs):
+        start, length = runs[index]
+        closer = next(
+            (i for i in range(index + 1, len(runs)) if runs[i][1] == length),
+            None,
+        )
+        if closer is None:
+            index += 1
+            continue
+        parts.append(line[copied_up_to:start])
+        parts.append(" ")
+        copied_up_to = runs[closer][0] + runs[closer][1]
+        index = closer + 1
+    parts.append(line[copied_up_to:])
+    return "".join(parts)
 
 
 def _end_of_content_warnings(
@@ -133,11 +190,12 @@ def _end_of_content_warnings(
     return warnings
 
 
-def validate_yfm(content: str) -> list[str]:
+def validate_yfm(content: str, *, max_warnings: int = MAX_WARNINGS) -> list[str]:
     """Check Markdown/YFM content against Yandex Wiki rendering quirks.
 
     Returns human-readable warnings sorted by line number, capped at
-    MAX_WARNINGS. An empty list means nothing suspicious was found.
+    max_warnings (callers that prepend their own warnings pass a reduced
+    budget). An empty list means nothing suspicious was found.
     """
     warnings: list[tuple[int, str]] = []
     directive_opens: dict[str, list[int]] = {"note": [], "cut": [], "list": []}
@@ -164,7 +222,7 @@ def validate_yfm(content: str) -> list[str]:
         if fence is not None:
             continue
 
-        line = _CODE_SPAN_RE.sub("", raw_line)
+        line = _strip_code_spans(raw_line)
 
         for match in _DIRECTIVE_OPEN_RE.finditer(line):
             directive_opens[match.group(1)].append(line_number)
@@ -213,8 +271,9 @@ def validate_yfm(content: str) -> list[str]:
                 )
             )
 
-        html_match = _HTML_TAG_RE.search(line)
-        if html_match:
+        for html_match in _HTML_TAG_RE.finditer(line):
+            if _is_prose_not_html(line, html_match):
+                continue
             tag_name = html_match.group(1).lower()
             hint = _HTML_HINTS.get(tag_name, "use Markdown/YFM syntax instead")
             warnings.append(
@@ -224,6 +283,7 @@ def validate_yfm(content: str) -> list[str]:
                     f"rendered by Yandex Wiki and shows as literal text — {hint}",
                 )
             )
+            break
 
     warnings.extend(
         _end_of_content_warnings(directive_opens, table_opens, fence_open_line)
@@ -231,8 +291,8 @@ def validate_yfm(content: str) -> list[str]:
     warnings.sort(key=lambda item: item[0])
 
     messages = [message for _, message in warnings]
-    if len(messages) > MAX_WARNINGS:
-        suppressed = len(messages) - MAX_WARNINGS
-        messages = messages[:MAX_WARNINGS]
+    if len(messages) > max_warnings:
+        suppressed = len(messages) - max_warnings
+        messages = messages[:max_warnings]
         messages.append(f"... {suppressed} more warning(s) suppressed")
     return messages

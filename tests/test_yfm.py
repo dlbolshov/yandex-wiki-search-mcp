@@ -49,11 +49,24 @@ class TestCleanContent:
     def test_html_inside_code_span_ignored(self) -> None:
         assert validate_yfm("Use `<br>` for line breaks in HTML.") == []
 
+    def test_html_inside_double_backtick_span_ignored(self) -> None:
+        assert validate_yfm("Use ``<br>`` for line breaks in HTML.") == []
+
+    def test_backtick_nested_in_double_backtick_span_ignored(self) -> None:
+        assert validate_yfm("``code with ` backtick and <br>`` outside") == []
+
+    def test_code_span_removal_does_not_glue_new_tags(self) -> None:
+        assert validate_yfm("<`x`b>") == []
+
     def test_autolink_not_flagged_as_html(self) -> None:
         assert validate_yfm("See <https://wiki.yandex.ru> for details.") == []
 
     def test_one_line_directive_pair(self) -> None:
         assert validate_yfm("{% cut %}short{% endcut %}") == []
+
+    def test_percent_in_directive_title(self) -> None:
+        content = '{% cut "100% готово" %}\n\nтекст\n\n{% endcut %}'
+        assert validate_yfm(content) == []
 
 
 class TestStructuralWarnings:
@@ -103,6 +116,16 @@ class TestStructuralWarnings:
     def test_unknown_directive_not_flagged(self) -> None:
         assert validate_yfm("{% include notitle [x](y) %}") == []
 
+    def test_html_after_unmatched_backtick_still_flagged(self) -> None:
+        warnings = validate_yfm("a ` stray backtick and <br>")
+        assert len(warnings) == 1
+        assert "<br>" in warnings[0]
+
+    def test_directive_after_malformed_open_still_tracked(self) -> None:
+        warnings = validate_yfm("{% cut } text {% note %}")
+        assert len(warnings) == 1
+        assert "{% endnote %}" in warnings[0]
+
 
 class TestGfmIsms:
     @pytest.mark.parametrize(
@@ -136,11 +159,40 @@ class TestGfmIsms:
         assert len(warnings) == 1
         assert "![alt](url)" in warnings[0]
 
-    def test_generic_type_parameter_not_flagged(self) -> None:
-        assert validate_yfm("Функция принимает List<int> и возвращает T.") == []
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "Функция принимает List<int> и возвращает T.",
+            "Vec<a> и Optional<b> — это дженерики",
+            "Set<i>, Box<u>, Slice<s>",
+            "Map<K, V> с двумя параметрами",
+        ],
+    )
+    def test_generic_type_parameter_not_flagged(self, content: str) -> None:
+        assert validate_yfm(content) == []
 
-    def test_comparison_prose_not_flagged(self) -> None:
-        assert validate_yfm("если a<b и b>c, то интервал пуст") == []
+    @pytest.mark.parametrize(
+        "content",
+        ["если a<b и b>c, то интервал пуст", "holds when a<b and b>c"],
+    )
+    def test_comparison_prose_not_flagged(self, content: str) -> None:
+        assert validate_yfm(content) == []
+
+    @pytest.mark.parametrize(
+        ("content", "expected_tag"),
+        [
+            ("<b>bold</b>", "<b>"),
+            ("текст<b>жирный</b>", "</b>"),
+            ("<p>para</p>", "<p>"),
+            ('foo<a href="/x">link</a>', '<a href="/x">'),
+        ],
+    )
+    def test_short_html_tag_flagged_when_real_markup(
+        self, content: str, expected_tag: str
+    ) -> None:
+        warnings = validate_yfm(content)
+        assert len(warnings) == 1
+        assert f"'{expected_tag}'" in warnings[0]
 
 
 class TestOutputShape:
@@ -154,6 +206,12 @@ class TestOutputShape:
         content = "\n".join("> [!NOTE]" if i % 2 == 0 else "" for i in range(60))
         warnings = validate_yfm(content)
         assert len(warnings) == MAX_WARNINGS + 1
+        assert "suppressed" in warnings[-1]
+
+    def test_reduced_max_warnings_budget(self) -> None:
+        content = "\n".join("> [!NOTE]" if i % 2 == 0 else "" for i in range(60))
+        warnings = validate_yfm(content, max_warnings=MAX_WARNINGS - 1)
+        assert len(warnings) == MAX_WARNINGS
         assert "suppressed" in warnings[-1]
 
 
