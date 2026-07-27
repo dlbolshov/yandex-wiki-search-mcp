@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.7.0] - 2026-07-27
 
 ### Added
 - YFM (Yandex Flavored Markdown) helpers, rules verified against a live wiki (`scripts/yfm_smoke.py`):
