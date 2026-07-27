@@ -8,6 +8,7 @@ from starlette.requests import Request
 from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.utils import get_yandex_auth
 from mcp_wiki.settings import Settings
+from mcp_wiki.yfm import YFM_CHEATSHEET
 
 
 class YandexWikiMCPConfigurationResponse(BaseModel):
@@ -34,3 +35,14 @@ def register_resources(settings: Settings, mcp: FastMCP[Any]) -> None:
             read_only=settings.wiki_read_only,
             oauth_enabled=settings.oauth_enabled,
         )
+
+    @mcp.resource(
+        "wiki-mcp://yfm-cheatsheet",
+        description=(
+            "Yandex Wiki markup (YFM) cheat sheet: which Markdown/GFM habits "
+            "render as-is, which do not, and the YFM equivalents to use instead."
+        ),
+        mime_type="text/markdown",
+    )
+    def yfm_cheatsheet() -> str:
+        return YFM_CHEATSHEET

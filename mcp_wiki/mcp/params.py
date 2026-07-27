@@ -230,4 +230,5 @@ Use these tools to:
 In russian Yandex Wiki is called "Яндекс Вики" or "Вики".
 If a tool accepts `page_id` and `slug`, provide exactly one of them.
 If a tool returns `next_cursor`, continue calling the same tool with that cursor until it becomes empty when you need the full result set.
+Page content is Markdown (YFM): plain Markdown renders as-is, but GitHub-specific extensions ('[!NOTE]' alerts, raw HTML) do not — the wiki-mcp://yfm-cheatsheet resource maps them to YFM equivalents. Write tools return `yfm_warnings` when submitted content will not render as intended.
 """

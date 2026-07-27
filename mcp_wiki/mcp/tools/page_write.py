@@ -21,6 +21,7 @@ from mcp_wiki.mcp.tools.common import (
     ToolContext,
     get_wiki,
     resolve_page_id,
+    resolve_page_id_and_type,
     resolve_page_slug,
 )
 from mcp_wiki.mcp.utils import get_yandex_auth
@@ -39,11 +40,44 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiGridPageRef,
     WikiPage,
 )
+from mcp_wiki.yfm import validate_yfm
 
 ADDITIVE = ToolAnnotations(destructiveHint=False)
 ADDITIVE_IDEMPOTENT = ToolAnnotations(destructiveHint=False, idempotentHint=True)
 DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
 DESTRUCTIVE_IDEMPOTENT = ToolAnnotations(destructiveHint=True, idempotentHint=True)
+
+YFM_CONTENT_NOTE = (
+    "Content is Markdown (YFM): plain Markdown renders as-is, but GitHub-specific "
+    "extensions ('[!NOTE]' alerts, raw HTML) do not — see the "
+    "wiki-mcp://yfm-cheatsheet resource for YFM equivalents."
+)
+
+
+class PageWriteResponse(WikiPage):
+    yfm_warnings: list[str] | None = Field(
+        default=None,
+        description=(
+            "Markup warnings for the submitted content (the write itself "
+            "succeeded): parts that will not render as intended on Yandex "
+            "Wiki. See the wiki-mcp://yfm-cheatsheet resource for fixes."
+        ),
+    )
+
+
+def _with_yfm_warnings(page: WikiPage, warnings: list[str]) -> PageWriteResponse:
+    return PageWriteResponse.model_validate(
+        {**page.model_dump(), "yfm_warnings": warnings or None}
+    )
+
+
+def _legacy_page_warnings(page_type: str | None) -> list[str]:
+    if page_type is None or page_type == "wysiwyg":
+        return []
+    return [
+        f"this page has page_type={page_type!r} (not the modern 'wysiwyg' "
+        "format) — YFM directives may not render on legacy pages"
+    ]
 
 
 def _require_non_empty_text(value: str, *, field_name: str) -> str:
@@ -478,7 +512,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
 
     @mcp.tool(
         title="Create Wiki Page",
-        description="Create a Yandex Wiki page.",
+        description=f"Create a Yandex Wiki page. {YFM_CONTENT_NOTE}",
         annotations=ADDITIVE,
     )
     async def page_create(
@@ -494,18 +528,22 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
                 )
             ),
         ] = "wysiwyg",
-    ) -> WikiPage:
-        return await get_wiki(ctx).page_create(
+    ) -> PageWriteResponse:
+        page = await get_wiki(ctx).page_create(
             slug=slug,
             title=title,
             content=content,
             page_type=page_type,
             auth=get_yandex_auth(ctx),
         )
+        return _with_yfm_warnings(page, validate_yfm(content))
 
     @mcp.tool(
         title="Update Wiki Page",
-        description="Update an existing Yandex Wiki page. Content replacement is full-page when content is provided.",
+        description=(
+            "Update an existing Yandex Wiki page. Content replacement is full-page "
+            f"when content is provided. {YFM_CONTENT_NOTE}"
+        ),
         annotations=ToolAnnotations(idempotentHint=True),
     )
     async def page_update(
@@ -529,9 +567,11 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
                 description="Whether to suppress notifications when supported by the API."
             ),
         ] = False,
-    ) -> WikiPage:
-        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await get_wiki(ctx).page_update(
+    ) -> PageWriteResponse:
+        resolved_page_id, resolved_page_type = await resolve_page_id_and_type(
+            ctx, page_id=page_id, slug=slug
+        )
+        page = await get_wiki(ctx).page_update(
             resolved_page_id,
             title=title,
             content=content,
@@ -539,10 +579,17 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             is_silent=is_silent,
             auth=get_yandex_auth(ctx),
         )
+        warnings = _legacy_page_warnings(resolved_page_type)
+        if content is not None:
+            warnings += validate_yfm(content)
+        return _with_yfm_warnings(page, warnings)
 
     @mcp.tool(
         title="Append Wiki Content",
-        description="Append content to the top, bottom, or anchor of a Yandex Wiki page.",
+        description=(
+            "Append content to the top, bottom, or anchor of a Yandex Wiki page. "
+            f"{YFM_CONTENT_NOTE}"
+        ),
         annotations=ADDITIVE,
     )
     async def page_append_content(
@@ -563,14 +610,20 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             ),
         ] = None,
     ) -> dict[str, Any]:
-        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await get_wiki(ctx).page_append_content(
+        resolved_page_id, resolved_page_type = await resolve_page_id_and_type(
+            ctx, page_id=page_id, slug=slug
+        )
+        result = await get_wiki(ctx).page_append_content(
             resolved_page_id,
             content=content,
             location=location,
             anchor=anchor,
             auth=get_yandex_auth(ctx),
         )
+        warnings = _legacy_page_warnings(resolved_page_type) + validate_yfm(content)
+        if warnings:
+            result = {**result, "yfm_warnings": warnings}
+        return result
 
     @mcp.tool(
         title="Add Page Comment",
