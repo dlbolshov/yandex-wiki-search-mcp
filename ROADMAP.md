@@ -183,20 +183,26 @@
       PageComment.user/updated_at выпилены, DynamicWikiModel для гридов;
       contract_sweep возвращает allow в рантайме (model_rebuild) для дрифт-детекции,
       свип 29/29 без необъявленных extras
-- [ ] Дубль text-блока: спека рекомендует дублировать (SHOULD) — дефолт не трогаем;
-      настройка `TOOL_RESULT_TEXT: pretty|compact|none` (дефолт pretty = поведение FastMCP)
-      через `Annotated[CallToolResult, Model]` (lowlevel-сервер отдаёт как есть, схема
-      и валидация structuredContent сохраняются)
-- [ ] Опционально: срезать pydantic-`title` из схем хуком `__get_pydantic_json_schema__`
-      (−20% на схему; tools/list сейчас 63.8k симв на диалог, из них 33.5k outputSchema)
-- [ ] `fetch_all: bool` для курсорных тулзов: цикл в tool-слое по `next_cursor`, жёсткий потолок
-      (~500 элементов), `truncated: bool` в ответе. Строго вместе с/после компактных моделей,
-      иначе умножает токен-жир. Курсорная ходьба проверена живьём (descendants: 15 элементов
-      за 3 страницы; comments: 4 за 2). ВАЖНО: у поиска курсоры всегда null — глубокая
-      пагинация поиска серверно не работает, `fetch_all` туда не тянуть
-- [ ] Выпилить `page_type` из схемы `page_create` (breaking): смок 2026-07-27 доказал, что API
+- [x] Дубль text-блока: спека рекомендует дублировать (SHOULD) — дефолт не трогаем;
+      настройка `TOOL_RESULT_TEXT: pretty|compact|none` (дефолт pretty = поведение FastMCP).
+      Сделано проще запланированного: `WikiFastMCP.call_tool` пост-обрабатывает пару
+      (unstructured, structured) от convert_result — без Annotated[CallToolResult, Model],
+      схема и валидация structuredContent не затронуты
+- [x] Опционально: срезать pydantic-`title` из схем хуком `__get_pydantic_json_schema__`
+      (−20% на схему; tools/list сейчас 63.8k симв на диалог, из них 33.5k outputSchema).
+      Сделано: outputSchema 33.5k → 29.1k, оставшиеся 2 title — DictOutput-обёртки FastMCP
+- [x] `fetch_all: bool` для курсорных тулзов: цикл в tool-слое по `next_cursor`, жёсткий потолок
+      (~500 элементов), `truncated: bool` в ответе. Сделано для всех пяти курсорных тулзов
+      (`_drain_cursor`: ≤50 запросов, защита от повторяющегося курсора).
+      Курсорная ходьба проверена живьём (descendants: 15 элементов за 3 страницы;
+      comments: 4 за 2). У поиска курсоры всегда null — `fetch_all` туда не тянем
+- [x] Выпилить `page_type` из схемы `page_create` (breaking): смок 2026-07-27 доказал, что API
       игнорирует поле целиком (любое значение → `wysiwyg`, даже мусор без ошибки) —
       параметр в схеме только вводит агента в заблуждение; из `WikiClient.page_create` тоже
+- [x] Защита от дрейфа API на постоянной основе: workflow `api-drift.yml` еженедельно гоняет
+      `contract_sweep.py` на живой организации (opt-in через секрет `DRIFT_WIKI_TOKEN` +
+      переменные `DRIFT_*`; без них скипается). Свип в рантайме возвращает моделям
+      `extra="allow"` (model_rebuild), чтобы видеть новые необъявленные ключи API
 
 ### v1.0.0 — page_move + стабилизация
 
