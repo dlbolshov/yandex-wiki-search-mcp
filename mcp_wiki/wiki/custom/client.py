@@ -763,14 +763,12 @@ class WikiClient(WikiProtocol):
         slug: str,
         title: str,
         content: str,
-        page_type: str = "wysiwyg",
         auth: YandexAuth | None = None,
     ) -> WikiPage:
         body = {
             "slug": normalize_slug(slug),
             "title": title,
             "content": content,
-            "page_type": page_type,
         }
         payload = await self._request("POST", "v1/pages", json_body=body, auth=auth)
         return WikiPage.model_validate_json(payload)

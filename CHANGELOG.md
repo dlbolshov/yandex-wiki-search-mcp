@@ -20,6 +20,9 @@ All notable changes to this project are documented in this file.
   - `page_get_descendants` items are now honest `{id, slug}` objects (the live API never sends titles there), shrinking both the output schema and each result
   - breaking for schema consumers: `PageComment.user` and `PageComment.updated_at` were removed — the live API sends neither (the author arrives in `author`)
 
+### Removed
+- The `page_type` parameter of `page_create` (breaking): a live smoke on 2026-07-27 proved the API ignores it entirely — any value, even garbage, yields a `wysiwyg` page with no error, so the parameter only misled agents into believing they could create other page types. Also removed from `WikiClient.page_create` and the protocol
+
 ## [0.7.0] - 2026-07-27
 
 ### Added

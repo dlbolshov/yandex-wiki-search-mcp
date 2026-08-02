@@ -223,7 +223,6 @@ class WikiProtocol(Protocol):
         slug: str,
         title: str,
         content: str,
-        page_type: str = "wysiwyg",
         auth: YandexAuth | None = None,
     ) -> WikiPage: ...
 

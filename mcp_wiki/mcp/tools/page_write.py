@@ -532,20 +532,11 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
         slug: PageSlug,
         title: Annotated[str, Field(description="Wiki page title.")],
         content: Annotated[str, Field(description="Full page content.")],
-        page_type: Annotated[
-            str,
-            Field(
-                description=(
-                    "Wiki page type. Prefer 'wysiwyg' unless a different editor type is required."
-                )
-            ),
-        ] = "wysiwyg",
     ) -> PageWriteResponse:
         page = await get_wiki(ctx).page_create(
             slug=slug,
             title=title,
             content=content,
-            page_type=page_type,
             auth=get_yandex_auth(ctx),
         )
         return _with_yfm_warnings(page, validate_yfm(content))
