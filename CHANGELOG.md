@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- `page_search` was broken against the live API (all fixes verified live on 2026-08-02):
+  - any non-empty search failed with a validation error — the API sends `modified_at` as an ISO datetime string, the model expected an integer epoch
+  - the snippet arrives in the `content` key, not `body`: the declared field was always empty and the snippet text only reached clients through the extra-fields leak
+  - the `page_size` tool parameter was silently ignored by the API (every search returned at most 10 results regardless of the requested size) — the endpoint reads `limit` from the POST body, which the client now sends; values above 50 are a validation error server-side, the existing clamp keeps them at 50
+
+### Changed
+- `SearchResponse` now mirrors the live envelope: `results` plus `next_cursor`/`prev_cursor` (currently always `null` server-side). The previously declared `total_documents`, `total_pages`, `page_id`, `search_client` and `uid` fields never arrived from the API and were removed from the schema
+
 ## [0.7.0] - 2026-07-27
 
 ### Added

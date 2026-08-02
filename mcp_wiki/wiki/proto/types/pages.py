@@ -48,18 +48,15 @@ class SearchResultItem(BaseWikiModel):
     url: str | None = None
     slug: str | None = None
     title: str | None = None
-    body: str | None = None
+    content: str | None = None
     type: str | None = None
-    modified_at: int | None = None
+    modified_at: str | None = None
 
 
 class SearchResponse(BaseWikiModel):
     results: list[SearchResultItem] = Field(default_factory=list)
-    total_documents: int | None = None
-    total_pages: int | None = None
-    page_id: int | None = None
-    search_client: str | None = None
-    uid: str | None = None
+    next_cursor: str | None = None
+    prev_cursor: str | None = None
 
 
 class PageComment(BaseWikiModel):

@@ -52,7 +52,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiPage,
 )
 
-SEARCH_PAGE_SIZE_MAX = 50
+SEARCH_LIMIT_MAX = 50
 
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 RETRY_BASE_DELAY = 0.3
@@ -355,9 +355,12 @@ class WikiClient(WikiProtocol):
         page_size: int = 10,
         auth: YandexAuth | None = None,
     ) -> SearchResponse:
+        # The search endpoint reads "limit" from the POST body and silently
+        # ignores "page_size" (always returning 10); limit > 50 is a 400.
+        # Verified against the live API 2026-08-02.
         body = {
             "query": query,
-            "page_size": max(1, min(page_size, SEARCH_PAGE_SIZE_MAX)),
+            "limit": max(1, min(page_size, SEARCH_LIMIT_MAX)),
         }
         payload = await self._request(
             "POST",

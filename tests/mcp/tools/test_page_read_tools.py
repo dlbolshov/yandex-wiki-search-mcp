@@ -23,7 +23,6 @@ class TestPageReadTools:
                 SearchResultItem.model_construct(slug="a/b", title="T", type="page"),
                 SearchResultItem.model_construct(slug="c/d", title="U", type="file"),
             ],
-            total_documents=2,
         )
 
         result = await client_session.call_tool("page_search", {"query": "hello"})
@@ -42,7 +41,6 @@ class TestPageReadTools:
                 SearchResultItem.model_construct(slug="a/b", type="page"),
                 SearchResultItem.model_construct(slug="c/d", type="file"),
             ],
-            total_documents=2,
         )
 
         result = await client_session.call_tool(
@@ -52,7 +50,6 @@ class TestPageReadTools:
         content = get_tool_result_content(result)
         assert len(content["results"]) == 1
         assert content["results"][0]["type"] == "page"
-        assert content["total_documents"] == 1
 
     async def test_page_search_slug_prefix_filter_and_url_normalization(
         self,
@@ -68,7 +65,6 @@ class TestPageReadTools:
                     slug="tech-doc/mlops/page", url="/tech-doc/mlops/page", type="page"
                 ),
             ],
-            total_documents=2,
         )
 
         result = await client_session.call_tool(
@@ -78,8 +74,6 @@ class TestPageReadTools:
         content = get_tool_result_content(result)
         # segment-boundary match: 'tech-doc/mlops' must NOT pass; prefix got normalized
         assert [r["slug"] for r in content["results"]] == ["tech-doc/ml/page"]
-        assert content["total_documents"] == 1
-        assert content["total_pages"] == 1
         assert content["results"][0]["url"] == "https://wiki.yandex.ru/tech-doc/ml/page"
 
     async def test_page_get_by_slug(

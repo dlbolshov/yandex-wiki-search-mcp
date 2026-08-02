@@ -56,24 +56,21 @@ class TestWikiClient:
                         "url": "/a/b",
                         "slug": "a/b",
                         "title": "T",
-                        "body": "snip",
+                        "content": "snip",
                         "type": "page",
-                        "modified_at": 1778104120,
+                        "modified_at": "2026-05-12T22:14:54",
                     },
                     {
                         "url": "https://wiki.yandex.ru/a/b/.files/f.xlsx?download=1",
                         "slug": "a/b",
                         "title": "f.xlsx",
-                        "body": "",
+                        "content": "",
                         "type": "file",
-                        "modified_at": 1769154990,
+                        "modified_at": "2026-01-23T08:36:30",
                     },
                 ],
-                "total_documents": 2,
-                "total_pages": 1,
-                "page_id": 1,
-                "search_client": "mailsearch",
-                "uid": "1",
+                "next_cursor": None,
+                "prev_cursor": None,
             }
         )
         with aioresponses() as mocked:
@@ -84,13 +81,16 @@ class TestWikiClient:
             result = await wiki_client.page_search("query text", page_size=50)
 
         assert result.results[0].slug == "a/b"
+        assert result.results[0].content == "snip"
+        assert result.results[0].modified_at == "2026-05-12T22:14:54"
         assert result.results[1].type == "file"
         capture.assert_called_once()
-        capture.last_request.assert_json_body({"query": "query text", "page_size": 50})
+        # the live endpoint honors "limit" only; "page_size" is silently ignored
+        capture.last_request.assert_json_body({"query": "query text", "limit": 50})
 
     async def test_page_search_clamps_page_size(self, wiki_client: WikiClient) -> None:
         capture = RequestCapture(
-            payload={"results": [], "total_documents": 0, "total_pages": 0}
+            payload={"results": [], "next_cursor": None, "prev_cursor": None}
         )
         with aioresponses() as mocked:
             mocked.post(
@@ -98,7 +98,7 @@ class TestWikiClient:
                 callback=capture.callback,
             )
             await wiki_client.page_search("q", page_size=1000)
-        capture.last_request.assert_json_field("page_size", 50)
+        capture.last_request.assert_json_field("limit", 50)
 
     async def test_page_search_raises_api_error_with_list_message(
         self, wiki_client: WikiClient
