@@ -37,6 +37,16 @@ Cursor = Annotated[
     str | None,
     Field(description="Opaque pagination cursor returned by the previous call."),
 ]
+FetchAll = Annotated[
+    bool,
+    Field(
+        description=(
+            "Follow pagination automatically and return all items in one call "
+            "(up to ~500). The response then carries truncated=false when the "
+            "list is complete, or truncated=true with next_cursor to continue."
+        )
+    ),
+]
 PageSize = Annotated[
     int,
     Field(description="Page size for cursor-based endpoints.", ge=1, le=100),

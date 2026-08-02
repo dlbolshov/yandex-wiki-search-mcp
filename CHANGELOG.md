@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `fetch_all` flag on the five cursor-paginated tools (`page_get_descendants`, `page_get_comments`, `page_get_attachments`, `page_get_resources`, `page_get_grids`): the server follows `next_cursor` and returns everything in one call, capped at ~500 items. The response then carries `truncated`: `false` when the list is complete, `true` when the cap was hit (with `next_cursor` set for continuing). `page_search` deliberately has no such flag — its cursors are dead server-side (always `null`)
+
 ### Fixed
 - `page_search` was broken against the live API (all fixes verified live on 2026-08-02):
   - any non-empty search failed with a validation error — the API sends `modified_at` as an ISO datetime string, the model expected an integer epoch

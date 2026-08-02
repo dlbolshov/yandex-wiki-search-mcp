@@ -138,28 +138,33 @@ class DescendantItem(BaseWikiModel):
     slug: str | None = None
 
 
-class DescendantsResponse(BaseWikiModel):
+class CursorEnvelope(BaseWikiModel):
+    """Cursor-paginated list envelope.
+
+    `truncated` is set only by the tool-layer `fetch_all` loop: False when the
+    whole list was drained, True when the item cap was hit (continue from
+    `next_cursor`).
+    """
+
+    next_cursor: str | None = None
+    prev_cursor: str | None = None
+    truncated: bool | None = None
+
+
+class DescendantsResponse(CursorEnvelope):
     results: list[DescendantItem] = Field(default_factory=list)
-    next_cursor: str | None = None
-    prev_cursor: str | None = None
 
 
-class CommentsResponse(BaseWikiModel):
+class CommentsResponse(CursorEnvelope):
     results: list[PageComment] = Field(default_factory=list)
-    next_cursor: str | None = None
-    prev_cursor: str | None = None
 
 
-class AttachmentListResponse(BaseWikiModel):
+class AttachmentListResponse(CursorEnvelope):
     results: list[WikiAttachment] = Field(default_factory=list)
-    next_cursor: str | None = None
-    prev_cursor: str | None = None
 
 
-class ResourcesResponse(BaseWikiModel):
+class ResourcesResponse(CursorEnvelope):
     results: list[WikiResource] = Field(default_factory=list)
-    next_cursor: str | None = None
-    prev_cursor: str | None = None
 
 
 class WikiGridPageRef(BaseWikiModel):
@@ -209,10 +214,8 @@ class WikiGridSummary(BaseWikiModel):
     created_at: str | None = None
 
 
-class GridsResponse(BaseWikiModel):
+class GridsResponse(CursorEnvelope):
     results: list[WikiGridSummary] = Field(default_factory=list)
-    next_cursor: str | None = None
-    prev_cursor: str | None = None
 
 
 class WikiGrid(DynamicWikiModel):

@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal
 
 from mcp.server import FastMCP
@@ -6,6 +7,7 @@ from pydantic import Field
 
 from mcp_wiki.mcp.params import (
     Cursor,
+    FetchAll,
     GridFields,
     GridID,
     GridPageSize,
@@ -31,6 +33,7 @@ from mcp_wiki.mcp.utils import (
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
     CommentsResponse,
+    CursorEnvelope,
     DescendantsResponse,
     GridsResponse,
     ResourcesResponse,
@@ -38,6 +41,33 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiGrid,
     WikiPage,
 )
+
+FETCH_ALL_MAX_ITEMS = 500
+_FETCH_ALL_MAX_REQUESTS = 50
+
+
+async def _drain_cursor(
+    first: CursorEnvelope,
+    fetch_page: Callable[[str], Awaitable[Any]],
+    max_items: int = FETCH_ALL_MAX_ITEMS,
+) -> None:
+    """Follow next_cursor in place, extending first.results.
+
+    Stops at max_items (the last fetched page may overshoot slightly) and
+    always sets `truncated`; next_cursor ends up None when the list was
+    drained, or points at the continuation when the cap was hit.
+    """
+    results: list[Any] = first.results  # type: ignore[attr-defined]
+    for _ in range(_FETCH_ALL_MAX_REQUESTS):
+        cursor = first.next_cursor
+        if cursor is None or len(results) >= max_items:
+            break
+        page = await fetch_page(cursor)
+        results.extend(page.results)
+        if page.next_cursor == cursor:
+            break
+        first.next_cursor = page.next_cursor
+    first.truncated = first.next_cursor is not None
 
 
 def register_page_read_tools(mcp: FastMCP[Any]) -> None:
@@ -141,15 +171,24 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         ] = False,
         page_size: PageSize = 100,
         cursor: Cursor = None,
+        fetch_all: FetchAll = False,
     ) -> DescendantsResponse:
         resolved_slug = await resolve_page_slug(ctx, page_id=page_id, slug=slug)
-        return await get_wiki(ctx).page_get_descendants(
-            resolved_slug,
-            include_self=include_self,
-            page_size=page_size,
-            cursor=cursor,
-            auth=get_yandex_auth(ctx),
-        )
+        auth = get_yandex_auth(ctx)
+
+        async def fetch(next_cursor: str | None) -> DescendantsResponse:
+            return await get_wiki(ctx).page_get_descendants(
+                resolved_slug,
+                include_self=include_self,
+                page_size=page_size,
+                cursor=next_cursor,
+                auth=auth,
+            )
+
+        response = await fetch(cursor)
+        if fetch_all:
+            await _drain_cursor(response, fetch)
+        return response
 
     @mcp.tool(
         title="Get Page Comments",
@@ -162,14 +201,23 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         slug: OptionalPageSlug = None,
         page_size: PageSize = 100,
         cursor: Cursor = None,
+        fetch_all: FetchAll = False,
     ) -> CommentsResponse:
         resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await get_wiki(ctx).page_get_comments(
-            resolved_page_id,
-            page_size=page_size,
-            cursor=cursor,
-            auth=get_yandex_auth(ctx),
-        )
+        auth = get_yandex_auth(ctx)
+
+        async def fetch(next_cursor: str | None) -> CommentsResponse:
+            return await get_wiki(ctx).page_get_comments(
+                resolved_page_id,
+                page_size=page_size,
+                cursor=next_cursor,
+                auth=auth,
+            )
+
+        response = await fetch(cursor)
+        if fetch_all:
+            await _drain_cursor(response, fetch)
+        return response
 
     @mcp.tool(
         title="Get Page Resources",
@@ -187,6 +235,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         ] = None,
         page_size: PageSize = 50,
         cursor: Cursor = None,
+        fetch_all: FetchAll = False,
         order_by: Annotated[
             Literal["name_title", "created_at"] | None,
             Field(description="Optional resource sorting field."),
@@ -197,18 +246,29 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         ] = None,
     ) -> ResourcesResponse:
         resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await get_wiki(ctx).page_get_resources(
-            resolved_page_id,
-            resource_types=[resource_type.value for resource_type in resource_types]
+        auth = get_yandex_auth(ctx)
+        type_values = (
+            [resource_type.value for resource_type in resource_types]
             if resource_types
-            else None,
-            q=search,
-            page_size=page_size,
-            cursor=cursor,
-            order_by=order_by,
-            order_direction=order_direction,
-            auth=get_yandex_auth(ctx),
+            else None
         )
+
+        async def fetch(next_cursor: str | None) -> ResourcesResponse:
+            return await get_wiki(ctx).page_get_resources(
+                resolved_page_id,
+                resource_types=type_values,
+                q=search,
+                page_size=page_size,
+                cursor=next_cursor,
+                order_by=order_by,
+                order_direction=order_direction,
+                auth=auth,
+            )
+
+        response = await fetch(cursor)
+        if fetch_all:
+            await _drain_cursor(response, fetch)
+        return response
 
     @mcp.tool(
         title="Get Page Grids",
@@ -221,6 +281,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         slug: OptionalPageSlug = None,
         page_size: GridPageSize = 50,
         cursor: Cursor = None,
+        fetch_all: FetchAll = False,
         order_by: Annotated[
             Literal["title", "created_at"] | None,
             Field(description="Optional grid sorting field."),
@@ -231,14 +292,22 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         ] = None,
     ) -> GridsResponse:
         resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await get_wiki(ctx).page_get_grids(
-            resolved_page_id,
-            page_size=page_size,
-            cursor=cursor,
-            order_by=order_by,
-            order_direction=order_direction,
-            auth=get_yandex_auth(ctx),
-        )
+        auth = get_yandex_auth(ctx)
+
+        async def fetch(next_cursor: str | None) -> GridsResponse:
+            return await get_wiki(ctx).page_get_grids(
+                resolved_page_id,
+                page_size=page_size,
+                cursor=next_cursor,
+                order_by=order_by,
+                order_direction=order_direction,
+                auth=auth,
+            )
+
+        response = await fetch(cursor)
+        if fetch_all:
+            await _drain_cursor(response, fetch)
+        return response
 
     @mcp.tool(
         title="Get Wiki Grid",
@@ -298,11 +367,20 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         slug: OptionalPageSlug = None,
         page_size: PageSize = 100,
         cursor: Cursor = None,
+        fetch_all: FetchAll = False,
     ) -> AttachmentListResponse:
         resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await get_wiki(ctx).page_get_attachments(
-            resolved_page_id,
-            page_size=page_size,
-            cursor=cursor,
-            auth=get_yandex_auth(ctx),
-        )
+        auth = get_yandex_auth(ctx)
+
+        async def fetch(next_cursor: str | None) -> AttachmentListResponse:
+            return await get_wiki(ctx).page_get_attachments(
+                resolved_page_id,
+                page_size=page_size,
+                cursor=next_cursor,
+                auth=auth,
+            )
+
+        response = await fetch(cursor)
+        if fetch_all:
+            await _drain_cursor(response, fetch)
+        return response

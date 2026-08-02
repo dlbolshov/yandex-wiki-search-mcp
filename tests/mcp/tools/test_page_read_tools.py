@@ -2,7 +2,10 @@ from unittest.mock import AsyncMock
 
 from mcp.client.session import ClientSession
 
+from mcp_wiki.mcp.tools.page_read import _drain_cursor
 from mcp_wiki.wiki.proto.types.pages import (
+    DescendantItem,
+    DescendantsResponse,
     SearchResponse,
     SearchResultItem,
     WikiGrid,
@@ -10,6 +13,60 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiPage,
 )
 from tests.mcp.conftest import get_tool_result_content, get_tool_result_text
+
+
+def _tree_page(start: int, count: int, next_cursor: str | None) -> DescendantsResponse:
+    return DescendantsResponse(
+        results=[
+            DescendantItem(id=i, slug=f"s/{i}") for i in range(start, start + count)
+        ],
+        next_cursor=next_cursor,
+    )
+
+
+class TestDrainCursor:
+    async def test_walks_until_exhausted(self) -> None:
+        first = _tree_page(0, 2, "c1")
+        pages = {"c1": _tree_page(2, 2, "c2"), "c2": _tree_page(4, 1, None)}
+        fetch = AsyncMock(side_effect=lambda cursor: pages[cursor])
+
+        await _drain_cursor(first, fetch)
+
+        assert [item.id for item in first.results] == [0, 1, 2, 3, 4]
+        assert first.truncated is False
+        assert first.next_cursor is None
+        assert fetch.await_count == 2
+
+    async def test_stops_at_cap_and_reports_truncation(self) -> None:
+        first = _tree_page(0, 2, "c1")
+        pages = {"c1": _tree_page(2, 2, "c2"), "c2": _tree_page(4, 2, "c3")}
+        fetch = AsyncMock(side_effect=lambda cursor: pages[cursor])
+
+        await _drain_cursor(first, fetch, max_items=3)
+
+        assert [item.id for item in first.results] == [0, 1, 2, 3]
+        assert first.truncated is True
+        assert first.next_cursor == "c2"
+        assert fetch.await_count == 1
+
+    async def test_repeated_cursor_stops_the_loop(self) -> None:
+        first = _tree_page(0, 1, "c1")
+        fetch = AsyncMock(return_value=_tree_page(1, 1, "c1"))
+
+        await _drain_cursor(first, fetch)
+
+        assert fetch.await_count == 1
+        assert first.truncated is True
+        assert first.next_cursor == "c1"
+
+    async def test_no_cursor_means_nothing_to_do(self) -> None:
+        first = _tree_page(0, 1, None)
+        fetch = AsyncMock()
+
+        await _drain_cursor(first, fetch)
+
+        fetch.assert_not_awaited()
+        assert first.truncated is False
 
 
 class TestPageReadTools:
@@ -114,6 +171,46 @@ class TestPageReadTools:
         assert (
             get_tool_result_content(result)["results"][0]["slug"] == "users/test/page"
         )
+        mock_wiki_protocol.page_get_descendants.assert_awaited_once()
+
+    async def test_page_get_descendants_fetch_all(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_descendants.side_effect = [
+            _tree_page(0, 2, "c1"),
+            _tree_page(2, 2, "c2"),
+            _tree_page(4, 1, None),
+        ]
+
+        result = await client_session.call_tool(
+            "page_get_descendants",
+            {"slug": "users/test/page", "fetch_all": True},
+        )
+
+        content = get_tool_result_content(result)
+        assert [item["id"] for item in content["results"]] == [0, 1, 2, 3, 4]
+        assert content["truncated"] is False
+        assert "next_cursor" not in content
+        assert mock_wiki_protocol.page_get_descendants.await_count == 3
+        last_call = mock_wiki_protocol.page_get_descendants.await_args_list[-1]
+        assert last_call.kwargs["cursor"] == "c2"
+
+    async def test_page_get_descendants_single_page_has_no_truncated_flag(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_descendants.return_value = _tree_page(0, 1, None)
+
+        result = await client_session.call_tool(
+            "page_get_descendants",
+            {"slug": "users/test/page"},
+        )
+
+        content = get_tool_result_content(result)
+        assert "truncated" not in content
         mock_wiki_protocol.page_get_descendants.assert_awaited_once()
 
     async def test_page_get_with_fields(
