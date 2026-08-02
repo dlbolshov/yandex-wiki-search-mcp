@@ -3,10 +3,16 @@
 # Yandex Wiki API field notes
 
 Findings verified live against a production Yandex 360 organization. The org-neutral
-probe scripts in [`scripts/`](../scripts/) (`probe_api*.sh`, `smoke.sh`) are living
-documentation of this behavior and can be re-run against your own organization
-(credentials via env vars or a `$SECRETS` file; probe output goes to `raw/`, which is
-gitignored because it contains real org data).
+probe scripts in [`scripts/`](../scripts/) are living documentation of this behavior and
+can be re-run against your own organization: `probe_api*.sh`/`smoke.sh` (curl-based;
+credentials via env vars or a `$SECRETS` file, output goes to `raw/`, which is gitignored
+because it contains real org data), plus the Python probes `contract_sweep.py` (every
+client method against the live API), `token_probe.py` (payload sizes and extra fields)
+and `yfm_smoke.py` (YFM rendering rules).
+
+**Warning: the undocumented parts of this API drift.** The search endpoint silently
+changed its wire contract between 2026-07-19 and 2026-08-02 (see below) — no versioning,
+no deprecation. When something looks off, re-run the probes before trusting these notes.
 
 Official references:
 
@@ -21,16 +27,27 @@ Official references:
 The endpoint is undocumented but public — it is the same backend that powers the Wiki
 web search bar. It was first discovered and published by
 [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki), which directly
-inspired `page_search`; this project independently re-verified and extended those
-findings (e.g. `page_size` accepts up to 50, not 10).
+inspired `page_search`; this project independently re-verified and extended those findings.
 
-- `page_size` max is **50** (0, negative, or >50 → HTTP 400). The tool clamps it to 1–50 client-side.
-- There is **no server-side pagination or filtering** — `page`/`offset`/`limit` and any
-  section/type body params are ignored, and `total_pages` is always 1 (or 0 when empty).
+**The wire contract silently changed between 2026-07-19 and 2026-08-02.** As probed in
+July: `page_size` controlled the result count (ceiling 50, out of range → 400), the
+envelope carried `total_documents`/`total_pages`, `modified_at` was an epoch integer and
+the snippet key was `body`. None of that is true anymore. Current behavior, verified
+2026-08-02:
+
+- The result-count knob is **`limit` in the POST body**: 1–50, anything else → HTTP 400.
+  `page_size`, `page` and `offset` are accepted but **ignored** (you get the default 10
+  results). The tool keeps its `page_size` argument and sends it as `limit`, clamped to 1–50.
+- The envelope is `results` + `next_cursor`/`prev_cursor`. The cursors are **always
+  `null`**, and a request `cursor` is validated (garbage → 400) but never satisfiable —
+  the pagination machinery exists in the schema only. You get the top ≤50 hits, full stop.
+  `total_documents`/`total_pages` are gone.
+- Per result: the snippet is in **`content`** (plain text), `modified_at` is an **ISO
+  datetime string**. Two result types: **`page`** (relative `url`, normalized by the tool
+  to an absolute link based on `WIKI_WEB_BASE_URL`) and **`file`** (absolute
+  `...?download=1` download link).
+- There is still **no server-side filtering** — section/type body params are ignored.
   The tool's `slug_prefix` and `result_type` arguments are applied client-side after fetching.
-- `total_documents` always equals the number of returned results — it is **not** a global hit count.
-- Results come in two types: **`page`** (relative url, normalized by the tool to an
-  absolute link based on `WIKI_WEB_BASE_URL`) and **`file`** (absolute `...?download=1` download link).
 - Quoted `"exact phrase"` queries work and produce phrase-matched results;
   `-minus` and boolean operators are ignored.
 
@@ -55,6 +72,23 @@ findings (e.g. `page_size` accepts up to 50, not 10).
   fields; fetch them via `page_get` with `fields=["attributes"]`.
 - `GET /pages/{id}/resources?q=` is the only server-side *text* filter in the whole API
   (title search within one page's attachments/grids) — exposed via `page_get_resources`.
+- `page_type` in `POST /pages` is **ignored** — any value, even garbage, yields a
+  `wysiwyg` page with no error (verified 2026-07-27).
+- `POST /pages/{id}/append-content` responds with the **full updated page object**
+  (id, content, breadcrumbs, access data, owner…), not a status stub.
+- Descendants items carry **only `id` and `slug`** — no titles; a `fields` query param is
+  accepted but has no effect. Cursor pagination works (verified with `page_size=5` walks).
+- Delete → recover (`DELETE /pages/{id}` → `POST /recovery_tokens/{token}/recover`)
+  restores the page with the **same id**; the recover response also carries `slug` and
+  `pages_count` (subtree size).
+- Attachment objects include an undocumented `is_downloadable` flag.
+
+## Comments
+
+- Comment objects carry `author` (id, login, display name), `inline_text`, `is_deleted`,
+  `reactions` and `resolve_status`. There is **no `user` key** (as of 2026-08-02 —
+  early versions of this project modeled one).
+- Cursor pagination on `GET /pages/{id}/comments` works (verified with `page_size=2` walks).
 
 ## Grids
 
@@ -65,6 +99,8 @@ findings (e.g. `page_size` accepts up to 50, not 10).
   `[{"column": "status", "direction": "asc"}]` shape and converts it.
 - `grid_add_columns` requires `required` on every column — the API validates it.
 - `grid_copy` is asynchronous: the API returns operation metadata, not a ready copied grid.
+- `POST /grids/{id}/cells` responds with a **`cells`** key — unlike the row/column
+  mutations, which answer with `results` (+ `revision`).
 
 ## Errors and limits
 
