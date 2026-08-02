@@ -5,6 +5,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    GetJsonSchemaHandler,
     SerializerFunctionWrapHandler,
     field_validator,
     model_serializer,
@@ -28,6 +29,18 @@ class BaseWikiModel(BaseModel):
         if isinstance(data, dict):
             return {key: value for key, value in data.items() if value is not None}
         return data
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: Any, handler: GetJsonSchemaHandler
+    ) -> dict[str, Any]:
+        """Strip pydantic's auto-generated titles — pure schema-token noise."""
+        json_schema = dict(handler(core_schema))
+        json_schema.pop("title", None)
+        for prop in json_schema.get("properties", {}).values():
+            if isinstance(prop, dict):
+                prop.pop("title", None)
+        return json_schema
 
 
 class DynamicWikiModel(BaseWikiModel):

@@ -23,6 +23,7 @@ All notable changes to this project are documented in this file.
   - fields the live API actually sends are now declared instead of leaking untyped: `WikiPage.access_policy`/`access_lists`/`owner` (arrive when requested via `fields`), comment `author`/`inline_text`/`is_deleted`/`resolve_status`/`reactions`, attachment `is_downloadable`, recover `slug`/`pages_count`, and the `cells` key in `grid_update_cells` responses
   - user references (comment `author`, attachment `user`) are trimmed to `id`/`username`/`display_name` — the raw API sends internal identity payloads (`uid`, `cloud_uid`, dismissal flags) on every comment and attachment
   - `page_get_descendants` items are now honest `{id, slug}` objects (the live API never sends titles there), shrinking both the output schema and each result
+  - pydantic's auto-generated `title` keys are stripped from the model JSON schemas — `tools/list` shrinks by ~4.4k characters of pure noise
   - breaking for schema consumers: `PageComment.user` and `PageComment.updated_at` were removed — the live API sends neither (the author arrives in `author`)
 
 ### Removed
