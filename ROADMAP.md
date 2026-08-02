@@ -163,19 +163,26 @@
       ISO-строка (не int) → любой непустой поиск падал валидацией; сниппет в `content` (не `body`);
       API читает `limit` из тела (не `page_size`) → всегда max 10 результатов; envelope =
       results + курсоры (всегда null), остальные поля-призраки выпилены
-- [ ] Компактные ответы: slim-модели + `exclude_none`-сериализация, не обнуление полей.
+- [x] Компактные ответы: slim-модели + `exclude_none`-сериализация, не обнуление полей.
+      Сделано: None-дроп через model_serializer(wrap) на базе, descendants → {id, slug},
+      юзеры обрезаны до WikiUser (id/username/display_name). Дерево 22 страниц:
+      3.4k симв по проводу вместо ~13k (~4x).
       Замер: 100 страниц дерева = 60.7k симв по проводу (33.9k text-дубль с indent=2 + 26.8k
       structured), slim-проекция = 8.5k. Дерево descendants живьём содержит ТОЛЬКО id+slug
       (`title` не существует, `fields`-параметр не работает) → slim-элемент {id, slug}.
       outputSchema статична на тулзу — тяжёлые поля опциональны.
       Breaking для схемы — фиксировать в CHANGELOG (прецедент — `default_sort` в 0.5.0)
-- [ ] Ужать `extra="allow"` → `ignore` на моделях фиксированной формы, НО сначала объявить
+- [x] Ужать `extra="allow"` → `ignore` на моделях фиксированной формы, НО сначала объявить
       живые extras (иначе молча потеряем данные): `WikiPage` ← access_lists/access_policy/owner
       (запрашиваемы через `fields`!), `PageComment` ← author/inline_text/is_deleted/reactions/
       resolve_status (объявленный `user` живьём не приходит), `WikiAttachment` ← is_downloadable,
       `RecoverPageResponse` ← pages_count/slug. `grid_update_cells` отвечает ключом `cells`,
       не `results` — данные мимо `GridMutationResponse`. Гриды и `WikiResource.item`
-      остаются `allow` (extras там — сами данные)
+      остаются `allow` (extras там — сами данные).
+      Сделано вместе с предыдущим пунктом: все живые extras объявлены, мёртвые
+      PageComment.user/updated_at выпилены, DynamicWikiModel для гридов;
+      contract_sweep возвращает allow в рантайме (model_rebuild) для дрифт-детекции,
+      свип 29/29 без необъявленных extras
 - [ ] Дубль text-блока: спека рекомендует дублировать (SHOULD) — дефолт не трогаем;
       настройка `TOOL_RESULT_TEXT: pretty|compact|none` (дефолт pretty = поведение FastMCP)
       через `Annotated[CallToolResult, Model]` (lowlevel-сервер отдаёт как есть, схема
