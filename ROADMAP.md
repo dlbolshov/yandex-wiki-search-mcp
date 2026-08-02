@@ -156,15 +156,37 @@
 
 ### v0.8.0 — Экономия токенов LLM
 
-- [ ] Компактные ответы: slim-модели (усечение `body`-сниппетов в `page_search`, id/slug/title
-      в `page_get_descendants`), не обнуление полей (см. удалённый `set_non_needed_fields_null` из M1).
-      Важно: outputSchema статична на тулзу — схема одна, тяжёлые поля опциональны,
-      `verbose=True` их заполняет. Проверить протечку `extra="allow"` в structured content
-      (неизвестные поля API сейчас, вероятно, утекают в ответы и жгут токены).
+Живая разведка 2026-08-02 (`scripts/token_probe.py`, `scripts/contract_sweep.py` — 29 проверок
+по всем методам клиента):
+
+- [x] Фикс `page_search` — модель была написана под контракт, которого нет: `modified_at`
+      ISO-строка (не int) → любой непустой поиск падал валидацией; сниппет в `content` (не `body`);
+      API читает `limit` из тела (не `page_size`) → всегда max 10 результатов; envelope =
+      results + курсоры (всегда null), остальные поля-призраки выпилены
+- [ ] Компактные ответы: slim-модели + `exclude_none`-сериализация, не обнуление полей.
+      Замер: 100 страниц дерева = 60.7k симв по проводу (33.9k text-дубль с indent=2 + 26.8k
+      structured), slim-проекция = 8.5k. Дерево descendants живьём содержит ТОЛЬКО id+slug
+      (`title` не существует, `fields`-параметр не работает) → slim-элемент {id, slug}.
+      outputSchema статична на тулзу — тяжёлые поля опциональны.
       Breaking для схемы — фиксировать в CHANGELOG (прецедент — `default_sort` в 0.5.0)
+- [ ] Ужать `extra="allow"` → `ignore` на моделях фиксированной формы, НО сначала объявить
+      живые extras (иначе молча потеряем данные): `WikiPage` ← access_lists/access_policy/owner
+      (запрашиваемы через `fields`!), `PageComment` ← author/inline_text/is_deleted/reactions/
+      resolve_status (объявленный `user` живьём не приходит), `WikiAttachment` ← is_downloadable,
+      `RecoverPageResponse` ← pages_count/slug. `grid_update_cells` отвечает ключом `cells`,
+      не `results` — данные мимо `GridMutationResponse`. Гриды и `WikiResource.item`
+      остаются `allow` (extras там — сами данные)
+- [ ] Дубль text-блока: спека рекомендует дублировать (SHOULD) — дефолт не трогаем;
+      настройка `TOOL_RESULT_TEXT: pretty|compact|none` (дефолт pretty = поведение FastMCP)
+      через `Annotated[CallToolResult, Model]` (lowlevel-сервер отдаёт как есть, схема
+      и валидация structuredContent сохраняются)
+- [ ] Опционально: срезать pydantic-`title` из схем хуком `__get_pydantic_json_schema__`
+      (−20% на схему; tools/list сейчас 63.8k симв на диалог, из них 33.5k outputSchema)
 - [ ] `fetch_all: bool` для курсорных тулзов: цикл в tool-слое по `next_cursor`, жёсткий потолок
       (~500 элементов), `truncated: bool` в ответе. Строго вместе с/после компактных моделей,
-      иначе умножает токен-жир
+      иначе умножает токен-жир. Курсорная ходьба проверена живьём (descendants: 15 элементов
+      за 3 страницы; comments: 4 за 2). ВАЖНО: у поиска курсоры всегда null — глубокая
+      пагинация поиска серверно не работает, `fetch_all` туда не тянуть
 - [ ] Выпилить `page_type` из схемы `page_create` (breaking): смок 2026-07-27 доказал, что API
       игнорирует поле целиком (любое значение → `wysiwyg`, даже мусор без ошибки) —
       параметр в схеме только вводит агента в заблуждение; из `WikiClient.page_create` тоже
