@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 - `fetch_all` flag on the five cursor-paginated tools (`page_get_descendants`, `page_get_comments`, `page_get_attachments`, `page_get_resources`, `page_get_grids`): the server follows `next_cursor` and returns everything in one call, capped at ~500 items. The response then carries `truncated`: `false` when the list is complete, `true` when the cap was hit (with `next_cursor` set for continuing). `page_search` deliberately has no such flag — its cursors are dead server-side (always `null`)
+- `TOOL_RESULT_TEXT` setting for the text duplicate of structured tool results: `pretty` (indent=2, the FastMCP default and still the spec-friendly choice), `compact` (single line — roughly halves the text block) or `none` (structured content only; make sure your client renders `structuredContent` before enabling). Structured content and its schema validation are unaffected
 
 ### Fixed
 - `page_search` was broken against the live API (all fixes verified live on 2026-08-02):

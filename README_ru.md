@@ -216,6 +216,7 @@ claude mcp add yandex-wiki-search \
 | `WIKI_WEB_BASE_URL` | нет | `https://wiki.yandex.ru` | База для абсолютных ссылок в результатах `page_search` |
 | `WIKI_AUTH_SCHEME` | нет | `OAuth` | Схема заголовка `Authorization` для `WIKI_TOKEN` (`OAuth` \| `Bearer`) |
 | `WIKI_MAX_RETRIES` | нет | `2` | Ретраи на обрыв соединения и `429`/`502`/`503`/`504` для читающих запросов; `0` выключает |
+| `TOOL_RESULT_TEXT` | нет | `pretty` | Текстовый дубль structured-результатов тулзов: `pretty` (indent=2) \| `compact` (одна строка, ~вдвое меньше токенов) \| `none` (только structured — сначала проверьте, что ваш клиент показывает `structuredContent`) |
 
 <details>
 <summary><b>Многопользовательский OAuth + Redis (только HTTP-деплой)</b></summary>

@@ -1,5 +1,6 @@
 import base64
 import importlib.metadata
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 import yarl
 from mcp.server import FastMCP
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+from mcp.types import TextContent
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
@@ -34,6 +36,35 @@ def server_version() -> str:
 
 async def healthz(_request: Request) -> PlainTextResponse:
     return PlainTextResponse("ok")
+
+
+class WikiFastMCP(FastMCP):
+    """FastMCP with a configurable text duplicate of structured tool results.
+
+    The MCP spec recommends (SHOULD) mirroring structuredContent as a text
+    block for backwards compatibility; FastMCP renders it with indent=2.
+    `tool_result_text` keeps that default ("pretty"), shrinks it to one line
+    ("compact"), or omits the duplicate entirely ("none") — structured
+    content and its schema validation are untouched.
+    """
+
+    def __init__(
+        self, *args: Any, tool_result_text: str = "pretty", **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._tool_result_text = tool_result_text
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        result = await super().call_tool(name, arguments)
+        if self._tool_result_text == "pretty" or not (
+            isinstance(result, tuple) and len(result) == 2
+        ):
+            return result
+        _, structured = result
+        if self._tool_result_text == "none":
+            return [], structured
+        compact_text = json.dumps(structured, ensure_ascii=False, separators=(",", ":"))
+        return [TextContent(type="text", text=compact_text)], structured
 
 
 def _parse_encryption_keys(keys_str: str | None) -> list[bytes] | None:
@@ -161,7 +192,7 @@ def create_mcp_server(
             ),
         )
 
-    server = FastMCP(
+    server = WikiFastMCP(
         name="Yandex Wiki Search MCP",
         instructions=instructions,
         host=settings.host,
@@ -172,6 +203,7 @@ def create_mcp_server(
         stateless_http=settings.stateless_http,
         json_response=settings.json_response,
         auth=auth_settings,
+        tool_result_text=settings.tool_result_text,
     )
     server._mcp_server.version = server_version()
 
