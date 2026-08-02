@@ -296,6 +296,19 @@ uv run pytest                   # tests
 Before committing, run the full verification set from [CONTRIBUTING.md](CONTRIBUTING.md).
 Verified API behavior and probe scripts are documented in [docs/api-notes.md](docs/api-notes.md).
 
+The Wiki API drifts (its undocumented search endpoint silently changed contract once
+already) — `scripts/contract_sweep.py` re-verifies every client method against a live
+organization and reports validation mismatches and undeclared keys:
+
+```bash
+uv run python scripts/contract_sweep.py users/YOU/contract-sweep            # ~30 live checks
+uv run python scripts/contract_sweep.py users/YOU/contract-sweep --cleanup  # remove fixtures
+```
+
+The [API drift check](.github/workflows/api-drift.yml) workflow runs the same sweep
+weekly when the `DRIFT_WIKI_TOKEN` secret and `DRIFT_*` variables are configured
+(instructions in the workflow header); without them it skips quietly.
+
 ## Credits
 
 This project is a fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)

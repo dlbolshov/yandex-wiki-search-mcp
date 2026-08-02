@@ -297,6 +297,19 @@ uv run pytest                   # тесты
 Перед коммитом прогоните полный набор проверок из [CONTRIBUTING.md](CONTRIBUTING.md).
 Проверенное поведение API и probe-скрипты описаны в [docs/api-notes_ru.md](docs/api-notes_ru.md).
 
+Вики-API дрейфует (недокументированный эндпоинт поиска уже однажды молча сменил
+контракт) — `scripts/contract_sweep.py` перепроверяет каждый метод клиента на живой
+организации и репортит расхождения валидации и необъявленные ключи:
+
+```bash
+uv run python scripts/contract_sweep.py users/YOU/contract-sweep            # ~30 живых проверок
+uv run python scripts/contract_sweep.py users/YOU/contract-sweep --cleanup  # убрать фикстуры
+```
+
+Workflow [API drift check](.github/workflows/api-drift.yml) гоняет тот же свип
+еженедельно, если настроены секрет `DRIFT_WIKI_TOKEN` и переменные `DRIFT_*`
+(инструкция в шапке workflow); без них он тихо скипается.
+
 ## Благодарности
 
 Проект — форк [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)

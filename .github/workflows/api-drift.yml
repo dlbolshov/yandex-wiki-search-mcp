@@ -1,0 +1,63 @@
+# The Yandex Wiki API drifts: the undocumented search endpoint silently swapped its
+# wire contract between 2026-07 and 2026-08 (see docs/api-notes.md). This workflow
+# re-runs the live contract sweep on a schedule so drift shows up as a red run
+# instead of a broken tool in production.
+#
+# Opt-in: configure in the repo settings
+#   secret DRIFT_WIKI_TOKEN        — OAuth token of a dedicated/robot account
+#   var    DRIFT_SWEEP_SLUG        — scratch slug the sweep may create/delete pages
+#                                    under, e.g. users/robot/contract-sweep
+#   var    DRIFT_WIKI_ORG_ID       — exactly one of the two org ids
+#   var    DRIFT_WIKI_CLOUD_ORG_ID
+# Without them every step is skipped and the run stays green.
+
+name: API drift check
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-sweep:
+    runs-on: ubuntu-latest
+    env:
+      WIKI_TOKEN: ${{ secrets.DRIFT_WIKI_TOKEN }}
+      WIKI_ORG_ID: ${{ vars.DRIFT_WIKI_ORG_ID }}
+      WIKI_CLOUD_ORG_ID: ${{ vars.DRIFT_WIKI_CLOUD_ORG_ID }}
+      SWEEP_SLUG: ${{ vars.DRIFT_SWEEP_SLUG }}
+    steps:
+      - name: Check drift credentials are configured
+        id: creds
+        run: |
+          if [ -n "$WIKI_TOKEN" ] && [ -n "$SWEEP_SLUG" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "DRIFT_WIKI_TOKEN / DRIFT_SWEEP_SLUG are not configured — skipping the sweep."
+          fi
+
+      - name: Checkout code
+        if: steps.creds.outputs.present == 'true'
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        if: steps.creds.outputs.present == 'true'
+        uses: astral-sh/setup-uv@v7
+        with:
+          cache-suffix: drift
+
+      - name: Install dependencies
+        if: steps.creds.outputs.present == 'true'
+        run: uv sync
+
+      - name: Run the live contract sweep
+        if: steps.creds.outputs.present == 'true'
+        run: uv run python scripts/contract_sweep.py "$SWEEP_SLUG"
+
+      - name: Clean up sweep fixtures
+        if: always() && steps.creds.outputs.present == 'true'
+        run: uv run python scripts/contract_sweep.py "$SWEEP_SLUG" --cleanup

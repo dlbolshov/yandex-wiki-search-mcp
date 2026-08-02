@@ -13,6 +13,8 @@ and `yfm_smoke.py` (YFM rendering rules).
 **Warning: the undocumented parts of this API drift.** The search endpoint silently
 changed its wire contract between 2026-07-19 and 2026-08-02 (see below) — no versioning,
 no deprecation. When something looks off, re-run the probes before trusting these notes.
+The [API drift check](../.github/workflows/api-drift.yml) workflow re-runs the contract
+sweep weekly against a live organization when its `DRIFT_*` secrets are configured.
 
 Official references:
 
