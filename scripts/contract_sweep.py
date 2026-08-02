@@ -26,6 +26,7 @@ from pydantic import BaseModel, ValidationError
 from mcp_wiki.settings import Settings
 from mcp_wiki.wiki.custom.client import WikiClient
 from mcp_wiki.wiki.custom.errors import WikiError
+from mcp_wiki.wiki.proto.types import pages as page_models
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
     GridUpdateRequest,
@@ -34,6 +35,24 @@ from mcp_wiki.wiki.proto.types.pages import (
 )
 
 REPORT: list[tuple[str, str, str]] = []
+
+
+def enable_extras_detection() -> None:
+    """Flip every model back to extra="allow" for this process.
+
+    Production models ignore unknown keys (token economy), which would blind
+    the sweep to contract drift — rebuild them permissive so new API keys
+    show up in the extras report again.
+    """
+    for name in dir(page_models):
+        obj = getattr(page_models, name)
+        if (
+            isinstance(obj, type)
+            and issubclass(obj, page_models.BaseWikiModel)
+            and obj is not page_models.BaseWikiModel
+        ):
+            obj.model_config["extra"] = "allow"
+            obj.model_rebuild(force=True)
 
 
 def make_client(settings: Settings) -> WikiClient:
@@ -334,6 +353,7 @@ async def main() -> int:
     parser.add_argument("--cleanup", action="store_true")
     args = parser.parse_args()
 
+    enable_extras_detection()
     settings = Settings()
     async with make_client(settings) as wiki:
         if args.cleanup:

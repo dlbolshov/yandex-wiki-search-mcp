@@ -12,6 +12,13 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 - `SearchResponse` now mirrors the live envelope: `results` plus `next_cursor`/`prev_cursor` (currently always `null` server-side). The previously declared `total_documents`, `total_pages`, `page_id`, `search_client` and `uid` fields never arrived from the API and were removed from the schema
+- Tool results went on a token diet (all shapes verified against the live API, `scripts/contract_sweep.py`):
+  - `None` values are omitted from every tool result — fields the API did not send no longer arrive as `null` noise
+  - unknown API keys are dropped from fixed-shape models instead of leaking into results verbatim; grid models (`WikiGrid`, `WikiGridColumn`, `WikiGridRow`, `GridUpdateResponse`) still pass unknown keys through, because there they are user data
+  - fields the live API actually sends are now declared instead of leaking untyped: `WikiPage.access_policy`/`access_lists`/`owner` (arrive when requested via `fields`), comment `author`/`inline_text`/`is_deleted`/`resolve_status`/`reactions`, attachment `is_downloadable`, recover `slug`/`pages_count`, and the `cells` key in `grid_update_cells` responses
+  - user references (comment `author`, attachment `user`) are trimmed to `id`/`username`/`display_name` — the raw API sends internal identity payloads (`uid`, `cloud_uid`, dismissal flags) on every comment and attachment
+  - `page_get_descendants` items are now honest `{id, slug}` objects (the live API never sends titles there), shrinking both the output schema and each result
+  - breaking for schema consumers: `PageComment.user` and `PageComment.updated_at` were removed — the live API sends neither (the author arrives in `author`)
 
 ## [0.7.0] - 2026-07-27
 

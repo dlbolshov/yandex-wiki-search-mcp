@@ -1,10 +1,38 @@
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+)
 
 
 class BaseWikiModel(BaseModel):
+    """Fixed-shape API models.
+
+    Unknown keys are dropped (`extra="ignore"`) and `None` values are omitted
+    from dumps — both to keep MCP tool results lean for LLM consumers. Fields
+    the live API actually sends must be declared explicitly (see
+    docs/api-notes.md and scripts/contract_sweep.py).
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _drop_none(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        if isinstance(data, dict):
+            return {key: value for key, value in data.items() if value is not None}
+        return data
+
+
+class DynamicWikiModel(BaseWikiModel):
+    """Dynamic payloads (grid values and friends): unknown keys are data."""
+
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
@@ -31,6 +59,14 @@ class ResourceTypeEnum(StrEnum):
 UploadLocation = Literal["top", "bottom"]
 
 
+class WikiUser(BaseWikiModel):
+    """Trimmed user reference — the API sends much more (identity, flags…)."""
+
+    id: int | None = None
+    username: str | None = None
+    display_name: str | None = None
+
+
 class WikiPage(BaseWikiModel):
     id: int
     slug: str | None = None
@@ -40,6 +76,9 @@ class WikiPage(BaseWikiModel):
     attributes: dict[str, Any] | None = None
     breadcrumbs: list[dict[str, Any]] | None = None
     redirect: dict[str, Any] | None = None
+    access_policy: dict[str, Any] | None = None
+    access_lists: dict[str, Any] | None = None
+    owner: dict[str, Any] | None = None
     created_at: str | None = None
     modified_at: str | None = None
 
@@ -65,8 +104,12 @@ class PageComment(BaseWikiModel):
     parent_id: int | None = None
     thread_id: int | None = None
     created_at: str | None = None
-    updated_at: str | None = None
-    user: dict[str, Any] | None = None
+    author: WikiUser | None = None
+    inline_text: str | None = None
+    is_deleted: bool | None = None
+    resolve_status: str | None = None
+    reactions: list[Any] | None = None
+    thread_info: Any = None
 
 
 class WikiAttachment(BaseWikiModel):
@@ -79,7 +122,8 @@ class WikiAttachment(BaseWikiModel):
     created_at: str | None = None
     has_preview: bool | None = None
     check_status: str | None = None
-    user: dict[str, Any] | None = None
+    is_downloadable: bool | None = None
+    user: WikiUser | None = None
 
 
 class WikiResource(BaseWikiModel):
@@ -87,8 +131,15 @@ class WikiResource(BaseWikiModel):
     item: dict[str, Any]
 
 
+class DescendantItem(BaseWikiModel):
+    """Descendants carry only id and slug live — titles never arrive."""
+
+    id: int
+    slug: str | None = None
+
+
 class DescendantsResponse(BaseWikiModel):
-    results: list[WikiPage] = Field(default_factory=list)
+    results: list[DescendantItem] = Field(default_factory=list)
     next_cursor: str | None = None
     prev_cursor: str | None = None
 
@@ -122,7 +173,7 @@ class WikiGridSort(BaseWikiModel):
     direction: str | None = None
 
 
-class WikiGridColumn(BaseWikiModel):
+class WikiGridColumn(DynamicWikiModel):
     id: str | None = None
     slug: str | None = None
     title: str | None = None
@@ -145,7 +196,7 @@ class WikiGridStructure(BaseWikiModel):
     columns: list[WikiGridColumn] = Field(default_factory=list)
 
 
-class WikiGridRow(BaseWikiModel):
+class WikiGridRow(DynamicWikiModel):
     id: str | int | None = None
     row: list[Any] = Field(default_factory=list)
     pinned: bool | None = None
@@ -164,7 +215,7 @@ class GridsResponse(BaseWikiModel):
     prev_cursor: str | None = None
 
 
-class WikiGrid(BaseWikiModel):
+class WikiGrid(DynamicWikiModel):
     id: str | int
     title: str | None = None
     page: WikiGridPageRef | None = None
@@ -209,9 +260,10 @@ class GridUpdateRequest(BaseWikiModel):
 class GridMutationResponse(BaseWikiModel):
     revision: str | None = None
     results: list[WikiGridRow] = Field(default_factory=list)
+    cells: list[Any] | None = None
 
 
-class GridUpdateResponse(BaseWikiModel):
+class GridUpdateResponse(DynamicWikiModel):
     id: str | int | None = None
     title: str | None = None
     page: WikiGridPageRef | None = None
@@ -242,6 +294,8 @@ class DeletePageResponse(BaseWikiModel):
 
 class RecoverPageResponse(BaseWikiModel):
     id: int
+    slug: str | None = None
+    pages_count: int | None = None
 
 
 class UploadSessionResponse(BaseWikiModel):
