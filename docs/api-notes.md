@@ -80,6 +80,10 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   (id, content, breadcrumbs, access data, owner…), not a status stub.
 - Descendants items carry **only `id` and `slug`** — no titles; a `fields` query param is
   accepted but has no effect. Cursor pagination works (verified with `page_size=5` walks).
+- `GET /pages/descendants` returns the **full subtree, all nesting levels**, as one flat
+  list — not just direct children (verified 2026-08-03: a 3-level tree arrives in a single
+  call). There is no depth parameter; slugs encode the hierarchy, so depth is
+  `slug.count("/")` relative to the root.
 - Delete → recover (`DELETE /pages/{id}` → `POST /recovery_tokens/{token}/recover`)
   restores the page with the **same id**; the recover response also carries `slug` and
   `pages_count` (subtree size).

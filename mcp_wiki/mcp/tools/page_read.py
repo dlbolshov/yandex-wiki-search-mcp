@@ -156,7 +156,15 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
 
     @mcp.tool(
         title="Get Page Descendants",
-        description="Get a subtree of Yandex Wiki pages under a parent page.",
+        description=(
+            "Get the subtree of Yandex Wiki pages under a parent page. Returns "
+            "descendants from ALL nesting levels as one flat list of {id, slug} "
+            "items — slugs encode the hierarchy ('<parent>/x/y' is nested under "
+            "'<parent>/x'), so the tree can be reconstructed without further "
+            "calls. Combine with fetch_all=true to map a whole section at once; "
+            "if the result comes back truncated=true, continue via next_cursor "
+            "or narrow down by calling this tool on a subsection's slug."
+        ),
         annotations=ToolAnnotations(readOnlyHint=True),
     )
     async def page_get_descendants(
