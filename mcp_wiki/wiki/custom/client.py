@@ -9,6 +9,7 @@ from typing import Any, BinaryIO, Literal
 
 from aiohttp import (
     ClientConnectionError,
+    ClientError,
     ClientPayloadError,
     ClientSession,
     ClientTimeout,
@@ -25,6 +26,7 @@ from mcp_wiki.wiki.custom.errors import (
     PageNotFound,
     WikiApiError,
     WikiError,
+    WikiTransportError,
     build_api_error,
 )
 from mcp_wiki.wiki.proto.common import YandexAuth
@@ -261,11 +263,15 @@ class WikiClient(WikiProtocol):
                     status = response.status
                     retry_after = response.headers.get("Retry-After")
                     payload = await response.read()
-            except (ClientConnectionError, ClientPayloadError) as exc:
-                # ServerTimeoutError subclasses both ClientConnectionError and
-                # asyncio.TimeoutError; timeouts are never retried.
-                if isinstance(exc, asyncio.TimeoutError) or attempt == attempts:
-                    raise
+            except (ClientError, TimeoutError) as exc:
+                # A plain total timeout raises bare TimeoutError, which is not a
+                # ClientError; ServerTimeoutError is both. Timeouts are never
+                # retried, and only connection/payload failures ever were.
+                retryable_failure = isinstance(
+                    exc, ClientConnectionError | ClientPayloadError
+                ) and not isinstance(exc, TimeoutError)
+                if not retryable_failure or attempt == attempts:
+                    raise WikiTransportError(method, path, exc) from exc
                 delay = _backoff_delay(attempt)
                 logger.warning(
                     "%s %s failed with %r, retrying in %.2fs (attempt %d/%d)",

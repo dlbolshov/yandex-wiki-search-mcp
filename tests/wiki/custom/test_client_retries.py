@@ -14,7 +14,11 @@ from mcp_wiki.wiki.custom.client import (
     _backoff_delay,
     _retry_delay,
 )
-from mcp_wiki.wiki.custom.errors import PageNotFound, WikiApiError
+from mcp_wiki.wiki.custom.errors import (
+    PageNotFound,
+    WikiApiError,
+    WikiTransportError,
+)
 
 PAGE_URL = "https://api.wiki.yandex.net/v1/pages/1"
 SEARCH_URL = "https://api.wiki.yandex.net/v1/search"
@@ -95,9 +99,10 @@ class TestRetries:
             for _ in range(3):
                 mocked.get(PAGE_URL, exception=ServerDisconnectedError())
 
-            with pytest.raises(ServerDisconnectedError):
+            with pytest.raises(WikiTransportError) as excinfo:
                 await wiki_client_retrying.page_get(1)
 
+        assert isinstance(excinfo.value.cause, ServerDisconnectedError)
         assert len(sleep_calls) == 2
 
     async def test_server_timeout_error_is_not_retried(
@@ -109,9 +114,27 @@ class TestRetries:
         with aioresponses() as mocked:
             mocked.get(PAGE_URL, exception=ServerTimeoutError())
 
-            with pytest.raises(ServerTimeoutError):
+            with pytest.raises(WikiTransportError) as excinfo:
                 await wiki_client_retrying.page_get(1)
 
+        assert isinstance(excinfo.value.cause, ServerTimeoutError)
+        assert sleep_calls == []
+
+    async def test_plain_total_timeout_is_wrapped_with_a_readable_message(
+        self,
+        wiki_client_retrying: WikiClient,
+        sleep_calls: list[float],
+    ) -> None:
+        # A bare TimeoutError is not a ClientError and carries an empty str(),
+        # so unwrapped it would reach MCP clients as a blank error message.
+        with aioresponses() as mocked:
+            mocked.get(PAGE_URL, exception=TimeoutError())
+
+            with pytest.raises(WikiTransportError) as excinfo:
+                await wiki_client_retrying.page_get(1)
+
+        assert "GET v1/pages/1 failed before a response" in str(excinfo.value)
+        assert "TimeoutError" in str(excinfo.value)
         assert sleep_calls == []
 
     async def test_search_is_retried_despite_being_a_post(
