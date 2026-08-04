@@ -23,7 +23,7 @@ def make_settings(**overrides: Any) -> Settings:
 
 
 def test_minimal_config_with_wiki_token() -> None:
-    settings = make_settings(wiki_token=SecretStr("token"))
+    settings = make_settings(wiki_token=SecretStr("token"), wiki_org_id="1")
 
     assert settings.transport == "stdio"
     assert settings.wiki_max_retries == 2
@@ -31,13 +31,31 @@ def test_minimal_config_with_wiki_token() -> None:
 
 
 def test_iam_token_alone_is_enough() -> None:
-    settings = make_settings(wiki_iam_token=SecretStr("iam-token"))
+    settings = make_settings(wiki_iam_token=SecretStr("iam-token"), wiki_org_id="1")
     assert settings.wiki_token is None
 
 
 def test_requires_some_auth_when_oauth_disabled() -> None:
     with pytest.raises(ValidationError, match="wiki_token or wiki_iam_token"):
         make_settings()
+
+
+def test_requires_an_org_id_when_oauth_disabled() -> None:
+    # Without one the server starts and then fails on the first API call
+    # with a bare ValueError out of _build_headers.
+    with pytest.raises(ValidationError, match="wiki_org_id or wiki_cloud_org_id"):
+        make_settings(wiki_token=SecretStr("token"))
+
+
+def test_org_id_is_not_required_under_oauth() -> None:
+    # Under OAuth the org arrives per request in YandexAuth.
+    settings = make_settings(
+        oauth_enabled=True,
+        oauth_client_id="cid",
+        oauth_client_secret=SecretStr("secret"),
+        mcp_server_public_url="https://example.test",
+    )
+    assert settings.wiki_org_id is None
 
 
 def test_rejects_both_org_ids() -> None:
@@ -88,5 +106,7 @@ def test_max_retries_rejects_negative() -> None:
 
 
 def test_max_retries_zero_disables_retries() -> None:
-    settings = make_settings(wiki_token=SecretStr("token"), wiki_max_retries=0)
+    settings = make_settings(
+        wiki_token=SecretStr("token"), wiki_org_id="1", wiki_max_retries=0
+    )
     assert settings.wiki_max_retries == 0

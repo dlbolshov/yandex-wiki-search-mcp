@@ -1,9 +1,23 @@
+import json
 from collections.abc import AsyncGenerator
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from mcp_wiki.wiki.custom.client import WikiClient
 from mcp_wiki.wiki.proto.common import YandexAuth
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def load_fixture(name: str) -> Any:
+    """Load a recorded API payload from tests/fixtures.
+
+    Tests that use these are what keeps them honest: a fixture nobody loads
+    quietly drifts away from the contract it claims to document.
+    """
+    return json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
 
 @pytest.fixture

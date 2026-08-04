@@ -48,6 +48,11 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   datetime string**. Two result types: **`page`** (relative `url`, normalized by the tool
   to an absolute link based on `WIKI_WEB_BASE_URL`) and **`file`** (absolute
   `...?download=1` download link).
+- Size, measured with `scripts/token_probe.py` on 2026-08-04 at `limit=50`: a 48-hit
+  response is ~28k chars, of which ~14k are snippets — 33 of 48 snippets exceed 200
+  chars. Worth knowing before raising `page_size`: the endpoint honoring `limit`
+  (fixed in 0.8.0) made a full-size search roughly 5x heavier than the 10-result
+  replies it used to return.
 - There is still **no server-side filtering** — section/type body params are ignored.
   The tool's `slug_prefix` and `result_type` arguments are applied client-side after fetching.
 - Quoted `"exact phrase"` queries work and produce phrase-matched results;

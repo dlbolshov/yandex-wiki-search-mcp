@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from mcp_wiki.settings import Settings
 from mcp_wiki.wiki.custom.client import WikiClient
 from mcp_wiki.wiki.proto.types.pages import (
+    DescendantItem,
     DescendantsResponse,
     PageComment,
     SearchResponse,
@@ -105,9 +106,11 @@ def report_wire(model: BaseModel, slim: Any) -> None:
 
 
 async def probe_search(wiki: WikiClient, query: str) -> None:
-    print(f"\n=== page_search (query={query!r}, page_size=50) ===")
+    print(f"\n=== page_search (query={query!r}, limit=50) ===")
+    # The endpoint reads "limit" and silently ignores "page_size" — sending
+    # the latter would measure 10 results while claiming 50 (api-notes.md).
     payload = await wiki._request(
-        "POST", "v1/search", json_body={"query": query, "page_size": 50}
+        "POST", "v1/search", json_body={"query": query, "limit": 50}
     )
     raw = json.loads(payload)
     print(f"  raw API response: {size(raw)} chars")
@@ -116,9 +119,9 @@ async def probe_search(wiki: WikiClient, query: str) -> None:
     print(f"  envelope keys: {sorted(envelope)}")
     if results:
         analyze_items(results, SearchResultItem, "result item")
-        bodies = [len(r.get("body") or r.get("content") or "") for r in results]
+        bodies = [len(r.get("content") or "") for r in results]
         print(
-            f"    snippets (body|content): min={min(bodies)} "
+            f"    snippets (content): min={min(bodies)} "
             f"med={int(statistics.median(bodies))} "
             f"max={max(bodies)} total={sum(bodies)}"
         )
@@ -131,7 +134,7 @@ async def probe_search(wiki: WikiClient, query: str) -> None:
                 "slug": r.get("slug"),
                 "title": r.get("title"),
                 "type": r.get("type"),
-                "snippet": (r.get("body") or r.get("content") or "")[:200],
+                "snippet": (r.get("content") or "")[:200],
             }
             for r in results
         ],
@@ -159,7 +162,7 @@ async def probe_descendants(wiki: WikiClient, slug: str) -> None:
     results = raw.get("results", [])
     print(f"  envelope keys: {sorted(k for k in raw if k != 'results')}")
     if results:
-        analyze_items(results, WikiPage, "tree item")
+        analyze_items(results, DescendantItem, "tree item")
         present: dict[str, int] = {}
         for item in results:
             for key, value in item.items():
@@ -167,10 +170,7 @@ async def probe_descendants(wiki: WikiClient, slug: str) -> None:
                     present[key] = present.get(key, 0) + 1
         print(f"    non-null key coverage: {dict(sorted(present.items()))}")
     slim = {
-        "results": [
-            {"id": r.get("id"), "slug": r.get("slug"), "title": r.get("title")}
-            for r in results
-        ],
+        "results": [{"id": r.get("id"), "slug": r.get("slug")} for r in results],
         "next_cursor": raw.get("next_cursor"),
     }
     try:

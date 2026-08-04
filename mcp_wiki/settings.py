@@ -64,5 +64,14 @@ class Settings(BaseSettings):
             raise ValueError(
                 "wiki_token or wiki_iam_token must be set when oauth_enabled is False"
             )
+        elif not self.wiki_org_id and not self.wiki_cloud_org_id:
+            # Only outside OAuth: with oauth_enabled the org arrives per
+            # request in YandexAuth, and requiring it here would break a
+            # legitimate multi-user deployment. Without OAuth there is no
+            # other source, so the server would start and then fail on the
+            # first API call with a bare ValueError from _build_headers.
+            raise ValueError(
+                "wiki_org_id or wiki_cloud_org_id must be set when oauth_enabled is False"
+            )
 
         return self
