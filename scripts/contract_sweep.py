@@ -37,22 +37,52 @@ from mcp_wiki.wiki.proto.types.pages import (
 REPORT: list[tuple[str, str, str]] = []
 
 
+KNOWN_DROPPED = frozenset(
+    {
+        # Identity payloads on every user reference, trimmed to WikiUser in
+        # v0.8.0 on purpose (docs/api-notes.md). They arrive on every comment
+        # and attachment, so without this list the sweep would cry drift
+        # every single run.
+        "identity",
+        "uid",
+        "cloud_uid",
+        "is_dismissed",
+        "affiliation",
+    }
+)
+
+
 def enable_extras_detection() -> None:
     """Flip every model back to extra="allow" for this process.
 
     Production models ignore unknown keys (token economy), which would blind
     the sweep to contract drift — rebuild them permissive so new API keys
     show up in the extras report again.
+
+    Flipping `model_config` is not enough: pydantic caches each model's core
+    schema, and a parent rebuilt while a child still holds a strict cached
+    schema keeps ignoring extras *inside* that child. Since dir() is
+    alphabetical, every `results: list[Item]` envelope sorted before its item
+    model — which is exactly where API drift shows up. So drop the cached
+    schemas first, then rebuild.
     """
-    for name in dir(page_models):
-        obj = getattr(page_models, name)
-        if (
-            isinstance(obj, type)
-            and issubclass(obj, page_models.BaseWikiModel)
-            and obj is not page_models.BaseWikiModel
+    models = [
+        obj
+        for name in dir(page_models)
+        if isinstance(obj := getattr(page_models, name), type)
+        and issubclass(obj, page_models.BaseWikiModel)
+    ]
+    for model in models:
+        model.model_config["extra"] = "allow"
+        for cached in (
+            "__pydantic_core_schema__",
+            "__pydantic_validator__",
+            "__pydantic_serializer__",
         ):
-            obj.model_config["extra"] = "allow"
-            obj.model_rebuild(force=True)
+            if cached in model.__dict__:
+                delattr(model, cached)
+    for model in models:
+        model.model_rebuild(force=True)
 
 
 def make_client(settings: Settings) -> WikiClient:
@@ -82,7 +112,17 @@ def extras_of(obj: Any) -> set[str]:
     return found
 
 
-async def check(name: str, fn: Callable[[], Awaitable[Any]]) -> Any:
+async def check(
+    name: str,
+    fn: Callable[[], Awaitable[Any]],
+    note_from_result: Callable[[Any], str] | None = None,
+) -> Any:
+    """Run one live call and record what the contract looked like.
+
+    Undeclared keys are a failure, not a footnote — silently noting them is
+    how drift reaches production. Keys we drop on purpose live in
+    KNOWN_DROPPED.
+    """
     try:
         result = await fn()
     except ValidationError as exc:
@@ -94,34 +134,62 @@ async def check(name: str, fn: Callable[[], Awaitable[Any]]) -> Any:
         REPORT.append((name, f"API {type(exc).__name__}", str(exc)[:160]))
         print(f"  !! {name}: {type(exc).__name__}: {str(exc)[:160]}")
         return None
-    note = ""
+
+    notes = []
+    if note_from_result is not None:
+        notes.append(note_from_result(result))
+    status = "OK"
     if isinstance(result, BaseModel | list):
-        extra = extras_of(result)
-        if extra:
-            note = "extras: " + ", ".join(sorted(extra))
+        undeclared = extras_of(result) - KNOWN_DROPPED
+        if undeclared:
+            status = "UNDECLARED EXTRAS"
+            notes.append(", ".join(sorted(undeclared)))
     elif isinstance(result, dict):
-        note = "keys: " + ", ".join(sorted(result)) if result else "empty body"
-    REPORT.append((name, "OK", note))
-    print(f"  ok {name}" + (f"  [{note}]" if note else ""))
+        notes.append("keys: " + ", ".join(sorted(result)) if result else "empty body")
+
+    note = "; ".join(n for n in notes if n)
+    REPORT.append((name, status, note))
+    marker = "ok" if status == "OK" else "!!"
+    print(f"  {marker} {name}" + (f"  [{note}]" if note else ""))
     return result
 
 
-async def walk_cursor(fetch: Callable[[str | None], Awaitable[Any]]) -> tuple[Any, str]:
-    """Follow next_cursor to the end; returns (last response, note)."""
-    total = 0
-    hops = 0
-    cursor: str | None = None
-    response = None
-    while True:
-        response = await fetch(cursor)
-        total += len(response.results)
-        cursor = response.next_cursor
-        if not cursor:
-            break
-        hops += 1
-        if hops > 20:
-            raise RuntimeError("cursor did not terminate after 20 hops")
-    return response, f"{total} items in {hops + 1} page(s)"
+class CursorWalk:
+    """Follows next_cursor to the end, merging every page into one envelope.
+
+    Merging matters: `check` inspects the object it is handed, so returning
+    only the last page would hide undeclared keys that appeared on any
+    earlier one.
+    """
+
+    MAX_PAGES = 20
+
+    def __init__(self, fetch: Callable[[str | None], Awaitable[Any]]):
+        self._fetch = fetch
+        self.pages = 0
+        self.stopped_early = False
+
+    async def run(self) -> Any:
+        first = await self._fetch(None)
+        self.pages = 1
+        cursor = first.next_cursor
+        while cursor:
+            if self.pages >= self.MAX_PAGES:
+                self.stopped_early = True
+                break
+            page = await self._fetch(cursor)
+            first.results.extend(page.results)
+            self.pages += 1
+            if page.next_cursor == cursor:
+                self.stopped_early = True
+                break
+            cursor = page.next_cursor
+        first.next_cursor = None
+        return first
+
+    def note(self, response: Any) -> str:
+        suffix = " (stopped early!)" if self.stopped_early else ""
+        return f"{len(response.results)} items in {self.pages} page(s){suffix}"
 
 
 async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
@@ -270,11 +338,22 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         fetched = await wiki.grid_get(grid_id)
         revision = fetched.revision or revision
         await check(
+            "grid_move_columns",
+            lambda: wiki.grid_move_columns(
+                grid_id, revision=revision, column_slug="count", position=0
+            ),
+        )
+        fetched = await wiki.grid_get(grid_id)
+        revision = fetched.revision or revision
+        await check(
             "grid_delete_columns",
             lambda: wiki.grid_delete_columns(
                 grid_id, revision=revision, column_slugs=["done"]
             ),
         )
+        # grid_delete last: it takes the fixture away, and its response shape
+        # is one of the two the models do not cover yet.
+        await check("grid_delete", lambda: wiki.grid_delete(grid_id))
 
     print("\n=== reads ===")
     all_fields = [field.value for field in PageFieldEnum]
@@ -283,26 +362,24 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         lambda: wiki.page_get(root.id, fields=all_fields),
     )
     await check("page_get_by_slug", lambda: wiki.page_get_by_slug(base))
-    result = await check(
+    tree_walk = CursorWalk(
+        lambda cur: wiki.page_get_descendants(
+            base, include_self=True, page_size=5, cursor=cur
+        )
+    )
+    await check(
         "page_get_descendants (cursor walk, page_size=5)",
-        lambda: walk_cursor(
-            lambda cur: wiki.page_get_descendants(
-                base, include_self=True, page_size=5, cursor=cur
-            )
-        ),
+        tree_walk.run,
+        note_from_result=tree_walk.note,
     )
-    if result is not None:
-        REPORT[-1] = (REPORT[-1][0], "OK", result[1])
-        print(f"     -> {result[1]}")
-    result = await check(
+    comment_walk = CursorWalk(
+        lambda cur: wiki.page_get_comments(root.id, page_size=2, cursor=cur)
+    )
+    await check(
         "page_get_comments (cursor walk, page_size=2)",
-        lambda: walk_cursor(
-            lambda cur: wiki.page_get_comments(root.id, page_size=2, cursor=cur)
-        ),
+        comment_walk.run,
+        note_from_result=comment_walk.note,
     )
-    if result is not None:
-        REPORT[-1] = (REPORT[-1][0], "OK", result[1])
-        print(f"     -> {result[1]}")
     await check("page_get_attachments", lambda: wiki.page_get_attachments(root.id))
     await check("page_get_resources (root)", lambda: wiki.page_get_resources(root.id))
     if grid is not None:
@@ -316,16 +393,21 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
     )
 
     print("\n=== delete / recover cycle ===")
+    if not children:
+        REPORT.append(("page_delete / page_recover", "SKIP", "no child pages created"))
+        return
     victim = children[-1]
     deleted = await check("page_delete", lambda: wiki.page_delete(victim.id))
     if deleted is not None and deleted.recovery_token:
-        recovered = await check(
-            "page_recover", lambda: wiki.page_recover(deleted.recovery_token)
+        await check(
+            "page_recover",
+            lambda: wiki.page_recover(deleted.recovery_token),
+            note_from_result=lambda r: (
+                "recovered with same id"
+                if r.id == victim.id
+                else "recovered with NEW id!"
+            ),
         )
-        if recovered is not None:
-            same = "same id" if recovered.id == victim.id else "NEW id!"
-            REPORT[-1] = (REPORT[-1][0], "OK", f"recovered with {same}")
-            print(f"     -> recovered with {same}")
     elif deleted is not None:
         REPORT.append(("page_recover", "SKIP", "no recovery_token in response"))
 
