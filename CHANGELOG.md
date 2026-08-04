@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.8.0] - 2026-08-04
 
 ### Added
 - `fetch_all` flag on the five cursor-paginated tools (`page_get_descendants`, `page_get_comments`, `page_get_attachments`, `page_get_resources`, `page_get_grids`): the server follows `next_cursor` and returns everything in one call, capped at 500 items and a 25s budget. The response then carries `truncated`: `false` only when the list was drained to its end, `true` when the walk stopped early — on the cap, the budget, a failed page or a cursor the server repeated. `next_cursor` then points at the continuation, except after a repeated cursor, where nothing is safe to continue from and it is cleared. A failed page keeps what was already fetched rather than discarding it. `page_search` deliberately has no such flag — its cursors are dead server-side (always `null`)
@@ -14,6 +14,7 @@ All notable changes to this project are documented in this file.
   - any non-empty search failed with a validation error — the API sends `modified_at` as an ISO datetime string, the model expected an integer epoch
   - the snippet arrives in the `content` key, not `body`: the declared field was always empty and the snippet text only reached clients through the extra-fields leak
   - the `page_size` tool parameter was silently ignored by the API (every search returned at most 10 results regardless of the requested size) — the endpoint reads `limit` from the POST body, which the client now sends; values above 50 are a validation error server-side, the existing clamp keeps them at 50
+- Under OAuth a client could not name a cloud organization on a server whose default is a plain `WIKI_ORG_ID`, or the other way round: the two ids were resolved independently, so a request carrying `?cloudOrgId=` was paired with the server-wide `org_id` and rejected as "only one of org_id or cloud_org_id". Per-request auth now replaces the organization as a unit
 
 ### Changed
 - `SearchResponse` now mirrors the live envelope: `results` plus `next_cursor`/`prev_cursor` (currently always `null` server-side). The previously declared `total_documents`, `total_pages`, `page_id`, `search_client` and `uid` fields never arrived from the API and were removed from the schema
