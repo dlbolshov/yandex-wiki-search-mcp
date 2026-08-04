@@ -3,13 +3,19 @@
 # re-runs the live contract sweep on a schedule so drift shows up as a red run
 # instead of a broken tool in production.
 #
-# Opt-in: configure in the repo settings
-#   secret DRIFT_WIKI_TOKEN        — OAuth token of a dedicated/robot account
-#   var    DRIFT_SWEEP_SLUG        — scratch slug the sweep may create/delete pages
-#                                    under, e.g. users/robot/contract-sweep
-#   var    DRIFT_WIKI_ORG_ID       — exactly one of the two org ids
-#   var    DRIFT_WIKI_CLOUD_ORG_ID
+# Opt-in: configure all of these as repository *secrets*, not variables
+#   DRIFT_WIKI_TOKEN        — OAuth token of a dedicated/robot account
+#   DRIFT_SWEEP_SLUG        — scratch slug the sweep may create/delete pages
+#                             under, e.g. users/robot/contract-sweep
+#   DRIFT_WIKI_ORG_ID       — exactly one of the two org ids
+#   DRIFT_WIKI_CLOUD_ORG_ID
 # Without them every step is skipped and the run stays green.
+#
+# Secrets rather than variables even for the non-credentials: on a public repo
+# the Actions logs are public, and only secrets are masked. The sweep prints
+# the slug it works under ("=== fixtures under '<slug>' ===", one "deleted
+# <slug>/..." line per page during cleanup), which would otherwise publish the
+# account name and the section layout every week.
 
 name: API drift check
 
@@ -26,16 +32,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       WIKI_TOKEN: ${{ secrets.DRIFT_WIKI_TOKEN }}
-      WIKI_ORG_ID: ${{ vars.DRIFT_WIKI_ORG_ID }}
-      WIKI_CLOUD_ORG_ID: ${{ vars.DRIFT_WIKI_CLOUD_ORG_ID }}
-      SWEEP_SLUG: ${{ vars.DRIFT_SWEEP_SLUG }}
+      WIKI_ORG_ID: ${{ secrets.DRIFT_WIKI_ORG_ID }}
+      WIKI_CLOUD_ORG_ID: ${{ secrets.DRIFT_WIKI_CLOUD_ORG_ID }}
+      SWEEP_SLUG: ${{ secrets.DRIFT_SWEEP_SLUG }}
     steps:
       - name: Check drift credentials are configured
         id: creds
         run: |
-          # An unset repo variable arrives as the empty string, so a partial
-          # setup would otherwise pass this gate and die on the first API
-          # call with a bare traceback.
+          # An unset secret arrives as the empty string, so a partial setup
+          # would otherwise pass this gate and die on the first API call
+          # with a bare traceback.
           if [ -n "$WIKI_TOKEN" ] && [ -n "$SWEEP_SLUG" ] &&
              { [ -n "$WIKI_ORG_ID" ] || [ -n "$WIKI_CLOUD_ORG_ID" ]; }; then
             echo "present=true" >> "$GITHUB_OUTPUT"

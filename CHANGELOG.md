@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+- The `API drift check` workflow now reads every `DRIFT_*` input from repository secrets instead of variables. Only secrets are masked in Actions logs, and on a public repo those logs are public — the sweep prints the slug it works under, so `DRIFT_SWEEP_SLUG` as a variable published the account name and section layout every week. Move the existing variables to secrets under the same names; until then the workflow skips itself, as it does for any incomplete setup
+
 ## [0.8.0] - 2026-08-04
 
 ### Added
