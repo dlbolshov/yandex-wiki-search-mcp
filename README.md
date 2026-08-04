@@ -111,11 +111,11 @@ claude mcp add yandex-wiki-search \
 |---|---|
 | `page_search` | Full-text search across the entire Wiki (pages and files), up to 50 ranked results with snippets |
 | `page_get` | Get a page by `page_id` or `slug` (accepts full Wiki URLs too) |
-| `page_get_descendants` | Traverse a page subtree with pagination |
-| `page_get_comments` | List page comments |
-| `page_get_resources` | List page resources (attachments + grids) with server-side title search |
-| `page_get_attachments` | List page attachments |
-| `page_get_grids` | List grids attached to a page |
+| `page_get_descendants` | Traverse a page subtree — one flat list of `{id, slug}` from all nesting levels; `fetch_all` drains the cursor in one call |
+| `page_get_comments` | List page comments (`fetch_all` supported) |
+| `page_get_resources` | List page resources (attachments + grids) with server-side title search (`fetch_all` supported) |
+| `page_get_attachments` | List page attachments (`fetch_all` supported) |
+| `page_get_grids` | List grids attached to a page (`fetch_all` supported) |
 | `grid_get` | Get a grid by `grid_id` with row/column/revision filters |
 
 ### Pages: write (7)
