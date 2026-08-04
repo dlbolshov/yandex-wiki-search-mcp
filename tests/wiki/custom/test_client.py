@@ -726,7 +726,7 @@ class TestWikiClient:
                 anchor="#release-notes",
             )
 
-        assert result["id"] == 10
+        assert result.id == 10
         append_capture.assert_called_once()
         get_capture.assert_called_once()
         update_capture.assert_called_once()

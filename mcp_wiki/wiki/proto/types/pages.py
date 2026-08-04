@@ -44,9 +44,27 @@ class BaseWikiModel(BaseModel):
 
 
 class DynamicWikiModel(BaseWikiModel):
-    """Dynamic payloads (grid values and friends): unknown keys are data."""
+    """Dynamic payloads (grid values and friends): unknown keys are data.
+
+    Declared fields are still API form, so a `None` there means "not sent"
+    and is dropped like everywhere else. Unknown keys are the user's own
+    columns, where `null` is a value — "this cell is empty" has to stay
+    distinguishable from "this column does not exist".
+    """
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _drop_none(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        if not isinstance(data, dict):
+            return data
+        extras = self.model_extra or {}
+        return {
+            key: value
+            for key, value in data.items()
+            if value is not None or key in extras
+        }
 
 
 class PageFieldEnum(StrEnum):
@@ -184,11 +202,13 @@ class ResourcesResponse(CursorEnvelope):
 
 
 class WikiGridPageRef(BaseWikiModel):
+    """Service reference, not user data — stays strict."""
+
     id: int | str | None = None
     slug: str | None = None
 
 
-class WikiGridSort(BaseWikiModel):
+class WikiGridSort(DynamicWikiModel):
     slug: str | None = None
     title: str | None = None
     direction: str | None = None
@@ -212,7 +232,7 @@ class WikiGridColumn(DynamicWikiModel):
     description: str | None = None
 
 
-class WikiGridStructure(BaseWikiModel):
+class WikiGridStructure(DynamicWikiModel):
     default_sort: list[WikiGridSort] = Field(default_factory=list)
     columns: list[WikiGridColumn] = Field(default_factory=list)
 
@@ -225,6 +245,8 @@ class WikiGridRow(DynamicWikiModel):
 
 
 class WikiGridSummary(BaseWikiModel):
+    """Listing envelope, not user data — stays strict."""
+
     id: str | int
     title: str | None = None
     created_at: str | None = None

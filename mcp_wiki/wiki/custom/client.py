@@ -822,7 +822,7 @@ class WikiClient(WikiProtocol):
         location: UploadLocation = "bottom",
         anchor: str | None = None,
         auth: YandexAuth | None = None,
-    ) -> dict[str, Any]:
+    ) -> WikiPage:
         body: dict[str, Any] = {"content": content}
         if anchor:
             body["anchor"] = {"name": anchor}
@@ -850,15 +850,17 @@ class WikiClient(WikiProtocol):
                     anchor=anchor,
                 )
                 if updated_content is not None:
-                    updated_page = await self.page_update(
+                    return await self.page_update(
                         page_id,
                         content=updated_content,
                         allow_merge=True,
                         auth=auth,
                     )
-                    return json.loads(updated_page.model_dump_json())
             raise
-        return self._json_or_empty(payload)
+        # The endpoint answers with the full updated page, not a status stub
+        # (verified live, docs/api-notes.md) — same shape as the anchor
+        # fallback above, so both paths of this tool agree.
+        return WikiPage.model_validate_json(payload)
 
     async def page_add_comment(
         self,

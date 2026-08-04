@@ -15,6 +15,8 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiAttachment,
     WikiGrid,
     WikiGridRow,
+    WikiGridStructure,
+    WikiGridSummary,
     WikiPage,
 )
 
@@ -164,3 +166,24 @@ class TestDynamicModels:
         assert dumped["custom"] == "x"
         assert "pinned" not in dumped
         assert dumped["row"] == [1, None]
+
+    def test_declared_none_is_dropped_but_user_null_survives(self) -> None:
+        # "this column is empty" must stay distinguishable from "no such
+        # column"; a declared field that the API did not send is just noise.
+        row = WikiGridRow.model_validate(
+            {"id": 7, "row": [1, None], "user_col": None, "pinned": None}
+        )
+        dumped = row.model_dump()
+        assert dumped["user_col"] is None
+        assert "pinned" not in dumped
+        assert dumped["row"] == [1, None]
+
+    def test_grid_structure_keeps_unknown_blocks(self) -> None:
+        structure = WikiGridStructure.model_validate(
+            {"columns": [], "future_layout_block": {"row_height": 2}}
+        )
+        assert structure.model_dump()["future_layout_block"] == {"row_height": 2}
+
+    def test_grid_summary_stays_strict(self) -> None:
+        summary = WikiGridSummary.model_validate({"id": "g1", "brand_new_key": 1})
+        assert "brand_new_key" not in summary.model_dump()

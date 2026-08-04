@@ -614,21 +614,18 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
                 description="Anchor name like '#release-notes'. Overrides location when provided."
             ),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> PageWriteResponse:
         resolved_page_id, resolved_page_type = await resolve_page_id_and_type(
             ctx, page_id=page_id, slug=slug
         )
-        result = await get_wiki(ctx).page_append_content(
+        page = await get_wiki(ctx).page_append_content(
             resolved_page_id,
             content=content,
             location=location,
             anchor=anchor,
             auth=get_yandex_auth(ctx),
         )
-        warnings = _content_warnings(resolved_page_type, content)
-        if warnings:
-            result = {**result, "yfm_warnings": warnings}
-        return result
+        return _with_yfm_warnings(page, _content_warnings(resolved_page_type, content))
 
     @mcp.tool(
         title="Add Page Comment",

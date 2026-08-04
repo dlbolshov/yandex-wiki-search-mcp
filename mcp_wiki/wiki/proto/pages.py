@@ -245,7 +245,7 @@ class WikiProtocol(Protocol):
         location: UploadLocation = "bottom",
         anchor: str | None = None,
         auth: YandexAuth | None = None,
-    ) -> dict[str, Any]: ...
+    ) -> WikiPage: ...
 
     async def page_add_comment(
         self,
