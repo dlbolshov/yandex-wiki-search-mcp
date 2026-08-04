@@ -21,8 +21,6 @@ from mcp_wiki.settings import Settings
 from mcp_wiki.wiki.custom.client import WikiClient
 from mcp_wiki.wiki.custom.errors import WikiError
 
-PAGE_TYPE_PROBES = ["wysiwyg", "md", "wiki", "wikipage", "page", "bogus-type"]
-
 FENCE = "```"
 
 BATTERY_SECTIONS = [
@@ -71,30 +69,11 @@ def make_client(settings: Settings) -> WikiClient:
     )
 
 
-async def probe_page_types(wiki: WikiClient, base_slug: str) -> None:
-    print("\n=== 1. page_type probe (page_create) ===")
-    for page_type in PAGE_TYPE_PROBES:
-        slug = f"{base_slug}/pt-{page_type}"
-        try:
-            page = await wiki.page_create(
-                slug=slug,
-                title=f"pt={page_type}",
-                content="probe",
-                page_type=page_type,
-            )
-            print(
-                f"  sent {page_type!r:14} -> OK   id={page.id} "
-                f"returned page_type={page.page_type!r}"
-            )
-        except WikiError as exc:
-            print(f"  sent {page_type!r:14} -> FAIL {type(exc).__name__}: {exc}")
-
-
 async def probe_battery(wiki: WikiClient, base_slug: str, web_base_url: str) -> None:
-    print("\n=== 2. YFM battery page ===")
+    print("\n=== 1. YFM battery page ===")
     slug = f"{base_slug}/battery"
     page = await wiki.page_create(
-        slug=slug, title="YFM battery", content=BATTERY_CONTENT, page_type="wysiwyg"
+        slug=slug, title="YFM battery", content=BATTERY_CONTENT
     )
     got = await wiki.page_get(page.id, fields=["content", "attributes"])
     stored = got.content if isinstance(got.content, str) else repr(got.content)
@@ -111,7 +90,7 @@ async def probe_battery(wiki: WikiClient, base_slug: str, web_base_url: str) -> 
         if len(sent_lines) != len(got_lines):
             print(f"    line count: sent={len(sent_lines)} got={len(got_lines)}")
 
-    print("\n=== 3. append-content into the battery page ===")
+    print("\n=== 2. append-content into the battery page ===")
     try:
         await wiki.page_append_content(page.id, content=APPEND_FRAGMENT)
         print("  append (bottom) -> OK")
@@ -122,7 +101,7 @@ async def probe_battery(wiki: WikiClient, base_slug: str, web_base_url: str) -> 
 
 
 async def probe_legacy(wiki: WikiClient, legacy_slug: str) -> None:
-    print("\n=== 4. legacy page probe ===")
+    print("\n=== 3. legacy page probe ===")
     try:
         page = await wiki.page_get_by_slug(legacy_slug, fields=["attributes"])
         print(f"  {legacy_slug}: page_type={page.page_type!r} id={page.id}")
@@ -132,8 +111,6 @@ async def probe_legacy(wiki: WikiClient, legacy_slug: str) -> None:
 
 async def cleanup(wiki: WikiClient, base_slug: str) -> None:
     print(f"\n=== cleanup: deleting descendants of {base_slug} ===")
-    for page_type in PAGE_TYPE_PROBES:
-        await _delete_silent(wiki, f"{base_slug}/pt-{page_type}")
     await _delete_silent(wiki, f"{base_slug}/battery")
 
 
@@ -162,7 +139,6 @@ async def main() -> int:
         if args.cleanup:
             await cleanup(wiki, args.base_slug)
             return 0
-        await probe_page_types(wiki, args.base_slug)
         await probe_battery(wiki, args.base_slug, settings.wiki_web_base_url)
         if args.legacy_slug:
             await probe_legacy(wiki, args.legacy_slug)
