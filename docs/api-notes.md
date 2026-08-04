@@ -93,6 +93,9 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   restores the page with the **same id**; the recover response also carries `slug` and
   `pages_count` (subtree size).
 - Attachment objects include an undocumented `is_downloadable` flag.
+- Deleting a page **frees its slug immediately**: the page stops resolving and the
+  same slug can be created again, even though the delete is recoverable by token
+  (verified 2026-08-05).
 
 ## Comments
 
@@ -110,6 +113,11 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   `[{"column": "status", "direction": "asc"}]` shape and converts it.
 - `grid_add_columns` requires `required` on every column — the API validates it.
 - `grid_copy` is asynchronous: the API returns operation metadata, not a ready copied grid.
+- Grid mutations are **serialized per grid**. Two mutations back to back — or any
+  mutation while an async `grid_copy` is still running — answer `409`
+  `CONFLICTING_OPERATION` ("Conflicting operation in progress"). The write did not
+  apply, so retrying after a short pause is safe; `scripts/contract_sweep.py` does
+  exactly that rather than reporting the lock as drift (verified 2026-08-05).
 - `POST /grids/{id}/cells` responds with a **`cells`** key — unlike the row/column
   mutations, which answer with `results` (+ `revision`).
 

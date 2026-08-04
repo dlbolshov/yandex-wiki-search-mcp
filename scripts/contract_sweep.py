@@ -25,7 +25,7 @@ from pydantic import BaseModel, ValidationError
 
 from mcp_wiki.settings import Settings
 from mcp_wiki.wiki.custom.client import WikiClient
-from mcp_wiki.wiki.custom.errors import WikiError
+from mcp_wiki.wiki.custom.errors import PageNotFound, WikiApiError, WikiError
 from mcp_wiki.wiki.proto.types import pages as page_models
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
@@ -112,6 +112,29 @@ def extras_of(obj: Any) -> set[str]:
     return found
 
 
+CONFLICT_ATTEMPTS = 4
+CONFLICT_DELAY = 1.5
+
+
+async def _await_settled(fn: Callable[[], Awaitable[Any]]) -> Any:
+    """Retry a call while the API reports a conflicting operation.
+
+    Grid mutations are serialized server-side: fire two at a grid back to back
+    — or touch one while an async `grid_copy` is still running — and the second
+    gets 409 CONFLICTING_OPERATION. That is a lock, not a contract change, and
+    a weekly job that cries drift over it teaches everyone to ignore it.
+    """
+    for attempt in range(1, CONFLICT_ATTEMPTS + 1):
+        try:
+            return await fn()
+        except WikiApiError as exc:
+            conflict = exc.status == 409 and exc.error_code == "CONFLICTING_OPERATION"
+            if not conflict or attempt == CONFLICT_ATTEMPTS:
+                raise
+            await asyncio.sleep(CONFLICT_DELAY * attempt)
+    raise AssertionError("unreachable")
+
+
 async def check(
     name: str,
     fn: Callable[[], Awaitable[Any]],
@@ -124,7 +147,7 @@ async def check(
     KNOWN_DROPPED.
     """
     try:
-        result = await fn()
+        result = await _await_settled(fn)
     except ValidationError as exc:
         first = "; ".join(str(exc).splitlines()[1:3])
         REPORT.append((name, "MODEL MISMATCH", first[:160]))
@@ -192,14 +215,48 @@ class CursorWalk:
         return f"{len(response.results)} items in {self.pages} page(s){suffix}"
 
 
+ROOT_TITLE = "Contract sweep"
+
+
+async def _clear_own_leftovers(wiki: WikiClient, base: str) -> bool:
+    """Remove a previous run's fixtures so a rerun can proceed.
+
+    A run cancelled between creating the root and the cleanup step leaves the
+    slug taken, and every later run would then fail on page_create — a weekly
+    job that breaks permanently after one bad night is worse than useless.
+
+    Only fixtures this script made are removed: the base slug must hold a page
+    this script titled. Anything else is someone's real page — the operator
+    pointed the sweep at the wrong slug, and deleting it would be the worst
+    possible response.
+    """
+    try:
+        existing = await wiki.page_get_by_slug(base)
+    except WikiError:
+        return False
+
+    title = existing.title or ""
+    if not title.startswith(ROOT_TITLE):
+        print(f"  !! {base!r} holds a page titled {title!r}, which this sweep did")
+        print("     not create. Point SWEEP_SLUG at a scratch slug instead — the")
+        print("     sweep creates and deletes pages under it.")
+        return False
+
+    print(f"  leftovers from an earlier run at {base!r}, clearing them first")
+    await cleanup(wiki, base)
+    return True
+
+
 async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
     print(f"\n=== fixtures under {base!r} ===")
-    root = await check(
-        "page_create (root)",
-        lambda: wiki.page_create(
-            slug=base, title="Contract sweep", content="root page"
-        ),
-    )
+
+    def create_root() -> Any:
+        return wiki.page_create(slug=base, title=ROOT_TITLE, content="root page")
+
+    root = await check("page_create (root)", create_root)
+    if root is None and await _clear_own_leftovers(wiki, base):
+        REPORT.pop()
+        root = await check("page_create (root, after clearing leftovers)", create_root)
     if root is None:
         print("cannot continue without the root page")
         return
@@ -421,7 +478,14 @@ async def cleanup(wiki: WikiClient, base: str) -> None:
             base, include_self=True, page_size=100, cursor=cur
         )
     )
-    response = await walk.run()
+    try:
+        response = await walk.run()
+    except PageNotFound:
+        # The workflow runs cleanup with if: always(), so it also runs after a
+        # sweep that died before creating anything. Nothing to remove is the
+        # goal state, not an error to fail the job with.
+        print(f"nothing to clean up under {base!r}")
+        return
     pages = sorted(
         response.results,
         key=lambda p: (p.slug or "").count("/"),
