@@ -214,7 +214,7 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 | `WIKI_WEB_BASE_URL` | no | `https://wiki.yandex.ru` | Base for absolute page links in `page_search` results |
 | `WIKI_AUTH_SCHEME` | no | `OAuth` | `Authorization` header scheme for `WIKI_TOKEN` (`OAuth` \| `Bearer`) |
 | `WIKI_MAX_RETRIES` | no | `2` | Retries for dropped connections and `429`/`502`/`503`/`504` on read requests; `0` disables them |
-| `TOOL_RESULT_TEXT` | no | `pretty` | Text duplicate of structured tool results: `pretty` (indent=2) \| `compact` (single line, ~half the tokens) \| `none` (structured only — check your client renders `structuredContent` first) |
+| `TOOL_RESULT_TEXT` | no | `pretty` | Text duplicate of structured tool results: `pretty` (indent=2) \| `compact` (single line, 10-30% off the text block) \| `none` (structured only — check your client renders `structuredContent` first) |
 
 <details>
 <summary><b>Multi-user OAuth + Redis (HTTP deployments only)</b></summary>

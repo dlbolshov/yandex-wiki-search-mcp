@@ -8,6 +8,7 @@ by scripts/contract_sweep.py on 2026-08-02 — see docs/api-notes.md.
 from mcp_wiki.wiki.proto.types.pages import (
     DescendantItem,
     DescendantsResponse,
+    GridCellsResponse,
     GridMutationResponse,
     PageComment,
     RecoverPageResponse,
@@ -143,12 +144,25 @@ class TestDeclaredLiveExtras:
         assert response.slug == "users/x/p"
         assert response.pages_count == 1
 
-    def test_grid_cells_mutation_key(self) -> None:
-        response = GridMutationResponse.model_validate(
+    def test_cell_updates_answer_with_cells_and_nothing_else(self) -> None:
+        response = GridCellsResponse.model_validate(
             {"revision": "5", "cells": [{"row_id": 1, "value": 42}]}
         )
+
         assert response.cells == [{"row_id": 1, "value": 42}]
-        assert response.model_dump()["results"] == []
+        # No empty `results` alongside them: an agent checking that key to
+        # confirm the mutation landed would read [] as "nothing changed".
+        assert response.model_dump() == {
+            "revision": "5",
+            "cells": [{"row_id": 1, "value": 42}],
+        }
+
+    def test_row_mutations_answer_with_results_and_no_cells_key(self) -> None:
+        response = GridMutationResponse.model_validate(
+            {"revision": "5", "results": [{"id": 1, "row": [1, 2]}]}
+        )
+
+        assert "cells" not in response.model_dump()
 
 
 class TestSchemaTitles:

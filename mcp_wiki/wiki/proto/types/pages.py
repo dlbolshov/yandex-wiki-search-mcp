@@ -306,8 +306,21 @@ class GridUpdateRequest(BaseWikiModel):
 
 
 class GridMutationResponse(BaseWikiModel):
+    """Row and column mutations answer with `results` (+ `revision`)."""
+
     revision: str | None = None
     results: list[WikiGridRow] = Field(default_factory=list)
+
+
+class GridCellsResponse(BaseWikiModel):
+    """`POST /grids/{id}/cells` answers with `cells`, not `results`.
+
+    Its own model rather than a shared one: `results` has a list default, so
+    it is never dropped as empty, and a mutation reply carrying
+    `"results": []` reads as "nothing changed" to an agent checking it.
+    """
+
+    revision: str | None = None
     cells: list[Any] | None = None
 
 

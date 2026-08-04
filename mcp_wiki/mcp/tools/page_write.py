@@ -27,6 +27,7 @@ from mcp_wiki.mcp.tools.common import (
 from mcp_wiki.mcp.utils import get_yandex_auth
 from mcp_wiki.wiki.proto.types.pages import (
     DeletePageResponse,
+    GridCellsResponse,
     GridCreateRequest,
     GridMutationResponse,
     GridOperationResponse,
@@ -336,7 +337,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
                 )
             ),
         ],
-    ) -> GridMutationResponse:
+    ) -> GridCellsResponse:
         normalized_grid_id = _require_non_empty_text(grid_id, field_name="grid_id")
         if not cells:
             raise ValueError("cells must not be empty.")

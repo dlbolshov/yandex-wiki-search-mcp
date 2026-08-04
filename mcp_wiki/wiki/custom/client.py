@@ -38,6 +38,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     CommentsResponse,
     DeletePageResponse,
     DescendantsResponse,
+    GridCellsResponse,
     GridCreateRequest,
     GridMutationResponse,
     GridOperationResponse,
@@ -631,7 +632,7 @@ class WikiClient(WikiProtocol):
         *,
         cells: list[dict[str, Any]],
         auth: YandexAuth | None = None,
-    ) -> GridMutationResponse:
+    ) -> GridCellsResponse:
         payload = await self._request(
             "POST",
             f"v1/grids/{grid_id}/cells",
@@ -639,7 +640,7 @@ class WikiClient(WikiProtocol):
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridMutationResponse.model_validate(self._json_or_empty(payload))
+        return GridCellsResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_delete_rows(
         self,
