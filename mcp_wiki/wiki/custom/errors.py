@@ -35,6 +35,28 @@ class WikiApiError(WikiError):
         self.message = message
 
 
+class GridConflict(WikiApiError):
+    """409 CONFLICTING_OPERATION — the grid is briefly locked, not broken.
+
+    Grid mutations are serialized per grid: a second one issued before the
+    first settles is rejected *without being applied*, and the lock clears in
+    about ten seconds (measured 2026-08-05, docs/api-notes.md). The raw API
+    text is just "Conflicting operation in progress", which tells a caller
+    nothing about whether to retry or give up, so the recovery is appended.
+    """
+
+    RECOVERY = (
+        "Another operation on this grid is still finishing and this one was "
+        "not applied. Wait a few seconds, re-read the grid for its current "
+        "revision, then retry. Grid mutations are serialized per grid — issue "
+        "them one at a time rather than in parallel."
+    )
+
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+        self.args = (f"{self.args[0]}. {self.RECOVERY}",)
+
+
 class WikiConfigError(WikiError):
     """The request could not be built from the current configuration.
 
@@ -87,9 +109,15 @@ def build_api_error(status: int, payload: bytes) -> WikiApiError:
             decoded = json.loads(payload)
             if isinstance(decoded, dict):
                 details = decoded
-    return WikiApiError(
+    error_code = details.get("error_code") if details else None
+    error_class = (
+        GridConflict
+        if status == 409 and error_code == "CONFLICTING_OPERATION"
+        else WikiApiError
+    )
+    return error_class(
         status=status,
-        error_code=details.get("error_code") if details else None,
+        error_code=error_code,
         debug_message=details.get("debug_message") if details else None,
         message=details.get("message") if details else None,
     )

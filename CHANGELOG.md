@@ -4,13 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- A grid `409 CONFLICTING_OPERATION` now raises `GridConflict` (a `WikiApiError`) whose message carries the recovery instead of only the API's "Conflicting operation in progress": the write was not applied, so re-read the grid for a fresh revision and retry. The server instructions also tell agents to issue `grid_*` writes one at a time. Measured live: back-to-back mutations on one grid conflict about a third of the time and clear in ~10s, while a 3s gap never conflicted — so this only bites callers that batch grid writes in parallel, which optimistic locking already makes wrong. Deliberately not retried in the client: that would block a tool call for ten seconds and paper over the revision race underneath
+- The `API drift check` workflow now reads every `DRIFT_*` input from repository secrets instead of variables. Only secrets are masked in Actions logs, and on a public repo those logs are public — the sweep prints the slug it works under, so `DRIFT_SWEEP_SLUG` as a variable published the account name and section layout every week. Move the existing variables to secrets under the same names; until then the workflow skips itself, as it does for any incomplete setup
+
 ### Fixed
 - The contract sweep could only ever run once per slug. A run interrupted between creating its root page and the cleanup step left the slug taken, and every later run died on `page_create` with `SLUG_OCCUPIED` — reported as a problem, so a weekly job would have gone red permanently after one bad night. It now clears its own leftovers and retries, but only when the slug holds a page this sweep created; anything else is someone's real page and it refuses with an explanation instead of deleting it
-- The sweep reported grid `409 CONFLICTING_OPERATION` as a contract problem. Grid mutations are serialized per grid, so firing them back to back — or touching a grid while an async `grid_copy` runs — hits a lock, not drift. Conflicts are now retried with a short backoff (documented in `docs/api-notes.md`)
+- The sweep reported grid `409 CONFLICTING_OPERATION` as a contract problem. Grid mutations are serialized per grid, so firing them back to back hits a lock, not drift. Conflicts are now retried with a short backoff (documented in `docs/api-notes.md`)
 - `--cleanup` crashed with a traceback when there was nothing to clean up. The workflow runs it with `if: always()`, so a sweep that failed early failed twice
-
-### Changed
-- The `API drift check` workflow now reads every `DRIFT_*` input from repository secrets instead of variables. Only secrets are masked in Actions logs, and on a public repo those logs are public — the sweep prints the slug it works under, so `DRIFT_SWEEP_SLUG` as a variable published the account name and section layout every week. Move the existing variables to secrets under the same names; until then the workflow skips itself, as it does for any incomplete setup
 
 ## [0.8.0] - 2026-08-04
 

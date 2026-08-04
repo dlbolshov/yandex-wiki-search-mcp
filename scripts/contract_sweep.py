@@ -25,7 +25,7 @@ from pydantic import BaseModel, ValidationError
 
 from mcp_wiki.settings import Settings
 from mcp_wiki.wiki.custom.client import WikiClient
-from mcp_wiki.wiki.custom.errors import PageNotFound, WikiApiError, WikiError
+from mcp_wiki.wiki.custom.errors import GridConflict, PageNotFound, WikiError
 from mcp_wiki.wiki.proto.types import pages as page_models
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
@@ -112,24 +112,24 @@ def extras_of(obj: Any) -> set[str]:
     return found
 
 
-CONFLICT_ATTEMPTS = 4
+# The lock clears in about 10s, so back off past that before giving up.
+CONFLICT_ATTEMPTS = 5
 CONFLICT_DELAY = 1.5
 
 
 async def _await_settled(fn: Callable[[], Awaitable[Any]]) -> Any:
     """Retry a call while the API reports a conflicting operation.
 
-    Grid mutations are serialized server-side: fire two at a grid back to back
-    — or touch one while an async `grid_copy` is still running — and the second
-    gets 409 CONFLICTING_OPERATION. That is a lock, not a contract change, and
-    a weekly job that cries drift over it teaches everyone to ignore it.
+    Grid mutations are serialized per grid: fire two back to back and the
+    second gets 409 CONFLICTING_OPERATION for about ten seconds. That is a
+    lock, not a contract change, and a weekly job that cries drift over it
+    teaches everyone to ignore it.
     """
     for attempt in range(1, CONFLICT_ATTEMPTS + 1):
         try:
             return await fn()
-        except WikiApiError as exc:
-            conflict = exc.status == 409 and exc.error_code == "CONFLICTING_OPERATION"
-            if not conflict or attempt == CONFLICT_ATTEMPTS:
+        except GridConflict:
+            if attempt == CONFLICT_ATTEMPTS:
                 raise
             await asyncio.sleep(CONFLICT_DELAY * attempt)
     raise AssertionError("unreachable")

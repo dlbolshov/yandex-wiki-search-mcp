@@ -113,11 +113,13 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   `[{"column": "status", "direction": "asc"}]` shape and converts it.
 - `grid_add_columns` requires `required` on every column — the API validates it.
 - `grid_copy` is asynchronous: the API returns operation metadata, not a ready copied grid.
-- Grid mutations are **serialized per grid**. Two mutations back to back — or any
-  mutation while an async `grid_copy` is still running — answer `409`
-  `CONFLICTING_OPERATION` ("Conflicting operation in progress"). The write did not
-  apply, so retrying after a short pause is safe; `scripts/contract_sweep.py` does
-  exactly that rather than reporting the lock as drift (verified 2026-08-05).
+- Grid mutations are **serialized per grid**: a second one issued while the first is
+  still settling answers `409` `CONFLICTING_OPERATION` ("Conflicting operation in
+  progress") and is **not applied**, so retrying after a pause is safe. Measured
+  2026-08-05 over 8 pairs at each spacing: back to back it fires about a third of the
+  time and clears in ~10s; at a 3s or 10s gap it never fired. An async `grid_copy`
+  does **not** lock its source grid — a mutation right after one goes through.
+  `scripts/contract_sweep.py` retries conflicts rather than reporting the lock as drift.
 - `POST /grids/{id}/cells` responds with a **`cells`** key — unlike the row/column
   mutations, which answer with `results` (+ `revision`).
 

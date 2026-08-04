@@ -6,7 +6,12 @@ import pytest
 from aioresponses import aioresponses
 
 from mcp_wiki.wiki.custom.client import WikiClient
-from mcp_wiki.wiki.custom.errors import PageNotFound, WikiApiError
+from mcp_wiki.wiki.custom.errors import (
+    GridConflict,
+    GridNotFound,
+    PageNotFound,
+    WikiApiError,
+)
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
     GridUpdateRequest,
@@ -314,6 +319,49 @@ class TestWikiClient:
                 "after_row_id": "row-0",
             }
         )
+
+    async def test_grid_mutation_conflict_surfaces_as_grid_conflict(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(
+            status=409,
+            body=(
+                '{"error_code":"CONFLICTING_OPERATION",'
+                '"debug_message":"Conflicting operation in progress"}'
+            ),
+        )
+
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/grids/grid-1/rows",
+                callback=capture.callback,
+            )
+            with pytest.raises(GridConflict) as excinfo:
+                await wiki_client.grid_add_rows(
+                    "grid-1", revision="7", rows=[{"status": "todo"}]
+                )
+
+        # Not retried here: writes never are, and the caller has to re-read the
+        # grid for a fresh revision anyway, so recovery belongs above the client.
+        capture.assert_called_once()
+        assert "re-read the grid" in str(excinfo.value)
+
+    async def test_grid_404_reports_the_grid_id(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.get(
+                re.compile(r"https://api\.wiki\.yandex\.net/v1/grids/missing.*"),
+                status=404,
+                body="{}",
+            )
+            with pytest.raises(GridNotFound) as excinfo:
+                await wiki_client.grid_get("missing")
+
+        assert excinfo.value.grid_id == "missing"
+        assert "missing" in str(excinfo.value)
 
     async def test_grid_delete(
         self,

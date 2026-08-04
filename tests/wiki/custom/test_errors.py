@@ -1,4 +1,8 @@
-from mcp_wiki.wiki.custom.errors import WikiApiError, build_api_error
+from mcp_wiki.wiki.custom.errors import (
+    GridConflict,
+    WikiApiError,
+    build_api_error,
+)
 
 
 class TestBuildApiError:
@@ -27,3 +31,41 @@ class TestBuildApiError:
         error = build_api_error(500, b"")
         assert error.status == 500
         assert str(error) == "Wiki API request failed with status 500"
+
+
+class TestGridConflict:
+    """409 CONFLICTING_OPERATION is a per-grid lock, not a broken request."""
+
+    PAYLOAD = (
+        b'{"error_code": "CONFLICTING_OPERATION",'
+        b' "debug_message": "Conflicting operation in progress"}'
+    )
+
+    def test_conflicting_operation_gets_its_own_type(self) -> None:
+        error = build_api_error(409, self.PAYLOAD)
+
+        assert isinstance(error, GridConflict)
+        assert isinstance(error, WikiApiError)
+        assert error.status == 409
+        assert error.error_code == "CONFLICTING_OPERATION"
+
+    def test_message_keeps_the_diagnosis_and_adds_the_recovery(self) -> None:
+        # The bare API text says only that something conflicts, which leaves an
+        # agent guessing between retrying and giving up.
+        message = str(build_api_error(409, self.PAYLOAD))
+
+        assert "Conflicting operation in progress" in message
+        assert "not applied" in message
+        assert "re-read the grid" in message
+        assert "one at a time" in message
+
+    def test_other_409s_stay_plain(self) -> None:
+        error = build_api_error(409, b'{"error_code": "REVISION_MISMATCH"}')
+
+        assert not isinstance(error, GridConflict)
+        assert isinstance(error, WikiApiError)
+
+    def test_409_without_an_envelope_stays_plain(self) -> None:
+        error = build_api_error(409, b"")
+
+        assert not isinstance(error, GridConflict)

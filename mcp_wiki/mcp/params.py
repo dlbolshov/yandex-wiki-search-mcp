@@ -240,5 +240,6 @@ Use these tools to:
 In russian Yandex Wiki is called "Яндекс Вики" or "Вики".
 If a tool accepts `page_id` and `slug`, provide exactly one of them.
 When you need a full list from a cursor-paginated tool, pass `fetch_all=true` — the server follows the cursors for you and returns everything in one call. Only if the reply carries `truncated: true` is the list incomplete: continue from `next_cursor`, or narrow the request. Walk cursors by hand only when a tool has no `fetch_all`.
+Grid mutations are serialized per grid and need the grid's current `revision`: call the `grid_*` write tools one at a time, never several against the same grid in one batch. A 409 means the previous one is still finishing and yours was not applied — re-read the grid and retry.
 Page content is Markdown (YFM): plain Markdown renders as-is, but GitHub-specific extensions ('[!NOTE]' alerts, raw HTML) do not — the wiki-mcp://yfm-cheatsheet resource maps them to YFM equivalents. Write tools return `yfm_warnings` when submitted content will not render as intended.
 """
