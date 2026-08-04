@@ -112,11 +112,11 @@ claude mcp add yandex-wiki-search \
 |---|---|
 | `page_search` | Полнотекстовый поиск по всей Вики (страницы и файлы), до 50 ранжированных результатов со сниппетами |
 | `page_get` | Страница по `page_id` или `slug` (полные URL Вики тоже принимаются) |
-| `page_get_descendants` | Обход поддерева страниц с пагинацией |
-| `page_get_comments` | Комментарии страницы |
-| `page_get_resources` | Ресурсы страницы (вложения + гриды) с серверным поиском по названию |
-| `page_get_attachments` | Вложения страницы |
-| `page_get_grids` | Гриды, прикреплённые к странице |
+| `page_get_descendants` | Обход поддерева — плоский список `{id, slug}` со всех уровней вложенности; `fetch_all` вычерпывает курсор за один вызов |
+| `page_get_comments` | Комментарии страницы (поддерживается `fetch_all`) |
+| `page_get_resources` | Ресурсы страницы (вложения + гриды) с серверным поиском по названию (поддерживается `fetch_all`) |
+| `page_get_attachments` | Вложения страницы (поддерживается `fetch_all`) |
+| `page_get_grids` | Гриды, прикреплённые к странице (поддерживается `fetch_all`) |
 | `grid_get` | Грид по `grid_id` с фильтрами строк/колонок/ревизий |
 
 ### Страницы: запись (7)
@@ -216,6 +216,7 @@ claude mcp add yandex-wiki-search \
 | `WIKI_WEB_BASE_URL` | нет | `https://wiki.yandex.ru` | База для абсолютных ссылок в результатах `page_search` |
 | `WIKI_AUTH_SCHEME` | нет | `OAuth` | Схема заголовка `Authorization` для `WIKI_TOKEN` (`OAuth` \| `Bearer`) |
 | `WIKI_MAX_RETRIES` | нет | `2` | Ретраи на обрыв соединения и `429`/`502`/`503`/`504` для читающих запросов; `0` выключает |
+| `TOOL_RESULT_TEXT` | нет | `pretty` | Текстовый дубль structured-результатов тулзов: `pretty` (indent=2) \| `compact` (одна строка, на 10–30% меньше текстового блока) \| `none` (только structured — сначала проверьте, что ваш клиент показывает `structuredContent`) |
 
 <details>
 <summary><b>Многопользовательский OAuth + Redis (только HTTP-деплой)</b></summary>
@@ -233,6 +234,14 @@ claude mcp add yandex-wiki-search \
 | `MCP_SERVER_PUBLIC_URL` | — | Публичный URL этого сервера (OAuth-коллбэки) |
 | `OAUTH_ENCRYPTION_KEYS` | — | base64-ключи по 32 байта через запятую (обязательно для `redis`) |
 | `REDIS_ENDPOINT` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PASSWORD` / `REDIS_POOL_MAX_SIZE` | `localhost` / `6379` / `0` / — / `10` | Подключение к Redis |
+
+**Выбор организации для каждого пользователя.** Под OAuth `WIKI_ORG_ID` /
+`WIKI_CLOUD_ORG_ID` необязательны: организацию можно назвать в каждом запросе — добавьте
+`?orgId=...` (или `?cloudOrgId=...`) к URL MCP-сервера, к которому подключается клиент.
+Query-параметр важнее общесерверной настройки, поэтому один деплой может обслуживать
+несколько организаций. Если в запросе нет ни того, ни другого, вызов тулзы завершится
+ошибкой с подсказкой про оба способа — задайте переменную окружения как значение по
+умолчанию, если все ваши пользователи в одной организации.
 
 Полный аннотированный список — в [`.env.example`](.env.example), база для Redis — в [`compose.yaml`](compose.yaml).
 
@@ -295,6 +304,19 @@ uv run pytest                   # тесты
 
 Перед коммитом прогоните полный набор проверок из [CONTRIBUTING.md](CONTRIBUTING.md).
 Проверенное поведение API и probe-скрипты описаны в [docs/api-notes_ru.md](docs/api-notes_ru.md).
+
+Вики-API дрейфует (недокументированный эндпоинт поиска уже однажды молча сменил
+контракт) — `scripts/contract_sweep.py` перепроверяет каждый метод клиента на живой
+организации и репортит расхождения валидации и необъявленные ключи:
+
+```bash
+uv run python scripts/contract_sweep.py users/YOU/contract-sweep            # ~30 живых проверок
+uv run python scripts/contract_sweep.py users/YOU/contract-sweep --cleanup  # убрать фикстуры
+```
+
+Workflow [API drift check](.github/workflows/api-drift.yml) гоняет тот же свип
+еженедельно, если настроены секрет `DRIFT_WIKI_TOKEN` и переменные `DRIFT_*`
+(инструкция в шапке workflow); без них он тихо скипается.
 
 ## Благодарности
 

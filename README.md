@@ -111,11 +111,11 @@ claude mcp add yandex-wiki-search \
 |---|---|
 | `page_search` | Full-text search across the entire Wiki (pages and files), up to 50 ranked results with snippets |
 | `page_get` | Get a page by `page_id` or `slug` (accepts full Wiki URLs too) |
-| `page_get_descendants` | Traverse a page subtree with pagination |
-| `page_get_comments` | List page comments |
-| `page_get_resources` | List page resources (attachments + grids) with server-side title search |
-| `page_get_attachments` | List page attachments |
-| `page_get_grids` | List grids attached to a page |
+| `page_get_descendants` | Traverse a page subtree — one flat list of `{id, slug}` from all nesting levels; `fetch_all` drains the cursor in one call |
+| `page_get_comments` | List page comments (`fetch_all` supported) |
+| `page_get_resources` | List page resources (attachments + grids) with server-side title search (`fetch_all` supported) |
+| `page_get_attachments` | List page attachments (`fetch_all` supported) |
+| `page_get_grids` | List grids attached to a page (`fetch_all` supported) |
 | `grid_get` | Get a grid by `grid_id` with row/column/revision filters |
 
 ### Pages: write (7)
@@ -214,6 +214,7 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 | `WIKI_WEB_BASE_URL` | no | `https://wiki.yandex.ru` | Base for absolute page links in `page_search` results |
 | `WIKI_AUTH_SCHEME` | no | `OAuth` | `Authorization` header scheme for `WIKI_TOKEN` (`OAuth` \| `Bearer`) |
 | `WIKI_MAX_RETRIES` | no | `2` | Retries for dropped connections and `429`/`502`/`503`/`504` on read requests; `0` disables them |
+| `TOOL_RESULT_TEXT` | no | `pretty` | Text duplicate of structured tool results: `pretty` (indent=2) \| `compact` (single line, 10-30% off the text block) \| `none` (structured only — check your client renders `structuredContent` first) |
 
 <details>
 <summary><b>Multi-user OAuth + Redis (HTTP deployments only)</b></summary>
@@ -232,6 +233,13 @@ their personal token.
 | `MCP_SERVER_PUBLIC_URL` | — | Public URL of this server (OAuth callbacks) |
 | `OAUTH_ENCRYPTION_KEYS` | — | Comma-separated base64 32-byte keys (required for `redis` store) |
 | `REDIS_ENDPOINT` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PASSWORD` / `REDIS_POOL_MAX_SIZE` | `localhost` / `6379` / `0` / — / `10` | Redis connection |
+
+**Choosing the organization per user.** `WIKI_ORG_ID` / `WIKI_CLOUD_ORG_ID` are optional
+under OAuth, because each request can name its own organization: append `?orgId=...` (or
+`?cloudOrgId=...`) to the MCP server URL your client connects to. A query parameter wins
+over the server-wide setting, so one deployment can serve several organizations. If a
+request carries neither, the tool call fails with a message pointing at both options —
+set the environment variable as the default if all your users share one organization.
 
 See [`.env.example`](.env.example) for the full annotated list and [`compose.yaml`](compose.yaml) for a Redis baseline.
 
@@ -294,6 +302,19 @@ uv run pytest                   # tests
 
 Before committing, run the full verification set from [CONTRIBUTING.md](CONTRIBUTING.md).
 Verified API behavior and probe scripts are documented in [docs/api-notes.md](docs/api-notes.md).
+
+The Wiki API drifts (its undocumented search endpoint silently changed contract once
+already) — `scripts/contract_sweep.py` re-verifies every client method against a live
+organization and reports validation mismatches and undeclared keys:
+
+```bash
+uv run python scripts/contract_sweep.py users/YOU/contract-sweep            # ~30 live checks
+uv run python scripts/contract_sweep.py users/YOU/contract-sweep --cleanup  # remove fixtures
+```
+
+The [API drift check](.github/workflows/api-drift.yml) workflow runs the same sweep
+weekly when the `DRIFT_WIKI_TOKEN` secret and `DRIFT_*` variables are configured
+(instructions in the workflow header); without them it skips quietly.
 
 ## Credits
 

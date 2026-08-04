@@ -9,6 +9,7 @@ from typing import Any, BinaryIO, Literal
 
 from aiohttp import (
     ClientConnectionError,
+    ClientError,
     ClientPayloadError,
     ClientSession,
     ClientTimeout,
@@ -24,7 +25,9 @@ from mcp_wiki.wiki.custom.errors import (
     GridNotFound,
     PageNotFound,
     WikiApiError,
+    WikiConfigError,
     WikiError,
+    WikiTransportError,
     build_api_error,
 )
 from mcp_wiki.wiki.proto.common import YandexAuth
@@ -35,6 +38,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     CommentsResponse,
     DeletePageResponse,
     DescendantsResponse,
+    GridCellsResponse,
     GridCreateRequest,
     GridMutationResponse,
     GridOperationResponse,
@@ -52,7 +56,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiPage,
 )
 
-SEARCH_PAGE_SIZE_MAX = 50
+SEARCH_LIMIT_MAX = 50
 
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 RETRY_BASE_DELAY = 0.3
@@ -197,19 +201,31 @@ class WikiClient(WikiProtocol):
         elif self._iam_token:
             auth_header = f"Bearer {self._iam_token}"
         else:
-            raise ValueError(
+            raise WikiConfigError(
                 "No authentication method provided. Configure wiki_token, wiki_iam_token, or OAuth."
             )
 
-        org_id = auth.org_id if auth and auth.org_id else self._org_id
-        cloud_org_id = (
-            auth.cloud_org_id if auth and auth.cloud_org_id else self._cloud_org_id
-        )
+        # Per-request auth replaces the organization as a unit. Picking each
+        # id independently would pair a request's cloud_org_id with the
+        # server-wide org_id and fail as "only one of" — so under OAuth a
+        # client could not select a cloud organization on a server that has a
+        # plain org configured as its default.
+        if auth and (auth.org_id or auth.cloud_org_id):
+            org_id, cloud_org_id = auth.org_id, auth.cloud_org_id
+        else:
+            org_id, cloud_org_id = self._org_id, self._cloud_org_id
 
         if org_id and cloud_org_id:
-            raise ValueError("Only one of org_id or cloud_org_id should be provided.")
+            raise WikiConfigError(
+                "Only one of org_id or cloud_org_id should be provided."
+            )
         if not org_id and not cloud_org_id:
-            raise ValueError("Either org_id or cloud_org_id must be provided.")
+            raise WikiConfigError(
+                "No organization for this request. Set WIKI_ORG_ID (or "
+                "WIKI_CLOUD_ORG_ID) on the server, or — under OAuth, where the "
+                "organization travels per request — append ?orgId=... (or "
+                "?cloudOrgId=...) to the MCP server URL."
+            )
 
         headers = {"Authorization": auth_header}
         if org_id:
@@ -261,11 +277,15 @@ class WikiClient(WikiProtocol):
                     status = response.status
                     retry_after = response.headers.get("Retry-After")
                     payload = await response.read()
-            except (ClientConnectionError, ClientPayloadError) as exc:
-                # ServerTimeoutError subclasses both ClientConnectionError and
-                # asyncio.TimeoutError; timeouts are never retried.
-                if isinstance(exc, asyncio.TimeoutError) or attempt == attempts:
-                    raise
+            except (ClientError, TimeoutError) as exc:
+                # A plain total timeout raises bare TimeoutError, which is not a
+                # ClientError; ServerTimeoutError is both. Timeouts are never
+                # retried, and only connection/payload failures ever were.
+                retryable_failure = isinstance(
+                    exc, ClientConnectionError | ClientPayloadError
+                ) and not isinstance(exc, TimeoutError)
+                if not retryable_failure or attempt == attempts:
+                    raise WikiTransportError(method, path, exc) from exc
                 delay = _backoff_delay(attempt)
                 logger.warning(
                     "%s %s failed with %r, retrying in %.2fs (attempt %d/%d)",
@@ -355,9 +375,12 @@ class WikiClient(WikiProtocol):
         page_size: int = 10,
         auth: YandexAuth | None = None,
     ) -> SearchResponse:
+        # The search endpoint reads "limit" from the POST body and silently
+        # ignores "page_size" (always returning 10); limit > 50 is a 400.
+        # Verified against the live API 2026-08-02.
         body = {
             "query": query,
-            "page_size": max(1, min(page_size, SEARCH_PAGE_SIZE_MAX)),
+            "limit": max(1, min(page_size, SEARCH_LIMIT_MAX)),
         }
         payload = await self._request(
             "POST",
@@ -614,7 +637,7 @@ class WikiClient(WikiProtocol):
         *,
         cells: list[dict[str, Any]],
         auth: YandexAuth | None = None,
-    ) -> GridMutationResponse:
+    ) -> GridCellsResponse:
         payload = await self._request(
             "POST",
             f"v1/grids/{grid_id}/cells",
@@ -622,7 +645,7 @@ class WikiClient(WikiProtocol):
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridMutationResponse.model_validate(self._json_or_empty(payload))
+        return GridCellsResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_delete_rows(
         self,
@@ -760,14 +783,12 @@ class WikiClient(WikiProtocol):
         slug: str,
         title: str,
         content: str,
-        page_type: str = "wysiwyg",
         auth: YandexAuth | None = None,
     ) -> WikiPage:
         body = {
             "slug": normalize_slug(slug),
             "title": title,
             "content": content,
-            "page_type": page_type,
         }
         payload = await self._request("POST", "v1/pages", json_body=body, auth=auth)
         return WikiPage.model_validate_json(payload)
@@ -815,7 +836,7 @@ class WikiClient(WikiProtocol):
         location: UploadLocation = "bottom",
         anchor: str | None = None,
         auth: YandexAuth | None = None,
-    ) -> dict[str, Any]:
+    ) -> WikiPage:
         body: dict[str, Any] = {"content": content}
         if anchor:
             body["anchor"] = {"name": anchor}
@@ -843,15 +864,17 @@ class WikiClient(WikiProtocol):
                     anchor=anchor,
                 )
                 if updated_content is not None:
-                    updated_page = await self.page_update(
+                    return await self.page_update(
                         page_id,
                         content=updated_content,
                         allow_merge=True,
                         auth=auth,
                     )
-                    return json.loads(updated_page.model_dump_json())
             raise
-        return self._json_or_empty(payload)
+        # The endpoint answers with the full updated page, not a status stub
+        # (verified live, docs/api-notes.md) — same shape as the anchor
+        # fallback above, so both paths of this tool agree.
+        return WikiPage.model_validate_json(payload)
 
     async def page_add_comment(
         self,

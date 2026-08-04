@@ -7,6 +7,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     CommentsResponse,
     DeletePageResponse,
     DescendantsResponse,
+    GridCellsResponse,
     GridCreateRequest,
     GridMutationResponse,
     GridOperationResponse,
@@ -157,7 +158,7 @@ class WikiProtocol(Protocol):
         *,
         cells: list[dict[str, Any]],
         auth: YandexAuth | None = None,
-    ) -> GridMutationResponse: ...
+    ) -> GridCellsResponse: ...
 
     async def grid_delete_rows(
         self,
@@ -223,7 +224,6 @@ class WikiProtocol(Protocol):
         slug: str,
         title: str,
         content: str,
-        page_type: str = "wysiwyg",
         auth: YandexAuth | None = None,
     ) -> WikiPage: ...
 
@@ -246,7 +246,7 @@ class WikiProtocol(Protocol):
         location: UploadLocation = "bottom",
         anchor: str | None = None,
         auth: YandexAuth | None = None,
-    ) -> dict[str, Any]: ...
+    ) -> WikiPage: ...
 
     async def page_add_comment(
         self,

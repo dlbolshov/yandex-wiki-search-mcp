@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- `fetch_all` flag on the five cursor-paginated tools (`page_get_descendants`, `page_get_comments`, `page_get_attachments`, `page_get_resources`, `page_get_grids`): the server follows `next_cursor` and returns everything in one call, capped at 500 items and a 25s budget. The response then carries `truncated`: `false` only when the list was drained to its end, `true` when the walk stopped early — on the cap, the budget, a failed page or a cursor the server repeated. `next_cursor` then points at the continuation, except after a repeated cursor, where nothing is safe to continue from and it is cleared. A failed page keeps what was already fetched rather than discarding it. `page_search` deliberately has no such flag — its cursors are dead server-side (always `null`)
+- `TOOL_RESULT_TEXT` setting for the text duplicate of structured tool results: `pretty` (indent=2, the FastMCP default and still the spec-friendly choice), `compact` (single line — 10-30% off the text block: most on long lists of small objects, least on a few large strings, since indentation is charged per line) or `none` (structured content only; make sure your client renders `structuredContent` before enabling). Structured content and its schema validation are unaffected
+- Living defense against API drift: `scripts/contract_sweep.py` exercises every `WikiClient` method against a live organization (fixtures under a scratch slug, delete/recover cycle included) and reports pydantic mismatches plus undeclared response keys; the `API drift check` workflow re-runs it weekly when the opt-in `DRIFT_WIKI_TOKEN` secret and `DRIFT_*` variables are configured. Born from the search-endpoint incident: the undocumented backend silently swapped its wire contract between 2026-07 and 2026-08 (documented in `docs/api-notes.md`)
+
+### Fixed
+- `page_search` was broken against the live API (all fixes verified live on 2026-08-02):
+  - any non-empty search failed with a validation error — the API sends `modified_at` as an ISO datetime string, the model expected an integer epoch
+  - the snippet arrives in the `content` key, not `body`: the declared field was always empty and the snippet text only reached clients through the extra-fields leak
+  - the `page_size` tool parameter was silently ignored by the API (every search returned at most 10 results regardless of the requested size) — the endpoint reads `limit` from the POST body, which the client now sends; values above 50 are a validation error server-side, the existing clamp keeps them at 50
+
+### Changed
+- `SearchResponse` now mirrors the live envelope: `results` plus `next_cursor`/`prev_cursor` (currently always `null` server-side). The previously declared `total_documents`, `total_pages`, `page_id`, `search_client` and `uid` fields never arrived from the API and were removed from the schema
+- Tool results went on a token diet (all shapes verified against the live API, `scripts/contract_sweep.py`):
+  - `None` values are omitted from every tool result — fields the API did not send no longer arrive as `null` noise. `page_append_content` is now typed as a page too (the endpoint answers with the full updated page, not a status stub), so the heaviest write response went from 11 keys to 4
+  - unknown API keys are dropped from fixed-shape models instead of leaking into results verbatim; models carrying grid *user data* (`WikiGrid`, `WikiGridColumn`, `WikiGridRow`, `WikiGridSort`, `WikiGridStructure`, `GridUpdateResponse`) still pass unknown keys through, and there a `null` under an unknown key is kept — "this cell is empty" has to stay distinguishable from "no such column". Service envelopes around them (`WikiGridSummary`, `WikiGridPageRef`) stay strict
+  - fields the live API actually sends are now declared instead of leaking untyped: `WikiPage.access_policy`/`access_lists`/`owner` (arrive when requested via `fields`), comment `author`/`inline_text`/`is_deleted`/`resolve_status`/`reactions`, attachment `is_downloadable`, recover `slug`/`pages_count`
+  - breaking for schema consumers: `grid_update_cells` returns the new `GridCellsResponse` (`revision` + `cells`). It used to share `GridMutationResponse` with the row and column mutations, whose `results` has a list default and so was never dropped as empty — every successful cell update answered with `"results": []`, which reads as "nothing changed" to an agent checking that key. The other seven grid mutations no longer advertise a `cells` field they never fill
+  - user references (comment `author`, attachment `user`, page `owner.user`) are trimmed to `id`/`username`/`display_name` — the raw API sends internal identity payloads (`uid`, `cloud_uid`, dismissal flags) on every comment and attachment, and 215 chars of them on every page fetched with `fields=["owner"]` (80 after trimming)
+  - `page_get_descendants` items are now honest `{id, slug}` objects (the live API never sends titles there), shrinking both the output schema and each result
+  - pydantic's auto-generated `title` keys are stripped from the model JSON schemas — `tools/list` shrinks by ~4.4k characters of pure noise
+  - breaking for schema consumers: `PageComment.user` and `PageComment.updated_at` were removed — the live API sends neither (the author arrives in `author`)
+- `TOOL_RESULT_TEXT=compact` and `none` now touch only the JSON duplicate: a tool returning real content blocks keeps them. Nothing does yet, but the setting used to replace an image with its own base64 or drop it outright
+- Transport failures now raise `WikiTransportError` (a `WikiError`) instead of leaking aiohttp's own exceptions: callers no longer need to import aiohttp and track its hierarchy to handle a dropped connection. This also fixes a bare request timeout reaching MCP clients as `Error executing tool page_get: ` with nothing after the colon — `str(TimeoutError())` is empty. Retry behavior is unchanged
+- Running without OAuth now requires `WIKI_ORG_ID` or `WIKI_CLOUD_ORG_ID` at startup instead of failing on the first API call. Under `OAUTH_ENABLED=true` the organization still arrives per request, so nothing is required there — via `?orgId=` / `?cloudOrgId=` on the MCP server URL, which the READMEs now document. Configuration failures raise `WikiConfigError` (a `WikiError`) instead of a bare `ValueError`, and the missing-organization message names both ways to supply one
+
+### Removed
+- The `page_type` parameter of `page_create` (breaking): a live smoke on 2026-07-27 proved the API ignores it entirely — any value, even garbage, yields a `wysiwyg` page with no error, so the parameter only misled agents into believing they could create other page types. Also removed from `WikiClient.page_create` and the protocol
+
 ## [0.7.0] - 2026-07-27
 
 ### Added

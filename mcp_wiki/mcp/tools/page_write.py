@@ -27,6 +27,7 @@ from mcp_wiki.mcp.tools.common import (
 from mcp_wiki.mcp.utils import get_yandex_auth
 from mcp_wiki.wiki.proto.types.pages import (
     DeletePageResponse,
+    GridCellsResponse,
     GridCreateRequest,
     GridMutationResponse,
     GridOperationResponse,
@@ -336,7 +337,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
                 )
             ),
         ],
-    ) -> GridMutationResponse:
+    ) -> GridCellsResponse:
         normalized_grid_id = _require_non_empty_text(grid_id, field_name="grid_id")
         if not cells:
             raise ValueError("cells must not be empty.")
@@ -532,20 +533,11 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
         slug: PageSlug,
         title: Annotated[str, Field(description="Wiki page title.")],
         content: Annotated[str, Field(description="Full page content.")],
-        page_type: Annotated[
-            str,
-            Field(
-                description=(
-                    "Wiki page type. Prefer 'wysiwyg' unless a different editor type is required."
-                )
-            ),
-        ] = "wysiwyg",
     ) -> PageWriteResponse:
         page = await get_wiki(ctx).page_create(
             slug=slug,
             title=title,
             content=content,
-            page_type=page_type,
             auth=get_yandex_auth(ctx),
         )
         return _with_yfm_warnings(page, validate_yfm(content))
@@ -623,21 +615,18 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
                 description="Anchor name like '#release-notes'. Overrides location when provided."
             ),
         ] = None,
-    ) -> dict[str, Any]:
+    ) -> PageWriteResponse:
         resolved_page_id, resolved_page_type = await resolve_page_id_and_type(
             ctx, page_id=page_id, slug=slug
         )
-        result = await get_wiki(ctx).page_append_content(
+        page = await get_wiki(ctx).page_append_content(
             resolved_page_id,
             content=content,
             location=location,
             anchor=anchor,
             auth=get_yandex_auth(ctx),
         )
-        warnings = _content_warnings(resolved_page_type, content)
-        if warnings:
-            result = {**result, "yfm_warnings": warnings}
-        return result
+        return _with_yfm_warnings(page, _content_warnings(resolved_page_type, content))
 
     @mcp.tool(
         title="Add Page Comment",

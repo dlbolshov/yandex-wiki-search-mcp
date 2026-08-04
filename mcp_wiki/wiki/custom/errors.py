@@ -35,6 +35,34 @@ class WikiApiError(WikiError):
         self.message = message
 
 
+class WikiConfigError(WikiError):
+    """The request could not be built from the current configuration.
+
+    A WikiError rather than a ValueError so callers can handle it alongside
+    every other Wiki failure, and so MCP clients get a message that names the
+    remedy instead of a bare exception repr.
+    """
+
+
+class WikiTransportError(WikiError):
+    """The request never produced an HTTP response.
+
+    Wraps the transport library's own exceptions (dropped connections, broken
+    payloads, timeouts) so that callers above the client — tools, scripts —
+    can handle every Wiki failure with a single ``except WikiError`` instead
+    of importing aiohttp and tracking its exception hierarchy. Timeouts in
+    particular carry an empty ``str()``, which would otherwise reach MCP
+    clients as a blank error message.
+    """
+
+    def __init__(self, method: str, path: str, cause: BaseException):
+        detail = str(cause) or type(cause).__name__
+        super().__init__(f"{method} {path} failed before a response: {detail}")
+        self.method = method
+        self.path = path
+        self.cause = cause
+
+
 class PageNotFound(WikiError):
     def __init__(self, page_identifier: int | str):
         super().__init__(f"Wiki page not found: {page_identifier}")

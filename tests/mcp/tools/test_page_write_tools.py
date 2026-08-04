@@ -207,7 +207,7 @@ class TestPageWriteTools:
     ) -> None:
         mock_wiki_protocol.grid_update_cells.return_value = {
             "revision": "8",
-            "results": [],
+            "cells": [{"row_id": 2, "column_slug": "status", "value": "done"}],
         }
 
         result = await client_session.call_tool(
@@ -221,12 +221,27 @@ class TestPageWriteTools:
             },
         )
 
-        assert get_tool_result_content(result)["revision"] == "8"
+        content = get_tool_result_content(result)
+        assert content["revision"] == "8"
+        assert len(content["cells"]) == 1
+        assert "results" not in content
         mock_wiki_protocol.grid_update_cells.assert_awaited_once()
         args = mock_wiki_protocol.grid_update_cells.await_args
         assert args.args[0] == "grid-1"
         assert args.kwargs["cells"][0]["column_slug"] == "status"
         assert args.kwargs["cells"][1]["column_id"] == "col-2"
+
+    async def test_grid_update_cells_rejects_an_empty_cell_list(
+        self,
+        client_session: ClientSession,
+    ) -> None:
+        result = await client_session.call_tool(
+            "grid_update_cells",
+            {"grid_id": "grid-1", "cells": []},
+        )
+
+        assert result.isError is True
+        assert "cells must not be empty" in get_tool_result_text(result)
 
     async def test_grid_update_cells_rejects_invalid_patch(
         self,
@@ -620,7 +635,9 @@ class TestPageWriteTools:
         mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_validate(
             {"id": 10, "page_type": "grid"}
         )
-        mock_wiki_protocol.page_append_content.return_value = {"status": "ok"}
+        mock_wiki_protocol.page_append_content.return_value = WikiPage.model_validate(
+            {"id": 10, "slug": "users/test/page", "title": "T"}
+        )
 
         result = await client_session.call_tool(
             "page_append_content",
@@ -653,7 +670,9 @@ class TestPageWriteTools:
         client_session: ClientSession,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_append_content.return_value = {"status": "ok"}
+        mock_wiki_protocol.page_append_content.return_value = WikiPage.model_validate(
+            {"id": 10, "slug": "users/test/page", "title": "T"}
+        )
 
         result = await client_session.call_tool(
             "page_append_content",
@@ -664,7 +683,7 @@ class TestPageWriteTools:
         )
 
         content = get_tool_result_content(result)
-        assert content["status"] == "ok"
+        assert content["id"] == 10
         assert len(content["yfm_warnings"]) == 1
         assert "{% cut" in content["yfm_warnings"][0]
 
@@ -673,7 +692,9 @@ class TestPageWriteTools:
         client_session: ClientSession,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_append_content.return_value = {"status": "ok"}
+        mock_wiki_protocol.page_append_content.return_value = WikiPage.model_validate(
+            {"id": 10, "slug": "users/test/page", "title": "T"}
+        )
 
         result = await client_session.call_tool(
             "page_append_content",
@@ -681,7 +702,7 @@ class TestPageWriteTools:
         )
 
         content = get_tool_result_content(result)
-        assert content["status"] == "ok"
+        assert content["id"] == 10
         assert "yfm_warnings" not in content
 
     async def test_page_upload_attachment(

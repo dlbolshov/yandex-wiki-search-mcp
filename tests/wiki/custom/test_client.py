@@ -13,6 +13,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiGridPageRef,
 )
 from tests.aioresponses_utils import RequestCapture
+from tests.conftest import load_fixture
 
 
 class TestWikiClient:
@@ -49,33 +50,7 @@ class TestWikiClient:
         capture.last_request.assert_params({"slug": "users/test/page"})
 
     async def test_page_search(self, wiki_client: WikiClient) -> None:
-        capture = RequestCapture(
-            payload={
-                "results": [
-                    {
-                        "url": "/a/b",
-                        "slug": "a/b",
-                        "title": "T",
-                        "body": "snip",
-                        "type": "page",
-                        "modified_at": 1778104120,
-                    },
-                    {
-                        "url": "https://wiki.yandex.ru/a/b/.files/f.xlsx?download=1",
-                        "slug": "a/b",
-                        "title": "f.xlsx",
-                        "body": "",
-                        "type": "file",
-                        "modified_at": 1769154990,
-                    },
-                ],
-                "total_documents": 2,
-                "total_pages": 1,
-                "page_id": 1,
-                "search_client": "mailsearch",
-                "uid": "1",
-            }
-        )
+        capture = RequestCapture(payload=load_fixture("search_results.json"))
         with aioresponses() as mocked:
             mocked.post(
                 "https://api.wiki.yandex.net/v1/search",
@@ -83,14 +58,32 @@ class TestWikiClient:
             )
             result = await wiki_client.page_search("query text", page_size=50)
 
-        assert result.results[0].slug == "a/b"
-        assert result.results[1].type == "file"
+        assert result.results[0].slug == "tech-doc/example/ml/pipeline-overview"
+        assert result.results[0].content == (
+            "The pipeline trains models and evaluates convergence.\n\n"
+            "See the testing module for details.\tHow to prepare inputs."
+        )
+        assert result.results[0].modified_at == "2026-05-12T22:14:54"
+        assert result.results[2].type == "file"
         capture.assert_called_once()
-        capture.last_request.assert_json_body({"query": "query text", "page_size": 50})
+        # the live endpoint honors "limit" only; "page_size" is silently ignored
+        capture.last_request.assert_json_body({"query": "query text", "limit": 50})
+
+    async def test_page_search_empty(self, wiki_client: WikiClient) -> None:
+        capture = RequestCapture(payload=load_fixture("search_empty.json"))
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            result = await wiki_client.page_search("nothing matches this")
+
+        assert result.results == []
+        assert result.next_cursor is None
 
     async def test_page_search_clamps_page_size(self, wiki_client: WikiClient) -> None:
         capture = RequestCapture(
-            payload={"results": [], "total_documents": 0, "total_pages": 0}
+            payload={"results": [], "next_cursor": None, "prev_cursor": None}
         )
         with aioresponses() as mocked:
             mocked.post(
@@ -98,7 +91,7 @@ class TestWikiClient:
                 callback=capture.callback,
             )
             await wiki_client.page_search("q", page_size=1000)
-        capture.last_request.assert_json_field("page_size", 50)
+        capture.last_request.assert_json_field("limit", 50)
 
     async def test_page_search_raises_api_error_with_list_message(
         self, wiki_client: WikiClient
@@ -726,7 +719,7 @@ class TestWikiClient:
                 anchor="#release-notes",
             )
 
-        assert result["id"] == 10
+        assert result.id == 10
         append_capture.assert_called_once()
         get_capture.assert_called_once()
         update_capture.assert_called_once()
@@ -742,6 +735,51 @@ class TestWikiClient:
     ) -> None:
         with pytest.raises(ValueError, match="at least one of title or content"):
             await wiki_client.page_update(10)
+
+    async def test_page_create_normalizes_the_slug_and_parses_the_page(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(
+            payload={"id": 42, "slug": "users/test/new", "title": "New"}
+        )
+
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages",
+                callback=capture.callback,
+            )
+            page = await wiki_client.page_create(
+                slug="https://wiki.yandex.ru/users/test/new/",
+                title="New",
+                content="body",
+            )
+
+        assert page.id == 42
+        assert page.slug == "users/test/new"
+        capture.last_request.assert_json_body(
+            {"slug": "users/test/new", "title": "New", "content": "body"}
+        )
+
+    async def test_page_append_content_without_anchor_sends_a_location(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(payload={"id": 10, "slug": "users/test/page"})
+
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/append-content",
+                callback=capture.callback,
+            )
+            page = await wiki_client.page_append_content(
+                10, content="Tail block", location="top"
+            )
+
+        assert page.id == 10
+        capture.last_request.assert_json_body(
+            {"content": "Tail block", "body": {"location": "top"}}
+        )
 
     async def test_page_get_by_slug_not_found_reports_normalized_slug(
         self,

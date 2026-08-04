@@ -1,11 +1,70 @@
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    GetJsonSchemaHandler,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+)
 
 
 class BaseWikiModel(BaseModel):
+    """Fixed-shape API models.
+
+    Unknown keys are dropped (`extra="ignore"`) and `None` values are omitted
+    from dumps — both to keep MCP tool results lean for LLM consumers. Fields
+    the live API actually sends must be declared explicitly (see
+    docs/api-notes.md and scripts/contract_sweep.py).
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _drop_none(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        if isinstance(data, dict):
+            return {key: value for key, value in data.items() if value is not None}
+        return data
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: Any, handler: GetJsonSchemaHandler
+    ) -> dict[str, Any]:
+        """Strip pydantic's auto-generated titles — pure schema-token noise."""
+        json_schema = dict(handler(core_schema))
+        json_schema.pop("title", None)
+        for prop in json_schema.get("properties", {}).values():
+            if isinstance(prop, dict):
+                prop.pop("title", None)
+        return json_schema
+
+
+class DynamicWikiModel(BaseWikiModel):
+    """Dynamic payloads (grid values and friends): unknown keys are data.
+
+    Declared fields are still API form, so a `None` there means "not sent"
+    and is dropped like everywhere else. Unknown keys are the user's own
+    columns, where `null` is a value — "this cell is empty" has to stay
+    distinguishable from "this column does not exist".
+    """
+
     model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _drop_none(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        if not isinstance(data, dict):
+            return data
+        extras = self.model_extra or {}
+        return {
+            key: value
+            for key, value in data.items()
+            if value is not None or key in extras
+        }
 
 
 class PageFieldEnum(StrEnum):
@@ -31,6 +90,21 @@ class ResourceTypeEnum(StrEnum):
 UploadLocation = Literal["top", "bottom"]
 
 
+class WikiUser(BaseWikiModel):
+    """Trimmed user reference — the API sends much more (identity, flags…)."""
+
+    id: int | None = None
+    username: str | None = None
+    display_name: str | None = None
+
+
+class WikiOwner(BaseWikiModel):
+    """Page owner: the API nests the full identity payload under `user`."""
+
+    user: WikiUser | None = None
+    group: dict[str, Any] | None = None
+
+
 class WikiPage(BaseWikiModel):
     id: int
     slug: str | None = None
@@ -40,6 +114,9 @@ class WikiPage(BaseWikiModel):
     attributes: dict[str, Any] | None = None
     breadcrumbs: list[dict[str, Any]] | None = None
     redirect: dict[str, Any] | None = None
+    access_policy: dict[str, Any] | None = None
+    access_lists: dict[str, Any] | None = None
+    owner: WikiOwner | None = None
     created_at: str | None = None
     modified_at: str | None = None
 
@@ -48,18 +125,15 @@ class SearchResultItem(BaseWikiModel):
     url: str | None = None
     slug: str | None = None
     title: str | None = None
-    body: str | None = None
+    content: str | None = None
     type: str | None = None
-    modified_at: int | None = None
+    modified_at: str | None = None
 
 
 class SearchResponse(BaseWikiModel):
     results: list[SearchResultItem] = Field(default_factory=list)
-    total_documents: int | None = None
-    total_pages: int | None = None
-    page_id: int | None = None
-    search_client: str | None = None
-    uid: str | None = None
+    next_cursor: str | None = None
+    prev_cursor: str | None = None
 
 
 class PageComment(BaseWikiModel):
@@ -68,8 +142,12 @@ class PageComment(BaseWikiModel):
     parent_id: int | None = None
     thread_id: int | None = None
     created_at: str | None = None
-    updated_at: str | None = None
-    user: dict[str, Any] | None = None
+    author: WikiUser | None = None
+    inline_text: str | None = None
+    is_deleted: bool | None = None
+    resolve_status: str | None = None
+    reactions: list[Any] | None = None
+    thread_info: Any = None
 
 
 class WikiAttachment(BaseWikiModel):
@@ -82,7 +160,8 @@ class WikiAttachment(BaseWikiModel):
     created_at: str | None = None
     has_preview: bool | None = None
     check_status: str | None = None
-    user: dict[str, Any] | None = None
+    is_downloadable: bool | None = None
+    user: WikiUser | None = None
 
 
 class WikiResource(BaseWikiModel):
@@ -90,42 +169,59 @@ class WikiResource(BaseWikiModel):
     item: dict[str, Any]
 
 
-class DescendantsResponse(BaseWikiModel):
-    results: list[WikiPage] = Field(default_factory=list)
+class DescendantItem(BaseWikiModel):
+    """Descendants carry only id and slug live — titles never arrive."""
+
+    id: int
+    slug: str | None = None
+
+
+class CursorEnvelope(BaseWikiModel):
+    """Cursor-paginated list envelope; subclasses narrow `results`.
+
+    `truncated` is set only by the tool-layer `fetch_all` loop: False when the
+    whole list was drained, True when it stopped early — on the item cap, the
+    time budget, a failed page, or a cursor the server repeated. `next_cursor`
+    then points at the continuation, except after a repeated cursor, where
+    there is nothing safe to continue from.
+    """
+
+    results: list[Any] = Field(default_factory=list)
     next_cursor: str | None = None
     prev_cursor: str | None = None
+    truncated: bool | None = None
 
 
-class CommentsResponse(BaseWikiModel):
+class DescendantsResponse(CursorEnvelope):
+    results: list[DescendantItem] = Field(default_factory=list)
+
+
+class CommentsResponse(CursorEnvelope):
     results: list[PageComment] = Field(default_factory=list)
-    next_cursor: str | None = None
-    prev_cursor: str | None = None
 
 
-class AttachmentListResponse(BaseWikiModel):
+class AttachmentListResponse(CursorEnvelope):
     results: list[WikiAttachment] = Field(default_factory=list)
-    next_cursor: str | None = None
-    prev_cursor: str | None = None
 
 
-class ResourcesResponse(BaseWikiModel):
+class ResourcesResponse(CursorEnvelope):
     results: list[WikiResource] = Field(default_factory=list)
-    next_cursor: str | None = None
-    prev_cursor: str | None = None
 
 
 class WikiGridPageRef(BaseWikiModel):
+    """Service reference, not user data — stays strict."""
+
     id: int | str | None = None
     slug: str | None = None
 
 
-class WikiGridSort(BaseWikiModel):
+class WikiGridSort(DynamicWikiModel):
     slug: str | None = None
     title: str | None = None
     direction: str | None = None
 
 
-class WikiGridColumn(BaseWikiModel):
+class WikiGridColumn(DynamicWikiModel):
     id: str | None = None
     slug: str | None = None
     title: str | None = None
@@ -143,12 +239,12 @@ class WikiGridColumn(BaseWikiModel):
     description: str | None = None
 
 
-class WikiGridStructure(BaseWikiModel):
+class WikiGridStructure(DynamicWikiModel):
     default_sort: list[WikiGridSort] = Field(default_factory=list)
     columns: list[WikiGridColumn] = Field(default_factory=list)
 
 
-class WikiGridRow(BaseWikiModel):
+class WikiGridRow(DynamicWikiModel):
     id: str | int | None = None
     row: list[Any] = Field(default_factory=list)
     pinned: bool | None = None
@@ -156,18 +252,18 @@ class WikiGridRow(BaseWikiModel):
 
 
 class WikiGridSummary(BaseWikiModel):
+    """Listing envelope, not user data — stays strict."""
+
     id: str | int
     title: str | None = None
     created_at: str | None = None
 
 
-class GridsResponse(BaseWikiModel):
+class GridsResponse(CursorEnvelope):
     results: list[WikiGridSummary] = Field(default_factory=list)
-    next_cursor: str | None = None
-    prev_cursor: str | None = None
 
 
-class WikiGrid(BaseWikiModel):
+class WikiGrid(DynamicWikiModel):
     id: str | int
     title: str | None = None
     page: WikiGridPageRef | None = None
@@ -210,11 +306,25 @@ class GridUpdateRequest(BaseWikiModel):
 
 
 class GridMutationResponse(BaseWikiModel):
+    """Row and column mutations answer with `results` (+ `revision`)."""
+
     revision: str | None = None
     results: list[WikiGridRow] = Field(default_factory=list)
 
 
-class GridUpdateResponse(BaseWikiModel):
+class GridCellsResponse(BaseWikiModel):
+    """`POST /grids/{id}/cells` answers with `cells`, not `results`.
+
+    Its own model rather than a shared one: `results` has a list default, so
+    it is never dropped as empty, and a mutation reply carrying
+    `"results": []` reads as "nothing changed" to an agent checking it.
+    """
+
+    revision: str | None = None
+    cells: list[Any] | None = None
+
+
+class GridUpdateResponse(DynamicWikiModel):
     id: str | int | None = None
     title: str | None = None
     page: WikiGridPageRef | None = None
@@ -245,6 +355,8 @@ class DeletePageResponse(BaseWikiModel):
 
 class RecoverPageResponse(BaseWikiModel):
     id: int
+    slug: str | None = None
+    pages_count: int | None = None
 
 
 class UploadSessionResponse(BaseWikiModel):
