@@ -25,6 +25,7 @@ from mcp_wiki.wiki.custom.errors import (
     GridNotFound,
     PageNotFound,
     WikiApiError,
+    WikiConfigError,
     WikiError,
     WikiTransportError,
     build_api_error,
@@ -199,7 +200,7 @@ class WikiClient(WikiProtocol):
         elif self._iam_token:
             auth_header = f"Bearer {self._iam_token}"
         else:
-            raise ValueError(
+            raise WikiConfigError(
                 "No authentication method provided. Configure wiki_token, wiki_iam_token, or OAuth."
             )
 
@@ -209,9 +210,16 @@ class WikiClient(WikiProtocol):
         )
 
         if org_id and cloud_org_id:
-            raise ValueError("Only one of org_id or cloud_org_id should be provided.")
+            raise WikiConfigError(
+                "Only one of org_id or cloud_org_id should be provided."
+            )
         if not org_id and not cloud_org_id:
-            raise ValueError("Either org_id or cloud_org_id must be provided.")
+            raise WikiConfigError(
+                "No organization for this request. Set WIKI_ORG_ID (or "
+                "WIKI_CLOUD_ORG_ID) on the server, or — under OAuth, where the "
+                "organization travels per request — append ?orgId=... (or "
+                "?cloudOrgId=...) to the MCP server URL."
+            )
 
         headers = {"Authorization": auth_header}
         if org_id:

@@ -21,7 +21,7 @@ from mcp_wiki.mcp.oauth.stores.redis import RedisOAuthStore
 from mcp_wiki.mcp.params import instructions
 from mcp_wiki.mcp.resources import register_resources
 from mcp_wiki.mcp.tools import register_all_tools
-from mcp_wiki.settings import Settings
+from mcp_wiki.settings import Settings, ToolResultText
 from mcp_wiki.wiki.custom.client import WikiClient
 
 Lifespan = Callable[[FastMCP[Any]], AbstractAsyncContextManager[AppContext]]
@@ -49,7 +49,10 @@ class WikiFastMCP(FastMCP):
     """
 
     def __init__(
-        self, *args: Any, tool_result_text: str = "pretty", **kwargs: Any
+        self,
+        *args: Any,
+        tool_result_text: ToolResultText = "pretty",
+        **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._tool_result_text = tool_result_text
@@ -60,7 +63,12 @@ class WikiFastMCP(FastMCP):
             isinstance(result, tuple) and len(result) == 2
         ):
             return result
-        _, structured = result
+        unstructured, structured = result
+        # Only the JSON duplicate is ours to drop or shrink. A tool that
+        # returns real content blocks — an image, a downloaded attachment —
+        # must keep them, so leave anything non-textual alone.
+        if not all(isinstance(block, TextContent) for block in unstructured):
+            return result
         if self._tool_result_text == "none":
             return [], structured
         compact_text = json.dumps(structured, ensure_ascii=False, separators=(",", ":"))

@@ -234,6 +234,13 @@ their personal token.
 | `OAUTH_ENCRYPTION_KEYS` | — | Comma-separated base64 32-byte keys (required for `redis` store) |
 | `REDIS_ENDPOINT` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PASSWORD` / `REDIS_POOL_MAX_SIZE` | `localhost` / `6379` / `0` / — / `10` | Redis connection |
 
+**Choosing the organization per user.** `WIKI_ORG_ID` / `WIKI_CLOUD_ORG_ID` are optional
+under OAuth, because each request can name its own organization: append `?orgId=...` (or
+`?cloudOrgId=...`) to the MCP server URL your client connects to. A query parameter wins
+over the server-wide setting, so one deployment can serve several organizations. If a
+request carries neither, the tool call fails with a message pointing at both options —
+set the environment variable as the default if all your users share one organization.
+
 See [`.env.example`](.env.example) for the full annotated list and [`compose.yaml`](compose.yaml) for a Redis baseline.
 
 </details>

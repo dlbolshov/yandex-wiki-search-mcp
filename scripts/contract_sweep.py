@@ -413,7 +413,15 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
 
 
 async def cleanup(wiki: WikiClient, base: str) -> None:
-    response = await wiki.page_get_descendants(base, include_self=True, page_size=100)
+    # Walk the cursor: a single page would leave a tail behind for any
+    # --pages value past the page size, and the leftovers would then collide
+    # with the next run's root page and read as API drift.
+    walk = CursorWalk(
+        lambda cur: wiki.page_get_descendants(
+            base, include_self=True, page_size=100, cursor=cur
+        )
+    )
+    response = await walk.run()
     pages = sorted(
         response.results,
         key=lambda p: (p.slug or "").count("/"),

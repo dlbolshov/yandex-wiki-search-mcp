@@ -3,6 +3,9 @@ from typing import Literal
 from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Shared so the server cannot widen it back to str and silently accept a typo.
+ToolResultText = Literal["pretty", "compact", "none"]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -17,7 +20,7 @@ class Settings(BaseSettings):
     stateless_http: bool = True
     json_response: bool = True
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    tool_result_text: Literal["pretty", "compact", "none"] = "pretty"
+    tool_result_text: ToolResultText = "pretty"
 
     wiki_api_base_url: str = "https://api.wiki.yandex.net"
     wiki_web_base_url: str = "https://wiki.yandex.ru"

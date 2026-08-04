@@ -81,6 +81,20 @@ class TestDeclaredLiveExtras:
         assert page.access_lists == {"direct": []}
         assert page.owner is not None
 
+    def test_owner_user_is_trimmed_like_every_other_user_reference(self) -> None:
+        page = WikiPage.model_validate(
+            {"id": 1, "owner": {"user": LIVE_USER, "group": None}}
+        )
+
+        assert page.owner is not None
+        assert page.owner.user is not None
+        assert page.owner.user.username == "david"
+        owner = page.model_dump()["owner"]
+        assert "identity" not in owner["user"]
+        assert "is_dismissed" not in owner["user"]
+        assert "affiliation" not in owner["user"]
+        assert "group" not in owner
+
     def test_comment_live_shape(self) -> None:
         comment = PageComment.model_validate(
             {

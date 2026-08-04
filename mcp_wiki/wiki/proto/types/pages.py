@@ -98,6 +98,13 @@ class WikiUser(BaseWikiModel):
     display_name: str | None = None
 
 
+class WikiOwner(BaseWikiModel):
+    """Page owner: the API nests the full identity payload under `user`."""
+
+    user: WikiUser | None = None
+    group: dict[str, Any] | None = None
+
+
 class WikiPage(BaseWikiModel):
     id: int
     slug: str | None = None
@@ -109,7 +116,7 @@ class WikiPage(BaseWikiModel):
     redirect: dict[str, Any] | None = None
     access_policy: dict[str, Any] | None = None
     access_lists: dict[str, Any] | None = None
-    owner: dict[str, Any] | None = None
+    owner: WikiOwner | None = None
     created_at: str | None = None
     modified_at: str | None = None
 

@@ -35,6 +35,15 @@ class WikiApiError(WikiError):
         self.message = message
 
 
+class WikiConfigError(WikiError):
+    """The request could not be built from the current configuration.
+
+    A WikiError rather than a ValueError so callers can handle it alongside
+    every other Wiki failure, and so MCP clients get a message that names the
+    remedy instead of a bare exception repr.
+    """
+
+
 class WikiTransportError(WikiError):
     """The request never produced an HTTP response.
 
