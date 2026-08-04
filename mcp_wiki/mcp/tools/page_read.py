@@ -1,5 +1,7 @@
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypeVar
 
 from mcp.server import FastMCP
 from mcp.types import ToolAnnotations
@@ -30,6 +32,7 @@ from mcp_wiki.mcp.utils import (
     normalize_slug,
     resolve_page_locator,
 )
+from mcp_wiki.wiki.custom.errors import WikiError
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
     CommentsResponse,
@@ -42,32 +45,77 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiPage,
 )
 
+logger = logging.getLogger(__name__)
+
 FETCH_ALL_MAX_ITEMS = 500
+FETCH_ALL_BUDGET_SECONDS = 25.0
 _FETCH_ALL_MAX_REQUESTS = 50
+
+EnvelopeT = TypeVar("EnvelopeT", bound=CursorEnvelope)
 
 
 async def _drain_cursor(
-    first: CursorEnvelope,
-    fetch_page: Callable[[str], Awaitable[Any]],
+    first: EnvelopeT,
+    fetch_page: Callable[[str], Awaitable[EnvelopeT]],
+    page_size: int,
     max_items: int = FETCH_ALL_MAX_ITEMS,
+    budget_seconds: float = FETCH_ALL_BUDGET_SECONDS,
 ) -> None:
     """Follow next_cursor in place, extending first.results.
 
-    Stops at max_items (the last fetched page may overshoot slightly) and
-    always sets `truncated`; next_cursor ends up None when the list was
-    drained, or points at the continuation when the cap was hit.
+    Stops before a hop that would exceed `max_items`, so the cap is a real
+    ceiling rather than an approximate one. Also stops when the request or
+    time budget runs out, or when a fetch fails — a partial list plus a
+    usable `next_cursor` beats discarding pages already paid for.
+
+    `truncated` is False only when the list was drained to its end. The
+    deadline can only be checked between hops, so the wall-clock ceiling is
+    the budget plus one in-flight request with its retries.
+
+    When the server echoes the cursor we just sent, continuing is
+    impossible: `next_cursor` is cleared so no caller retries it forever.
     """
-    results: list[Any] = first.results  # type: ignore[attr-defined]
+    results: list[Any] = first.results
+    deadline = asyncio.get_running_loop().time() + budget_seconds
+    complete = False
+
     for _ in range(_FETCH_ALL_MAX_REQUESTS):
         cursor = first.next_cursor
-        if cursor is None or len(results) >= max_items:
+        if cursor is None:
+            complete = True
             break
-        page = await fetch_page(cursor)
+        if len(results) + page_size > max_items:
+            logger.debug("fetch_all stopped: %d items, cap %d", len(results), max_items)
+            break
+        if asyncio.get_running_loop().time() >= deadline:
+            logger.debug("fetch_all stopped: %.0fs budget spent", budget_seconds)
+            break
+        try:
+            page = await fetch_page(cursor)
+        except WikiError as exc:
+            logger.warning("fetch_all stopped after a failed page: %s", exc)
+            break
         results.extend(page.results)
         if page.next_cursor == cursor:
+            logger.warning("fetch_all stopped: the server repeated cursor %r", cursor)
+            first.next_cursor = None
             break
         first.next_cursor = page.next_cursor
-    first.truncated = first.next_cursor is not None
+
+    first.truncated = not complete
+
+
+async def _paginate(
+    fetch_page: Callable[[str | None], Awaitable[EnvelopeT]],
+    cursor: str | None,
+    fetch_all: bool,
+    page_size: int,
+) -> EnvelopeT:
+    """Fetch one page, or drain the whole cursor when fetch_all is set."""
+    response = await fetch_page(cursor)
+    if fetch_all:
+        await _drain_cursor(response, fetch_page, page_size=page_size)
+    return response
 
 
 def register_page_read_tools(mcp: FastMCP[Any]) -> None:
@@ -193,10 +241,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
                 auth=auth,
             )
 
-        response = await fetch(cursor)
-        if fetch_all:
-            await _drain_cursor(response, fetch)
-        return response
+        return await _paginate(fetch, cursor, fetch_all, page_size)
 
     @mcp.tool(
         title="Get Page Comments",
@@ -222,10 +267,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
                 auth=auth,
             )
 
-        response = await fetch(cursor)
-        if fetch_all:
-            await _drain_cursor(response, fetch)
-        return response
+        return await _paginate(fetch, cursor, fetch_all, page_size)
 
     @mcp.tool(
         title="Get Page Resources",
@@ -273,10 +315,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
                 auth=auth,
             )
 
-        response = await fetch(cursor)
-        if fetch_all:
-            await _drain_cursor(response, fetch)
-        return response
+        return await _paginate(fetch, cursor, fetch_all, page_size)
 
     @mcp.tool(
         title="Get Page Grids",
@@ -312,10 +351,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
                 auth=auth,
             )
 
-        response = await fetch(cursor)
-        if fetch_all:
-            await _drain_cursor(response, fetch)
-        return response
+        return await _paginate(fetch, cursor, fetch_all, page_size)
 
     @mcp.tool(
         title="Get Wiki Grid",
@@ -388,7 +424,4 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
                 auth=auth,
             )
 
-        response = await fetch(cursor)
-        if fetch_all:
-            await _drain_cursor(response, fetch)
-        return response
+        return await _paginate(fetch, cursor, fetch_all, page_size)

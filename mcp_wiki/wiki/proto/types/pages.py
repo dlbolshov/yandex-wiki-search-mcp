@@ -152,13 +152,16 @@ class DescendantItem(BaseWikiModel):
 
 
 class CursorEnvelope(BaseWikiModel):
-    """Cursor-paginated list envelope.
+    """Cursor-paginated list envelope; subclasses narrow `results`.
 
     `truncated` is set only by the tool-layer `fetch_all` loop: False when the
-    whole list was drained, True when the item cap was hit (continue from
-    `next_cursor`).
+    whole list was drained, True when it stopped early — on the item cap, the
+    time budget, a failed page, or a cursor the server repeated. `next_cursor`
+    then points at the continuation, except after a repeated cursor, where
+    there is nothing safe to continue from.
     """
 
+    results: list[Any] = Field(default_factory=list)
     next_cursor: str | None = None
     prev_cursor: str | None = None
     truncated: bool | None = None

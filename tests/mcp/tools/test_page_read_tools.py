@@ -1,16 +1,28 @@
+from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
 from mcp.client.session import ClientSession
 
 from mcp_wiki.mcp.tools.page_read import _drain_cursor
+from mcp_wiki.wiki.custom.errors import WikiTransportError
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentListResponse,
+    CommentsResponse,
+    CursorEnvelope,
     DescendantItem,
     DescendantsResponse,
+    GridsResponse,
+    PageComment,
+    ResourcesResponse,
     SearchResponse,
     SearchResultItem,
+    WikiAttachment,
     WikiGrid,
     WikiGridRow,
+    WikiGridSummary,
     WikiPage,
+    WikiResource,
 )
 from tests.mcp.conftest import get_tool_result_content, get_tool_result_text
 
@@ -24,38 +36,119 @@ def _tree_page(start: int, count: int, next_cursor: str | None) -> DescendantsRe
     )
 
 
+def _cursor_page(
+    envelope: type[CursorEnvelope],
+    item: Any,
+    start: int,
+    count: int,
+    next_cursor: str | None,
+) -> CursorEnvelope:
+    return envelope(
+        results=[item(i) for i in range(start, start + count)],
+        next_cursor=next_cursor,
+    )
+
+
+# (tool name, protocol method, envelope type, item builder)
+CURSOR_TOOLS = [
+    (
+        "page_get_descendants",
+        "page_get_descendants",
+        DescendantsResponse,
+        lambda i: DescendantItem(id=i, slug=f"s/{i}"),
+    ),
+    (
+        "page_get_comments",
+        "page_get_comments",
+        CommentsResponse,
+        lambda i: PageComment(id=i, body=f"c{i}"),
+    ),
+    (
+        "page_get_attachments",
+        "page_get_attachments",
+        AttachmentListResponse,
+        lambda i: WikiAttachment(id=i, name=f"f{i}.txt"),
+    ),
+    (
+        "page_get_resources",
+        "page_get_resources",
+        ResourcesResponse,
+        lambda i: WikiResource(type="attachment", item={"id": i}),
+    ),
+    (
+        "page_get_grids",
+        "page_get_grids",
+        GridsResponse,
+        lambda i: WikiGridSummary(id=str(i), title=f"g{i}"),
+    ),
+]
+
+
 class TestDrainCursor:
     async def test_walks_until_exhausted(self) -> None:
         first = _tree_page(0, 2, "c1")
         pages = {"c1": _tree_page(2, 2, "c2"), "c2": _tree_page(4, 1, None)}
         fetch = AsyncMock(side_effect=lambda cursor: pages[cursor])
 
-        await _drain_cursor(first, fetch)
+        await _drain_cursor(first, fetch, page_size=2)
 
         assert [item.id for item in first.results] == [0, 1, 2, 3, 4]
         assert first.truncated is False
         assert first.next_cursor is None
         assert fetch.await_count == 2
 
-    async def test_stops_at_cap_and_reports_truncation(self) -> None:
+    async def test_stops_before_a_hop_that_would_exceed_the_cap(self) -> None:
         first = _tree_page(0, 2, "c1")
         pages = {"c1": _tree_page(2, 2, "c2"), "c2": _tree_page(4, 2, "c3")}
         fetch = AsyncMock(side_effect=lambda cursor: pages[cursor])
 
-        await _drain_cursor(first, fetch, max_items=3)
+        await _drain_cursor(first, fetch, page_size=2, max_items=5)
 
+        # 2 + 2 = 4 fits under 5, a third hop would reach 6 — so it is not made
         assert [item.id for item in first.results] == [0, 1, 2, 3]
         assert first.truncated is True
         assert first.next_cursor == "c2"
         assert fetch.await_count == 1
 
-    async def test_repeated_cursor_stops_the_loop(self) -> None:
+    async def test_cap_is_never_overshot(self) -> None:
+        first = _tree_page(0, 100, "c1")
+        fetch = AsyncMock(side_effect=lambda cursor: _tree_page(100, 100, "c2"))
+
+        await _drain_cursor(first, fetch, page_size=100, max_items=150)
+
+        assert len(first.results) <= 150
+        fetch.assert_not_awaited()
+        assert first.truncated is True
+
+    async def test_repeated_cursor_clears_the_continuation(self) -> None:
         first = _tree_page(0, 1, "c1")
         fetch = AsyncMock(return_value=_tree_page(1, 1, "c1"))
 
-        await _drain_cursor(first, fetch)
+        await _drain_cursor(first, fetch, page_size=1)
 
+        # the page was merged, but continuing from "c1" would re-fetch it forever
+        assert [item.id for item in first.results] == [0, 1]
         assert fetch.await_count == 1
+        assert first.truncated is True
+        assert first.next_cursor is None
+
+    async def test_failed_page_keeps_what_was_already_fetched(self) -> None:
+        first = _tree_page(0, 2, "c1")
+        fetch = AsyncMock(side_effect=WikiTransportError("GET", "v1/x", TimeoutError()))
+
+        await _drain_cursor(first, fetch, page_size=2)
+
+        assert [item.id for item in first.results] == [0, 1]
+        assert first.truncated is True
+        assert first.next_cursor == "c1"
+
+    async def test_time_budget_stops_the_walk(self) -> None:
+        first = _tree_page(0, 1, "c1")
+        fetch = AsyncMock(side_effect=lambda cursor: _tree_page(1, 1, "c2"))
+
+        await _drain_cursor(first, fetch, page_size=1, budget_seconds=-1.0)
+
+        fetch.assert_not_awaited()
         assert first.truncated is True
         assert first.next_cursor == "c1"
 
@@ -63,7 +156,7 @@ class TestDrainCursor:
         first = _tree_page(0, 1, None)
         fetch = AsyncMock()
 
-        await _drain_cursor(first, fetch)
+        await _drain_cursor(first, fetch, page_size=1)
 
         fetch.assert_not_awaited()
         assert first.truncated is False
@@ -196,6 +289,68 @@ class TestPageReadTools:
         assert mock_wiki_protocol.page_get_descendants.await_count == 3
         last_call = mock_wiki_protocol.page_get_descendants.await_args_list[-1]
         assert last_call.kwargs["cursor"] == "c2"
+
+    @pytest.mark.parametrize(
+        ("tool_name", "method", "envelope", "item"),
+        CURSOR_TOOLS,
+        ids=[tool for tool, *_ in CURSOR_TOOLS],
+    )
+    async def test_every_cursor_tool_drains_with_fetch_all(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+        tool_name: str,
+        method: str,
+        envelope: type[CursorEnvelope],
+        item: Any,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
+            id=10, slug="users/test/page"
+        )
+        getattr(mock_wiki_protocol, method).side_effect = [
+            _cursor_page(envelope, item, 0, 2, "c1"),
+            _cursor_page(envelope, item, 2, 1, None),
+        ]
+
+        result = await client_session.call_tool(
+            tool_name,
+            {"slug": "users/test/page", "fetch_all": True},
+        )
+
+        content = get_tool_result_content(result)
+        assert len(content["results"]) == 3
+        assert content["truncated"] is False
+        assert "next_cursor" not in content
+        assert getattr(mock_wiki_protocol, method).await_count == 2
+
+    @pytest.mark.parametrize(
+        ("tool_name", "method", "envelope", "item"),
+        CURSOR_TOOLS,
+        ids=[tool for tool, *_ in CURSOR_TOOLS],
+    )
+    async def test_every_cursor_tool_stays_on_one_page_by_default(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+        tool_name: str,
+        method: str,
+        envelope: type[CursorEnvelope],
+        item: Any,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
+            id=10, slug="users/test/page"
+        )
+        getattr(mock_wiki_protocol, method).return_value = _cursor_page(
+            envelope, item, 0, 2, "c1"
+        )
+
+        result = await client_session.call_tool(tool_name, {"slug": "users/test/page"})
+
+        content = get_tool_result_content(result)
+        assert len(content["results"]) == 2
+        assert content["next_cursor"] == "c1"
+        assert "truncated" not in content
+        assert getattr(mock_wiki_protocol, method).await_count == 1
 
     async def test_page_get_descendants_single_page_has_no_truncated_flag(
         self,
