@@ -205,10 +205,15 @@ class WikiClient(WikiProtocol):
                 "No authentication method provided. Configure wiki_token, wiki_iam_token, or OAuth."
             )
 
-        org_id = auth.org_id if auth and auth.org_id else self._org_id
-        cloud_org_id = (
-            auth.cloud_org_id if auth and auth.cloud_org_id else self._cloud_org_id
-        )
+        # Per-request auth replaces the organization as a unit. Picking each
+        # id independently would pair a request's cloud_org_id with the
+        # server-wide org_id and fail as "only one of" — so under OAuth a
+        # client could not select a cloud organization on a server that has a
+        # plain org configured as its default.
+        if auth and (auth.org_id or auth.cloud_org_id):
+            org_id, cloud_org_id = auth.org_id, auth.cloud_org_id
+        else:
+            org_id, cloud_org_id = self._org_id, self._cloud_org_id
 
         if org_id and cloud_org_id:
             raise WikiConfigError(

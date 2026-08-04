@@ -1,10 +1,11 @@
+import itertools
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from mcp.client.session import ClientSession
 
-from mcp_wiki.mcp.tools.page_read import _drain_cursor
+from mcp_wiki.mcp.tools.page_read import _FETCH_ALL_MAX_REQUESTS, _drain_cursor
 from mcp_wiki.wiki.custom.errors import WikiTransportError
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
@@ -151,6 +152,21 @@ class TestDrainCursor:
         fetch.assert_not_awaited()
         assert first.truncated is True
         assert first.next_cursor == "c1"
+
+    async def test_request_ceiling_stops_a_cursor_that_never_ends(self) -> None:
+        # A server handing out a fresh cursor forever must not keep the tool
+        # call running: the hop ceiling bounds it even under the item cap.
+        counter = itertools.count(1)
+        first = _tree_page(0, 1, "c0")
+        fetch = AsyncMock(
+            side_effect=lambda cursor: _tree_page(next(counter), 1, f"c{cursor}")
+        )
+
+        await _drain_cursor(first, fetch, page_size=1, max_items=10_000)
+
+        assert fetch.await_count == _FETCH_ALL_MAX_REQUESTS
+        assert first.truncated is True
+        assert first.next_cursor is not None
 
     async def test_no_cursor_means_nothing_to_do(self) -> None:
         first = _tree_page(0, 1, None)

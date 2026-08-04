@@ -207,7 +207,7 @@ class TestPageWriteTools:
     ) -> None:
         mock_wiki_protocol.grid_update_cells.return_value = {
             "revision": "8",
-            "results": [],
+            "cells": [{"row_id": 2, "column_slug": "status", "value": "done"}],
         }
 
         result = await client_session.call_tool(
@@ -221,12 +221,27 @@ class TestPageWriteTools:
             },
         )
 
-        assert get_tool_result_content(result)["revision"] == "8"
+        content = get_tool_result_content(result)
+        assert content["revision"] == "8"
+        assert len(content["cells"]) == 1
+        assert "results" not in content
         mock_wiki_protocol.grid_update_cells.assert_awaited_once()
         args = mock_wiki_protocol.grid_update_cells.await_args
         assert args.args[0] == "grid-1"
         assert args.kwargs["cells"][0]["column_slug"] == "status"
         assert args.kwargs["cells"][1]["column_id"] == "col-2"
+
+    async def test_grid_update_cells_rejects_an_empty_cell_list(
+        self,
+        client_session: ClientSession,
+    ) -> None:
+        result = await client_session.call_tool(
+            "grid_update_cells",
+            {"grid_id": "grid-1", "cells": []},
+        )
+
+        assert result.isError is True
+        assert "cells must not be empty" in get_tool_result_text(result)
 
     async def test_grid_update_cells_rejects_invalid_patch(
         self,

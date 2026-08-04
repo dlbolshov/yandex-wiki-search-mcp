@@ -736,6 +736,51 @@ class TestWikiClient:
         with pytest.raises(ValueError, match="at least one of title or content"):
             await wiki_client.page_update(10)
 
+    async def test_page_create_normalizes_the_slug_and_parses_the_page(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(
+            payload={"id": 42, "slug": "users/test/new", "title": "New"}
+        )
+
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages",
+                callback=capture.callback,
+            )
+            page = await wiki_client.page_create(
+                slug="https://wiki.yandex.ru/users/test/new/",
+                title="New",
+                content="body",
+            )
+
+        assert page.id == 42
+        assert page.slug == "users/test/new"
+        capture.last_request.assert_json_body(
+            {"slug": "users/test/new", "title": "New", "content": "body"}
+        )
+
+    async def test_page_append_content_without_anchor_sends_a_location(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(payload={"id": 10, "slug": "users/test/page"})
+
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/append-content",
+                callback=capture.callback,
+            )
+            page = await wiki_client.page_append_content(
+                10, content="Tail block", location="top"
+            )
+
+        assert page.id == 10
+        capture.last_request.assert_json_body(
+            {"content": "Tail block", "body": {"location": "top"}}
+        )
+
     async def test_page_get_by_slug_not_found_reports_normalized_slug(
         self,
         wiki_client: WikiClient,
