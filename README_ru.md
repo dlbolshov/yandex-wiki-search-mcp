@@ -315,7 +315,7 @@ uv run python scripts/contract_sweep.py users/YOU/contract-sweep --cleanup  # у
 ```
 
 Workflow [API drift check](.github/workflows/api-drift.yml) гоняет тот же свип
-еженедельно, если настроены секрет `DRIFT_WIKI_TOKEN` и переменные `DRIFT_*`
+еженедельно, если настроены секреты репозитория `DRIFT_*`
 (инструкция в шапке workflow); без них он тихо скипается.
 
 ## Благодарности

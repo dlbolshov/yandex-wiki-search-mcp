@@ -21,11 +21,14 @@ from mcp_wiki.wiki.proto.types.pages import (
     WikiPage,
 )
 
-LIVE_USER = {
-    "id": 80616691,
-    "identity": {"uid": "1130000067296925", "cloud_uid": "aje8rk0gjh0qq7q7mmt4"},
-    "username": "david",
-    "display_name": "Давид Большов",
+# Synthetic, like everything under tests/fixtures: the shape is what the live
+# API sends, the values are made up. The non-ASCII display name is deliberate —
+# it keeps unicode on the round-trip path.
+USER_PAYLOAD = {
+    "id": 78000001,
+    "identity": {"uid": "1130000000000010", "cloud_uid": "aje000000000000000001"},
+    "username": "user1",
+    "display_name": "Тестовый Пользователь",
     "is_dismissed": False,
     "affiliation": "",
 }
@@ -75,7 +78,7 @@ class TestDeclaredLiveExtras:
                 "id": 1,
                 "access_policy": {"access_type": "inherited"},
                 "access_lists": {"direct": []},
-                "owner": {"user": LIVE_USER},
+                "owner": {"user": USER_PAYLOAD},
             }
         )
         assert page.access_policy == {"access_type": "inherited"}
@@ -84,12 +87,12 @@ class TestDeclaredLiveExtras:
 
     def test_owner_user_is_trimmed_like_every_other_user_reference(self) -> None:
         page = WikiPage.model_validate(
-            {"id": 1, "owner": {"user": LIVE_USER, "group": None}}
+            {"id": 1, "owner": {"user": USER_PAYLOAD, "group": None}}
         )
 
         assert page.owner is not None
         assert page.owner.user is not None
-        assert page.owner.user.username == "david"
+        assert page.owner.user.username == "user1"
         owner = page.model_dump()["owner"]
         assert "identity" not in owner["user"]
         assert "is_dismissed" not in owner["user"]
@@ -103,7 +106,7 @@ class TestDeclaredLiveExtras:
                 "body": "sweep reply",
                 "inline_text": None,
                 "parent_id": 1026439,
-                "author": LIVE_USER,
+                "author": USER_PAYLOAD,
                 "thread_id": None,
                 "created_at": "2026-08-02T20:09:05.706Z",
                 "is_deleted": False,
@@ -113,12 +116,12 @@ class TestDeclaredLiveExtras:
             }
         )
         assert comment.author is not None
-        assert comment.author.username == "david"
+        assert comment.author.username == "user1"
         assert comment.is_deleted is False
         dumped = comment.model_dump()
         assert "user" not in dumped
         assert "identity" not in dumped["author"]
-        assert dumped["author"]["display_name"] == "Давид Большов"
+        assert dumped["author"]["display_name"] == "Тестовый Пользователь"
 
     def test_attachment_live_shape(self) -> None:
         attachment = WikiAttachment.model_validate(
@@ -127,14 +130,14 @@ class TestDeclaredLiveExtras:
                 "name": "sweep.txt",
                 "is_downloadable": True,
                 "download_url": "/users/x/.files/sweep.txt",
-                "user": LIVE_USER,
+                "user": USER_PAYLOAD,
                 "has_preview": False,
                 "check_status": "ready",
             }
         )
         assert attachment.is_downloadable is True
         assert attachment.user is not None
-        assert attachment.user.id == LIVE_USER["id"]
+        assert attachment.user.id == USER_PAYLOAD["id"]
         assert "identity" not in attachment.model_dump()["user"]
 
     def test_recover_response_live_shape(self) -> None:
