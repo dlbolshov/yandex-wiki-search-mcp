@@ -1,5 +1,7 @@
 import base64
 import importlib.metadata
+import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -51,6 +53,12 @@ NON_READ_TOOL_NAMES = [
 ]
 
 EXPECTED_TOOL_NAMES = READ_ONLY_TOOL_NAMES + NON_READ_TOOL_NAMES
+
+MANIFEST_PATH = Path(__file__).resolve().parents[3] / "manifest.json"
+
+
+def load_manifest() -> dict[str, Any]:
+    return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
 class TestToolRegistration:
@@ -149,6 +157,29 @@ class TestOAuthUploadGating:
         assert "page_upload_attachment" in tool_names
         assert server.instructions is not None
         assert "upload attachments from the local filesystem" in server.instructions
+
+
+class TestManifestSync:
+    async def test_manifest_tools_match_the_registered_surface(
+        self,
+        mcp_server: FastMCP[Any],
+    ) -> None:
+        # manifest.json is the MCPB bundle metadata: its tools list is what
+        # clients show before installing. Nothing generates it from the code,
+        # so renames and additions silently drift apart without this check
+        # (v1.0.0 shipped with grid_move_row still listed under its old
+        # plural name and no page_clone at all).
+        manifest = load_manifest()
+
+        manifest_names = [tool["name"] for tool in manifest["tools"]]
+        registered_names = [tool.name for tool in await mcp_server.list_tools()]
+
+        assert sorted(manifest_names) == sorted(registered_names)
+
+        for tool in manifest["tools"]:
+            assert tool.get("description", "").strip(), (
+                f"manifest tool {tool['name']!r} has no description"
+            )
 
 
 class TestResourceRegistration:

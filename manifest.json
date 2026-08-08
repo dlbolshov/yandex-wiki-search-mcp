@@ -103,11 +103,11 @@
       "description": "Delete columns from a Yandex Wiki dynamic table"
     },
     {
-      "name": "grid_move_rows",
+      "name": "grid_move_row",
       "description": "Move a row inside a Yandex Wiki dynamic table"
     },
     {
-      "name": "grid_move_columns",
+      "name": "grid_move_column",
       "description": "Move a column inside a Yandex Wiki dynamic table"
     },
     {
@@ -121,6 +121,10 @@
     {
       "name": "page_append_content",
       "description": "Append content to a Yandex Wiki page"
+    },
+    {
+      "name": "page_clone",
+      "description": "Copy a Yandex Wiki page to a new slug (children stay with the original)"
     },
     {
       "name": "page_add_comment",
