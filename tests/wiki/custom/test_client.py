@@ -11,6 +11,7 @@ from mcp_wiki.wiki.custom.errors import (
     GridNotFound,
     PageNotFound,
     WikiApiError,
+    WikiOperationError,
 )
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
@@ -61,7 +62,7 @@ class TestWikiClient:
                 "https://api.wiki.yandex.net/v1/search",
                 callback=capture.callback,
             )
-            result = await wiki_client.page_search("query text", page_size=50)
+            result = await wiki_client.page_search("query text", limit=50)
 
         assert result.results[0].slug == "tech-doc/example/ml/pipeline-overview"
         assert result.results[0].content == (
@@ -86,7 +87,7 @@ class TestWikiClient:
         assert result.results == []
         assert result.next_cursor is None
 
-    async def test_page_search_clamps_page_size(self, wiki_client: WikiClient) -> None:
+    async def test_page_search_clamps_limit(self, wiki_client: WikiClient) -> None:
         capture = RequestCapture(
             payload={"results": [], "next_cursor": None, "prev_cursor": None}
         )
@@ -95,7 +96,7 @@ class TestWikiClient:
                 "https://api.wiki.yandex.net/v1/search",
                 callback=capture.callback,
             )
-            await wiki_client.page_search("q", page_size=1000)
+            await wiki_client.page_search("q", limit=1000)
         capture.last_request.assert_json_field("limit", 50)
 
     async def test_page_search_raises_api_error_with_list_message(
@@ -376,7 +377,9 @@ class TestWikiClient:
             )
             result = await wiki_client.grid_delete("grid-1")
 
-        assert result == {}
+        # 204 No Content → the acknowledgment is filled in client-side.
+        assert result.grid_id == "grid-1"
+        assert result.deleted is True
         capture.assert_called_once()
 
     async def test_grid_copy(
@@ -549,7 +552,7 @@ class TestWikiClient:
             }
         )
 
-    async def test_grid_move_rows(
+    async def test_grid_move_row(
         self,
         wiki_client: WikiClient,
     ) -> None:
@@ -560,7 +563,7 @@ class TestWikiClient:
                 "https://api.wiki.yandex.net/v1/grids/grid-1/rows/move",
                 callback=capture.callback,
             )
-            result = await wiki_client.grid_move_rows(
+            result = await wiki_client.grid_move_row(
                 "grid-1",
                 revision="9",
                 row_id="3",
@@ -577,7 +580,7 @@ class TestWikiClient:
             }
         )
 
-    async def test_grid_move_columns(
+    async def test_grid_move_column(
         self,
         wiki_client: WikiClient,
     ) -> None:
@@ -588,7 +591,7 @@ class TestWikiClient:
                 "https://api.wiki.yandex.net/v1/grids/grid-1/columns/move",
                 callback=capture.callback,
             )
-            result = await wiki_client.grid_move_columns(
+            result = await wiki_client.grid_move_column(
                 "grid-1",
                 revision="10",
                 column_slug="status",
@@ -783,6 +786,166 @@ class TestWikiClient:
     ) -> None:
         with pytest.raises(ValueError, match="at least one of title or content"):
             await wiki_client.page_update(10)
+
+    async def test_page_clone_polls_the_operation_and_returns_the_copy(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(
+            payload={
+                "operation": {"type": "clone", "id": "op-1"},
+                "dry_run": False,
+                "status_url": "/v1/operations/clone/op-1",
+            }
+        )
+
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                callback=capture.callback,
+            )
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/operations/clone/op-1",
+                payload={
+                    "status": "success",
+                    "result": {"page": {"id": 77, "slug": "users/test/copy"}},
+                },
+            )
+            copy = await wiki_client.page_clone(
+                10,
+                target="https://wiki.yandex.ru/users/test/copy/",
+                title="Copy title",
+            )
+
+        assert copy.id == 77
+        assert copy.slug == "users/test/copy"
+        capture.last_request.assert_json_body(
+            {"target": "users/test/copy", "title": "Copy title"}
+        )
+
+    async def test_page_clone_keeps_polling_until_the_operation_settles(
+        self,
+        wiki_client: WikiClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.CLONE_POLL_INTERVAL", 0)
+
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                payload={
+                    "operation": {"type": "clone", "id": "op-2"},
+                    "status_url": "/v1/operations/clone/op-2",
+                },
+            )
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/operations/clone/op-2",
+                payload={"status": "in_progress"},
+            )
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/operations/clone/op-2",
+                payload={
+                    "status": "success",
+                    "result": {"page": {"id": 78, "slug": "users/test/copy-2"}},
+                },
+            )
+            copy = await wiki_client.page_clone(10, target="users/test/copy-2")
+
+        assert copy.id == 78
+
+    async def test_page_clone_rejects_an_empty_target(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        with pytest.raises(ValueError, match="target must not be empty"):
+            await wiki_client.page_clone(10, target="  / ")
+
+    async def test_page_clone_not_found_raises_page_not_found(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/404/clone",
+                status=404,
+                payload={"error_code": "NOT_FOUND"},
+            )
+            with pytest.raises(PageNotFound):
+                await wiki_client.page_clone(404, target="users/test/anywhere")
+
+    async def test_page_clone_raises_when_the_operation_fails(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                payload={
+                    "operation": {"type": "clone", "id": "op-3"},
+                    "status_url": "/v1/operations/clone/op-3",
+                },
+            )
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/operations/clone/op-3",
+                payload={"status": "failed"},
+            )
+            with pytest.raises(WikiOperationError, match="ended with status='failed'"):
+                await wiki_client.page_clone(10, target="users/test/copy-3")
+
+    async def test_page_clone_raises_when_the_operation_never_settles(
+        self,
+        wiki_client: WikiClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.CLONE_POLL_TIMEOUT", 0.0)
+
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                payload={
+                    "operation": {"type": "clone", "id": "op-4"},
+                    "status_url": "/v1/operations/clone/op-4",
+                },
+            )
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/operations/clone/op-4",
+                payload={"status": "in_progress"},
+            )
+            with pytest.raises(WikiOperationError, match="did not finish within"):
+                await wiki_client.page_clone(10, target="users/test/copy-4")
+
+    async def test_page_clone_raises_when_no_status_url_is_returned(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                payload={"operation": {"type": "clone", "id": "op-5"}},
+            )
+            with pytest.raises(WikiOperationError, match="did not return a status_url"):
+                await wiki_client.page_clone(10, target="users/test/copy-5")
+
+    async def test_page_clone_raises_when_success_reports_no_page(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        # Drift guard: a "success" without result.page must not be reported
+        # as a completed clone — there is no id or slug to hand back.
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                payload={
+                    "operation": {"type": "clone", "id": "op-6"},
+                    "status_url": "/v1/operations/clone/op-6",
+                },
+            )
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/operations/clone/op-6",
+                payload={"status": "success"},
+            )
+            with pytest.raises(WikiOperationError, match="reported no page"):
+                await wiki_client.page_clone(10, target="users/test/copy-6")
 
     async def test_page_create_normalizes_the_slug_and_parses_the_page(
         self,

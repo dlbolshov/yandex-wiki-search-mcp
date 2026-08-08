@@ -27,6 +27,7 @@ from mcp_wiki.wiki.custom.errors import (
     WikiApiError,
     WikiConfigError,
     WikiError,
+    WikiOperationError,
     WikiTransportError,
     build_api_error,
 )
@@ -35,16 +36,19 @@ from mcp_wiki.wiki.proto.pages import WikiProtocol
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
     AttachmentResultsResponse,
+    ClonedPageRef,
     CommentsResponse,
     DeletePageResponse,
     DescendantsResponse,
     GridCellsResponse,
     GridCreateRequest,
+    GridDeleteResponse,
     GridMutationResponse,
     GridOperationResponse,
     GridsResponse,
     GridUpdateRequest,
     GridUpdateResponse,
+    PageCloneStatus,
     PageComment,
     RecoverPageResponse,
     ResourcesResponse,
@@ -57,6 +61,13 @@ from mcp_wiki.wiki.proto.types.pages import (
 )
 
 SEARCH_LIMIT_MAX = 50
+
+# Page clone is a deferred operation. Observed to finish on the first poll
+# (~1s, 2026-08-08); the timeout is a guard against an operation that never
+# settles, not an expected wait.
+CLONE_POLL_INTERVAL = 0.5
+CLONE_POLL_TIMEOUT = 30.0
+CLONE_FAILED_STATUSES = frozenset({"failed", "error", "cancelled"})
 
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 RETRY_BASE_DELAY = 0.3
@@ -372,15 +383,17 @@ class WikiClient(WikiProtocol):
         self,
         query: str,
         *,
-        page_size: int = 10,
+        limit: int = 10,
         auth: YandexAuth | None = None,
     ) -> SearchResponse:
         # The search endpoint reads "limit" from the POST body and silently
         # ignores "page_size" (always returning 10); limit > 50 is a 400.
-        # Verified against the live API 2026-08-02.
+        # Verified against the live API 2026-08-02. Named limit rather than
+        # page_size on purpose: there is no pagination behind it — the
+        # endpoint's cursors are always null.
         body = {
             "query": query,
-            "limit": max(1, min(page_size, SEARCH_LIMIT_MAX)),
+            "limit": max(1, min(limit, SEARCH_LIMIT_MAX)),
         }
         payload = await self._request(
             "POST",
@@ -601,14 +614,22 @@ class WikiClient(WikiProtocol):
         grid_id: str,
         *,
         auth: YandexAuth | None = None,
-    ) -> dict[str, Any]:
+    ) -> GridDeleteResponse:
         payload = await self._request(
             "DELETE",
             f"v1/grids/{grid_id}",
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return self._json_or_empty(payload)
+        # The endpoint answers 204 No Content, so the acknowledgment fields
+        # are ours; a future JSON object body still reaches the model, where
+        # the contract sweep watches for undeclared keys. A non-object body
+        # would be dropped here — nothing merges a bare list into a model.
+        data = self._json_or_empty(payload)
+        body = data if isinstance(data, dict) else {}
+        return GridDeleteResponse.model_validate(
+            {**body, "grid_id": grid_id, "deleted": True}
+        )
 
     async def grid_copy(
         self,
@@ -706,7 +727,7 @@ class WikiClient(WikiProtocol):
         )
         return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
-    async def grid_move_rows(
+    async def grid_move_row(
         self,
         grid_id: str,
         *,
@@ -734,7 +755,7 @@ class WikiClient(WikiProtocol):
         )
         return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
-    async def grid_move_columns(
+    async def grid_move_column(
         self,
         grid_id: str,
         *,
@@ -792,6 +813,68 @@ class WikiClient(WikiProtocol):
         }
         payload = await self._request("POST", "v1/pages", json_body=body, auth=auth)
         return WikiPage.model_validate_json(payload)
+
+    async def page_clone(
+        self,
+        page_id: int,
+        *,
+        target: str,
+        title: str | None = None,
+        auth: YandexAuth | None = None,
+    ) -> ClonedPageRef:
+        # The API's only relocation primitive. There is no move/rename:
+        # POST /pages/{id} silently ignores a "slug" field (the documented
+        # body is title/content/redirect/access_policy/owner) and no /move
+        # endpoint exists — probed live 2026-08-08, docs/api-notes.md. Clone
+        # copies a single page (children stay behind) to a new slug with a
+        # new id, as a deferred operation that is polled here to completion
+        # so callers get the copy's id and slug, not a status URL.
+        normalized = normalize_slug(target)
+        if not normalized:
+            raise ValueError("target must not be empty.")
+
+        body: dict[str, Any] = {"target": normalized}
+        if title is not None:
+            body["title"] = title
+
+        payload = await self._request(
+            "POST",
+            f"v1/pages/{page_id}/clone",
+            json_body=body,
+            auth=auth,
+            not_found=lambda: PageNotFound(page_id),
+        )
+        started = GridOperationResponse.model_validate(self._json_or_empty(payload))
+        if not started.status_url:
+            raise WikiOperationError(
+                "clone operation did not return a status_url to poll; "
+                "whether the copy was created is unknown"
+            )
+
+        deadline = asyncio.get_running_loop().time() + CLONE_POLL_TIMEOUT
+        while True:
+            status_payload = await self._request(
+                "GET",
+                started.status_url.lstrip("/"),
+                auth=auth,
+            )
+            progress = PageCloneStatus.model_validate_json(status_payload)
+            if progress.status == "success":
+                if progress.result is None or progress.result.page is None:
+                    raise WikiOperationError(
+                        "clone operation succeeded but reported no page"
+                    )
+                return progress.result.page
+            if progress.status in CLONE_FAILED_STATUSES:
+                raise WikiOperationError(
+                    f"clone operation ended with status={progress.status!r}"
+                )
+            if asyncio.get_running_loop().time() >= deadline:
+                raise WikiOperationError(
+                    f"clone operation did not finish within {CLONE_POLL_TIMEOUT:.0f}s; "
+                    f"check {started.status_url} manually"
+                )
+            await asyncio.sleep(CLONE_POLL_INTERVAL)
 
     async def page_update(
         self,

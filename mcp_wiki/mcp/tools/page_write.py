@@ -5,6 +5,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from mcp_wiki.mcp.params import (
+    CloneTargetSlug,
     CommentID,
     GridCellPatch,
     GridColumnSpec,
@@ -26,9 +27,11 @@ from mcp_wiki.mcp.tools.common import (
 )
 from mcp_wiki.mcp.utils import get_yandex_auth
 from mcp_wiki.wiki.proto.types.pages import (
+    ClonedPageRef,
     DeletePageResponse,
     GridCellsResponse,
     GridCreateRequest,
+    GridDeleteResponse,
     GridMutationResponse,
     GridOperationResponse,
     GridUpdateRequest,
@@ -43,10 +46,17 @@ from mcp_wiki.wiki.proto.types.pages import (
 )
 from mcp_wiki.yfm import MAX_WARNINGS, validate_yfm
 
-ADDITIVE = ToolAnnotations(destructiveHint=False)
-ADDITIVE_IDEMPOTENT = ToolAnnotations(destructiveHint=False, idempotentHint=True)
-DESTRUCTIVE = ToolAnnotations(destructiveHint=True)
-DESTRUCTIVE_IDEMPOTENT = ToolAnnotations(destructiveHint=True, idempotentHint=True)
+# openWorldHint=False on all of these: the tools talk to exactly one
+# configured Wiki organization — a closed domain. Left unset it defaults
+# to true.
+ADDITIVE = ToolAnnotations(destructiveHint=False, openWorldHint=False)
+ADDITIVE_IDEMPOTENT = ToolAnnotations(
+    destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
+DESTRUCTIVE = ToolAnnotations(destructiveHint=True, openWorldHint=False)
+# destructiveHint deliberately unset (defaults to true): these overwrite
+# existing state, retrying them is safe but running them is not additive.
+IDEMPOTENT = ToolAnnotations(idempotentHint=True, openWorldHint=False)
 
 YFM_CONTENT_NOTE = (
     "Content is Markdown (YFM): plain Markdown renders as-is, but GitHub-specific "
@@ -125,7 +135,11 @@ def _validate_column_slugs(column_slugs: list[str]) -> list[str]:
     ]
 
 
-def register_page_write_tools(mcp: FastMCP[Any]) -> None:
+def register_page_write_tools(
+    mcp: FastMCP[Any],
+    *,
+    include_local_uploads: bool = True,
+) -> None:
     @mcp.tool(
         title="Create Wiki Grid",
         description=(
@@ -158,7 +172,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             "Update a Yandex Wiki dynamic table. Fetch the grid first and pass the latest revision. "
             "This changes structured data."
         ),
-        annotations=ToolAnnotations(idempotentHint=True),
+        annotations=IDEMPOTENT,
     )
     async def grid_update(
         ctx: ToolContext,
@@ -268,7 +282,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
     async def grid_delete(
         ctx: ToolContext,
         grid_id: GridID,
-    ) -> dict[str, Any]:
+    ) -> GridDeleteResponse:
         normalized_grid_id = _require_non_empty_text(grid_id, field_name="grid_id")
         return await get_wiki(ctx).grid_delete(
             normalized_grid_id,
@@ -323,7 +337,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             "Update cells in a Yandex Wiki dynamic table. This changes structured data. "
             "Each cell patch must include row_id, value, and exactly one of column_id or column_slug."
         ),
-        annotations=ToolAnnotations(idempotentHint=True),
+        annotations=IDEMPOTENT,
     )
     async def grid_update_cells(
         ctx: ToolContext,
@@ -447,7 +461,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
         ),
         annotations=ADDITIVE_IDEMPOTENT,
     )
-    async def grid_move_rows(
+    async def grid_move_row(
         ctx: ToolContext,
         grid_id: GridID,
         revision: GridRevision,
@@ -480,7 +494,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             if after_row_id is not None
             else None
         )
-        return await get_wiki(ctx).grid_move_rows(
+        return await get_wiki(ctx).grid_move_row(
             normalized_grid_id,
             revision=normalized_revision,
             row_id=normalized_row_id,
@@ -497,7 +511,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
         ),
         annotations=ADDITIVE_IDEMPOTENT,
     )
-    async def grid_move_columns(
+    async def grid_move_column(
         ctx: ToolContext,
         grid_id: GridID,
         revision: GridRevision,
@@ -515,7 +529,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
         normalized_column_slug = _require_non_empty_text(
             column_slug, field_name="column_slug"
         )
-        return await get_wiki(ctx).grid_move_columns(
+        return await get_wiki(ctx).grid_move_column(
             normalized_grid_id,
             revision=normalized_revision,
             column_slug=normalized_column_slug,
@@ -548,7 +562,7 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             "Update an existing Yandex Wiki page. Content replacement is full-page "
             f"when content is provided. {YFM_CONTENT_NOTE}"
         ),
-        annotations=ToolAnnotations(idempotentHint=True),
+        annotations=IDEMPOTENT,
     )
     async def page_update(
         ctx: ToolContext,
@@ -629,6 +643,43 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
         return _with_yfm_warnings(page, _content_warnings(resolved_page_type, content))
 
     @mcp.tool(
+        title="Clone Wiki Page",
+        description=(
+            "Copy a Yandex Wiki page to a new slug and return the copy's id "
+            "and slug once the operation completes. Copies title and content "
+            "only: child pages, comments, attachments, and edit history stay "
+            "with the original, and the copy gets a new page id. Fails when "
+            "the target slug is already occupied. The Wiki API has no true "
+            "move/rename; to relocate a page, clone it and delete the "
+            "original — re-uploading attachments and re-creating grids on "
+            "the copy if they must follow."
+        ),
+        annotations=ADDITIVE,
+    )
+    async def page_clone(
+        ctx: ToolContext,
+        target: CloneTargetSlug,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+        title: Annotated[
+            str | None,
+            Field(description="Optional title for the copied page."),
+        ] = None,
+    ) -> ClonedPageRef:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        normalized_title = (
+            _require_non_empty_text(title, field_name="title")
+            if title is not None
+            else None
+        )
+        return await get_wiki(ctx).page_clone(
+            resolved_page_id,
+            target=target,
+            title=normalized_title,
+            auth=get_yandex_auth(ctx),
+        )
+
+    @mcp.tool(
         title="Add Page Comment",
         description="Add a comment to a Yandex Wiki page.",
         annotations=ADDITIVE,
@@ -687,6 +738,14 @@ def register_page_write_tools(mcp: FastMCP[Any]) -> None:
             recovery_token,
             auth=get_yandex_auth(ctx),
         )
+
+    if not include_local_uploads:
+        # file_path is read from the filesystem of the machine running THIS
+        # server. In a multi-user OAuth deployment that is the shared server
+        # host, not the caller's machine: the tool would be useless for its
+        # purpose and would let any authenticated user exfiltrate
+        # server-local files (.env, secrets) into their own wiki.
+        return
 
     @mcp.tool(
         title="Upload Page Attachment",

@@ -25,7 +25,12 @@ from pydantic import BaseModel, ValidationError
 
 from mcp_wiki.settings import Settings
 from mcp_wiki.wiki.custom.client import WikiClient
-from mcp_wiki.wiki.custom.errors import GridConflict, PageNotFound, WikiError
+from mcp_wiki.wiki.custom.errors import (
+    GridConflict,
+    PageNotFound,
+    WikiApiError,
+    WikiError,
+)
 from mcp_wiki.wiki.proto.types import pages as page_models
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
@@ -175,6 +180,42 @@ async def check(
     marker = "ok" if status == "OK" else "!!"
     print(f"  {marker} {name}" + (f"  [{note}]" if note else ""))
     return result
+
+
+async def check_expected_error(
+    name: str,
+    fn: Callable[[], Awaitable[Any]],
+    expected: type[WikiError],
+    *,
+    error_code: str | None = None,
+) -> None:
+    """Record a contract that is only visible in a refusal.
+
+    Slug collisions and single-page clone semantics answer with an error by
+    design, so this check is inverted: the call succeeding means the API
+    changed under us. When error_code is given, the refusal must carry
+    exactly that code — a 403 or a 500 is an outage wearing the same
+    exception class, not the contract.
+    """
+    try:
+        await _await_settled(fn)
+    except expected as exc:
+        actual_code = getattr(exc, "error_code", None)
+        if error_code is not None and actual_code != error_code:
+            note = f"{actual_code!r} (expected {error_code!r}): {str(exc)[:120]}"
+            REPORT.append((name, "UNEXPECTED ERROR_CODE", note))
+            print(f"  !! {name}: error_code={actual_code!r}, expected {error_code!r}")
+            return
+        note = f"{type(exc).__name__}: {str(exc)[:120]}"
+        REPORT.append((name, "OK", note))
+        print(f"  ok {name}  [{note}]")
+        return
+    except WikiError as exc:
+        REPORT.append((name, f"UNEXPECTED {type(exc).__name__}", str(exc)[:160]))
+        print(f"  !! {name}: {type(exc).__name__}: {str(exc)[:160]}")
+        return
+    REPORT.append((name, "NO ERROR", f"expected {expected.__name__}"))
+    print(f"  !! {name}: expected {expected.__name__}, but the call succeeded")
 
 
 class CursorWalk:
@@ -361,8 +402,8 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
                 ),
             )
             await check(
-                "grid_move_rows",
-                lambda: wiki.grid_move_rows(
+                "grid_move_row",
+                lambda: wiki.grid_move_row(
                     grid_id, revision=revision, row_id=str(row_ids[0]), position=1
                 ),
             )
@@ -395,8 +436,8 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         fetched = await wiki.grid_get(grid_id)
         revision = fetched.revision or revision
         await check(
-            "grid_move_columns",
-            lambda: wiki.grid_move_columns(
+            "grid_move_column",
+            lambda: wiki.grid_move_column(
                 grid_id, revision=revision, column_slug="count", position=0
             ),
         )
@@ -408,8 +449,9 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
                 grid_id, revision=revision, column_slugs=["done"]
             ),
         )
-        # grid_delete last: it takes the fixture away, and its response shape
-        # is one of the two the models do not cover yet.
+        # grid_delete last: it takes the fixture away. The endpoint answers
+        # 204 No Content; the model fields are client-side acknowledgment,
+        # so any body the API starts sending shows up here as extras.
         await check("grid_delete", lambda: wiki.grid_delete(grid_id))
 
     print("\n=== reads ===")
@@ -446,8 +488,54 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         )
     await check(
         "page_search (existing corpus)",
-        lambda: wiki.page_search("документация", page_size=50),
+        lambda: wiki.page_search("документация", limit=50),
     )
+
+    print("\n=== page_clone ===")
+    # One fixture, four contracts, matching the page_clone tool description:
+    # the copy lands at the target with a NEW id, children do NOT follow
+    # (clone is single-page — probed 2026-08-08, docs/api-notes.md), the
+    # original stays, and cloning onto an occupied slug is refused.
+    original = await check(
+        "page_create (clone fixture)",
+        lambda: wiki.page_create(
+            slug=f"{base}/clone-src", title="Sweep clone fixture", content="original"
+        ),
+    )
+    if original is not None:
+        kid = await check(
+            "page_create (clone kid)",
+            lambda: wiki.page_create(
+                slug=f"{base}/clone-src/kid", title="Sweep clone kid", content="kid"
+            ),
+        )
+        copy = await check(
+            "page_clone",
+            lambda: wiki.page_clone(original.id, target=f"{base}/clone-dst"),
+            note_from_result=lambda r: f"copy landed at {r.slug} (id={r.id})",
+        )
+        if copy is not None and copy.id == original.id:
+            REPORT.append(
+                ("page_clone (copy has a new id)", "BROKEN", "copy kept the same id")
+            )
+        await check(
+            "page_get_by_slug (original stays)",
+            lambda: wiki.page_get_by_slug(f"{base}/clone-src"),
+        )
+        if kid is not None:
+            # Meaningful only when the kid exists: without it, PageNotFound
+            # on clone-dst/kid proves nothing about clone semantics.
+            await check_expected_error(
+                "page_get_by_slug (children do not follow the clone)",
+                lambda: wiki.page_get_by_slug(f"{base}/clone-dst/kid"),
+                PageNotFound,
+            )
+        await check_expected_error(
+            "page_clone (onto an occupied slug is refused)",
+            lambda: wiki.page_clone(original.id, target=f"{base}/clone-src"),
+            WikiApiError,
+            error_code="SLUG_OCCUPIED",
+        )
 
     print("\n=== delete / recover cycle ===")
     if not children:

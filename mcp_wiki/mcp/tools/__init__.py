@@ -10,7 +10,10 @@ from mcp_wiki.settings import Settings
 def register_all_tools(settings: Settings, mcp: FastMCP[Any]) -> None:
     register_page_read_tools(mcp)
     if not settings.wiki_read_only:
-        register_page_write_tools(mcp)
+        register_page_write_tools(
+            mcp,
+            include_local_uploads=settings.include_local_uploads,
+        )
 
 
 __all__ = ["register_all_tools"]

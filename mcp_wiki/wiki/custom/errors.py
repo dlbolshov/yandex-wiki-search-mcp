@@ -57,6 +57,17 @@ class GridConflict(WikiApiError):
         self.args = (f"{self.args[0]}. {self.RECOVERY}",)
 
 
+class WikiOperationError(WikiError):
+    """A deferred Wiki operation failed or never settled.
+
+    Every HTTP exchange succeeded — the POST started the operation and the
+    status polls answered 200 — but the operation itself reported failure,
+    returned no usable result, or outlived the polling deadline. Raising
+    WikiApiError here would prefix the message with "failed with status
+    200", blaming the one layer that worked.
+    """
+
+
 class WikiConfigError(WikiError):
     """The request could not be built from the current configuration.
 

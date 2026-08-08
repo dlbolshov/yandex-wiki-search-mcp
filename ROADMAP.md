@@ -204,17 +204,20 @@
       переменные `DRIFT_*`; без них скипается). Свип в рантайме возвращает моделям
       `extra="allow"` (model_rebuild), чтобы видеть новые необъявленные ключи API
 
-### v1.0.0 — page_move + стабилизация
+### v1.0.0 — page_clone + стабилизация
 
-- [ ] `page_move` (паритет с qstyle/yandex-wiki-mcp): тот же эндпоинт, что `update_page` —
-      `POST /v1/pages/{id}` с `{"slug": new_slug}` (проверено по их исходникам 2026-07-27).
-      Принимать page_id ИЛИ текущий slug (наш паттерн OptionalPageID/OptionalPageSlug);
-      idempotentHint. Проверить на живой вики: судьба поддерева при смене слага (иерархия
-      слаговая — дети должны переехать?), коллизия слагов (ожидаем 4xx → `WikiApiError`),
-      нормализация new_slug. В description — предупреждение: смена слага ломает внешние ссылки
+- [x] ~~`page_move`~~ → `page_clone` (2026-08-08). План был «паритет с qstyle: `POST /v1/pages/{id}`
+      с `{"slug": new_slug}`» — живые пробы доказали, что это тихий no-op: 200, поле `slug`
+      молча игнорируется (документированное тело апдейта — title/content/redirect/
+      access_policy/owner), эндпоинта `/move` нет вовсе (404) — move есть только в веб-UI,
+      а «move» qstyle сломан точно так же. Свип поймал это четырьмя фейлами до релиза —
+      ради этого он и писался. Вместо move — `page_clone` поверх реального
+      `POST /pages/{id}/clone` (отложенная операция, клиент поллит до success): копия с
+      новым id, дети/комментарии/история остаются у оригинала, занятый slug — отказ
+      (`SLUG_OCCUPIED`). Подробности и пробы — docs/api-notes.md «Страницы»
 - [ ] Стабилизация перед 1.0: ревизия «что ещё ломать» (после 1.0 breaking = major bump);
       классификатор в pyproject `4 - Beta` → `5 - Production/Stable`; README-таблица сравнения
-      (YFM «planned» → done, строка про page_move)
+      (YFM «planned» → done, строка про page_clone)
 
 ### Отклонено (2026-07-27)
 
