@@ -30,6 +30,14 @@ class TestGetYandexAuth:
         assert auth.cloud_org_id == "cloud-1"
         assert auth.org_id == "org-1"
 
+    def test_org_id_alone_leaves_cloud_org_untouched(self) -> None:
+        # The per-request override params are independent: supplying only
+        # orgId must not touch cloud_org_id, and vice versa.
+        auth = get_yandex_auth(make_ctx({"orgId": "org-1"}))
+
+        assert auth.cloud_org_id is None
+        assert auth.org_id == "org-1"
+
     def test_blank_query_params_do_not_override(self) -> None:
         # "?cloudOrgId=  " arrives as whitespace; treating it as a value
         # would send a bogus header to the API.

@@ -926,6 +926,27 @@ class TestWikiClient:
             with pytest.raises(WikiOperationError, match="did not return a status_url"):
                 await wiki_client.page_clone(10, target="users/test/copy-5")
 
+    async def test_page_clone_raises_when_success_reports_no_page(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        # Drift guard: a "success" without result.page must not be reported
+        # as a completed clone — there is no id or slug to hand back.
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                payload={
+                    "operation": {"type": "clone", "id": "op-6"},
+                    "status_url": "/v1/operations/clone/op-6",
+                },
+            )
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/operations/clone/op-6",
+                payload={"status": "success"},
+            )
+            with pytest.raises(WikiOperationError, match="reported no page"):
+                await wiki_client.page_clone(10, target="users/test/copy-6")
+
     async def test_page_create_normalizes_the_slug_and_parses_the_page(
         self,
         wiki_client: WikiClient,
