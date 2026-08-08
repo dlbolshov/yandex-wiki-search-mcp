@@ -86,6 +86,22 @@ class TestReadOnlyModeToolRegistration:
         tool_names = [tool.name for tool in result.tools]
         assert tool_name not in tool_names
 
+    async def test_read_only_instructions_do_not_advertise_writes(self) -> None:
+        server = create_mcp_server(
+            settings=create_test_settings(read_only=True),
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        assert server.instructions is not None
+        assert "read-only mode" in server.instructions
+        assert "Create, update" not in server.instructions
+        assert "Add comments" not in server.instructions
+        assert "Grid mutations" not in server.instructions
+        assert "yfm_warnings" not in server.instructions
+        # read guidance stays
+        assert "page_search" in server.instructions
+        assert "fetch_all" in server.instructions
+
 
 class TestToolAnnotations:
     async def test_every_tool_declares_a_closed_world(
@@ -118,6 +134,21 @@ class TestOAuthUploadGating:
         # only the local-filesystem tool is gated; other writes stay
         assert "page_clone" in tool_names
         assert "page_create" in tool_names
+        # the instructions must not advertise the tool that is not there
+        assert server.instructions is not None
+        assert "upload attachments" not in server.instructions
+        assert "- Add comments" in server.instructions
+
+    async def test_local_upload_tool_is_offered_without_oauth(self) -> None:
+        server = create_mcp_server(
+            settings=create_test_settings(),
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        tool_names = [tool.name for tool in await server.list_tools()]
+        assert "page_upload_attachment" in tool_names
+        assert server.instructions is not None
+        assert "upload attachments from the local filesystem" in server.instructions
 
 
 class TestResourceRegistration:

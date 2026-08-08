@@ -27,6 +27,7 @@ from mcp_wiki.wiki.custom.errors import (
     WikiApiError,
     WikiConfigError,
     WikiError,
+    WikiOperationError,
     WikiTransportError,
     build_api_error,
 )
@@ -621,8 +622,9 @@ class WikiClient(WikiProtocol):
             not_found=lambda: GridNotFound(grid_id),
         )
         # The endpoint answers 204 No Content, so the acknowledgment fields
-        # are ours; a future response body still reaches the model, where
-        # the contract sweep watches for undeclared keys.
+        # are ours; a future JSON object body still reaches the model, where
+        # the contract sweep watches for undeclared keys. A non-object body
+        # would be dropped here — nothing merges a bare list into a model.
         data = self._json_or_empty(payload)
         body = data if isinstance(data, dict) else {}
         return GridDeleteResponse.model_validate(
@@ -844,9 +846,9 @@ class WikiClient(WikiProtocol):
         )
         started = GridOperationResponse.model_validate(self._json_or_empty(payload))
         if not started.status_url:
-            raise WikiApiError(
-                status=200,
-                debug_message="clone operation did not return a status_url",
+            raise WikiOperationError(
+                "clone operation did not return a status_url to poll; "
+                "whether the copy was created is unknown"
             )
 
         deadline = asyncio.get_running_loop().time() + CLONE_POLL_TIMEOUT
@@ -859,25 +861,18 @@ class WikiClient(WikiProtocol):
             progress = PageCloneStatus.model_validate_json(status_payload)
             if progress.status == "success":
                 if progress.result is None or progress.result.page is None:
-                    raise WikiApiError(
-                        status=200,
-                        debug_message="clone succeeded but reported no page",
+                    raise WikiOperationError(
+                        "clone operation succeeded but reported no page"
                     )
                 return progress.result.page
             if progress.status in CLONE_FAILED_STATUSES:
-                raise WikiApiError(
-                    status=200,
-                    error_code="CLONE_FAILED",
-                    debug_message=f"clone operation ended with status={progress.status!r}",
+                raise WikiOperationError(
+                    f"clone operation ended with status={progress.status!r}"
                 )
             if asyncio.get_running_loop().time() >= deadline:
-                raise WikiApiError(
-                    status=200,
-                    error_code="CLONE_TIMEOUT",
-                    debug_message=(
-                        f"clone operation did not finish within {CLONE_POLL_TIMEOUT:.0f}s; "
-                        f"check {started.status_url} manually"
-                    ),
+                raise WikiOperationError(
+                    f"clone operation did not finish within {CLONE_POLL_TIMEOUT:.0f}s; "
+                    f"check {started.status_url} manually"
                 )
             await asyncio.sleep(CLONE_POLL_INTERVAL)
 

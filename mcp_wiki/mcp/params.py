@@ -236,20 +236,52 @@ class GridSortEntry(BaseModel):
         return {self.column: self.direction}
 
 
-instructions = """Tools for interacting with Yandex Wiki.
-Use these tools to:
-- Discover pages across the whole Wiki with page_search, then open a result by its slug with page_get.
-- Read Wiki pages by slug or ID
-- Traverse a page subtree
-- Read comments, resources, and attachments
-- Read page grids and get dynamic tables
-- Create, update, copy, and delete dynamic tables; add, move, and delete grid rows and columns; update cells
-- Create, update, append to, clone, delete, and recover pages
-- Add comments and upload attachments from the local filesystem
+def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
+    """Server instructions matching the registered tool surface.
 
-In russian Yandex Wiki is called "Яндекс Вики" or "Вики".
-If a tool accepts `page_id` and `slug`, provide exactly one of them.
-When you need a full list from a cursor-paginated tool, pass `fetch_all=true` — the server follows the cursors for you and returns everything in one call. Only if the reply carries `truncated: true` is the list incomplete: continue from `next_cursor`, or narrow the request. Walk cursors by hand only when a tool has no `fetch_all`.
-Grid mutations are serialized per grid and need the grid's current `revision`: call the `grid_*` write tools one at a time, never several against the same grid in one batch. A 409 means the previous one is still finishing and yours was not applied — re-read the grid and retry.
-Page content is Markdown (YFM): plain Markdown renders as-is, but GitHub-specific extensions ('[!NOTE]' alerts, raw HTML) do not — the wiki-mcp://yfm-cheatsheet resource maps them to YFM equivalents. Write tools return `yfm_warnings` when submitted content will not render as intended.
-"""
+    Static instructions would send agents to tools that do not exist: the
+    write capabilities and their usage notes survive only outside
+    WIKI_READ_ONLY, and the comments line offers local-filesystem uploads
+    only when page_upload_attachment is actually registered (it is not
+    under OAuth, see Settings.include_local_uploads).
+    """
+    capabilities = [
+        "- Discover pages across the whole Wiki with page_search, then open a result by its slug with page_get.",
+        "- Read Wiki pages by slug or ID",
+        "- Traverse a page subtree",
+        "- Read comments, resources, and attachments",
+        "- Read page grids and get dynamic tables",
+    ]
+    if not read_only:
+        capabilities += [
+            "- Create, update, copy, and delete dynamic tables; add, move, and delete grid rows and columns; update cells",
+            "- Create, update, append to, clone, delete, and recover pages",
+            "- Add comments and upload attachments from the local filesystem"
+            if include_local_uploads
+            else "- Add comments",
+        ]
+
+    notes = [
+        'In russian Yandex Wiki is called "Яндекс Вики" or "Вики".',
+        "If a tool accepts `page_id` and `slug`, provide exactly one of them.",
+        "When you need a full list from a cursor-paginated tool, pass `fetch_all=true` — the server follows the cursors for you and returns everything in one call. Only if the reply carries `truncated: true` is the list incomplete: continue from `next_cursor`, or narrow the request. Walk cursors by hand only when a tool has no `fetch_all`.",
+    ]
+    if read_only:
+        notes.insert(
+            0,
+            "This server runs in read-only mode: tools that modify the Wiki are not registered.",
+        )
+    else:
+        notes += [
+            "Grid mutations are serialized per grid and need the grid's current `revision`: call the `grid_*` write tools one at a time, never several against the same grid in one batch. A 409 means the previous one is still finishing and yours was not applied — re-read the grid and retry.",
+            "Page content is Markdown (YFM): plain Markdown renders as-is, but GitHub-specific extensions ('[!NOTE]' alerts, raw HTML) do not — the wiki-mcp://yfm-cheatsheet resource maps them to YFM equivalents. Write tools return `yfm_warnings` when submitted content will not render as intended.",
+        ]
+
+    lines = [
+        "Tools for interacting with Yandex Wiki.",
+        "Use these tools to:",
+        *capabilities,
+        "",
+        *notes,
+    ]
+    return "\n".join(lines) + "\n"

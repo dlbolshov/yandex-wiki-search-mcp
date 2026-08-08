@@ -12,10 +12,7 @@ def register_all_tools(settings: Settings, mcp: FastMCP[Any]) -> None:
     if not settings.wiki_read_only:
         register_page_write_tools(
             mcp,
-            # page_upload_attachment reads the server's local filesystem,
-            # which only matches the caller's files outside multi-user
-            # OAuth deployments.
-            include_local_uploads=not settings.oauth_enabled,
+            include_local_uploads=settings.include_local_uploads,
         )
 
 

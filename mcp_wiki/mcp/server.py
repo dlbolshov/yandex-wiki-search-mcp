@@ -18,7 +18,7 @@ from mcp_wiki.mcp.oauth.provider import YandexOAuthAuthorizationServerProvider
 from mcp_wiki.mcp.oauth.store import OAuthStore
 from mcp_wiki.mcp.oauth.stores.memory import InMemoryOAuthStore
 from mcp_wiki.mcp.oauth.stores.redis import RedisOAuthStore
-from mcp_wiki.mcp.params import instructions
+from mcp_wiki.mcp.params import build_instructions
 from mcp_wiki.mcp.resources import register_resources
 from mcp_wiki.mcp.tools import register_all_tools
 from mcp_wiki.settings import Settings, ToolResultText
@@ -202,7 +202,10 @@ def create_mcp_server(
 
     server = WikiFastMCP(
         name="Yandex Wiki Search MCP",
-        instructions=instructions,
+        instructions=build_instructions(
+            include_local_uploads=settings.include_local_uploads,
+            read_only=settings.wiki_read_only,
+        ),
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level,

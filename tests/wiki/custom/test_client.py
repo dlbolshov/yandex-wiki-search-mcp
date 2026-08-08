@@ -11,6 +11,7 @@ from mcp_wiki.wiki.custom.errors import (
     GridNotFound,
     PageNotFound,
     WikiApiError,
+    WikiOperationError,
 )
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
@@ -888,8 +889,42 @@ class TestWikiClient:
                 "https://api.wiki.yandex.net/v1/operations/clone/op-3",
                 payload={"status": "failed"},
             )
-            with pytest.raises(WikiApiError, match="CLONE_FAILED"):
+            with pytest.raises(WikiOperationError, match="ended with status='failed'"):
                 await wiki_client.page_clone(10, target="users/test/copy-3")
+
+    async def test_page_clone_raises_when_the_operation_never_settles(
+        self,
+        wiki_client: WikiClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.CLONE_POLL_TIMEOUT", 0.0)
+
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                payload={
+                    "operation": {"type": "clone", "id": "op-4"},
+                    "status_url": "/v1/operations/clone/op-4",
+                },
+            )
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/operations/clone/op-4",
+                payload={"status": "in_progress"},
+            )
+            with pytest.raises(WikiOperationError, match="did not finish within"):
+                await wiki_client.page_clone(10, target="users/test/copy-4")
+
+    async def test_page_clone_raises_when_no_status_url_is_returned(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                payload={"operation": {"type": "clone", "id": "op-5"}},
+            )
+            with pytest.raises(WikiOperationError, match="did not return a status_url"):
+                await wiki_client.page_clone(10, target="users/test/copy-5")
 
     async def test_page_create_normalizes_the_slug_and_parses_the_page(
         self,

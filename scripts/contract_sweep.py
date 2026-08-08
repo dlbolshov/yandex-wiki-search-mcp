@@ -186,16 +186,26 @@ async def check_expected_error(
     name: str,
     fn: Callable[[], Awaitable[Any]],
     expected: type[WikiError],
+    *,
+    error_code: str | None = None,
 ) -> None:
     """Record a contract that is only visible in a refusal.
 
     Slug collisions and single-page clone semantics answer with an error by
     design, so this check is inverted: the call succeeding means the API
-    changed under us.
+    changed under us. When error_code is given, the refusal must carry
+    exactly that code — a 403 or a 500 is an outage wearing the same
+    exception class, not the contract.
     """
     try:
         await _await_settled(fn)
     except expected as exc:
+        actual_code = getattr(exc, "error_code", None)
+        if error_code is not None and actual_code != error_code:
+            note = f"{actual_code!r} (expected {error_code!r}): {str(exc)[:120]}"
+            REPORT.append((name, "UNEXPECTED ERROR_CODE", note))
+            print(f"  !! {name}: error_code={actual_code!r}, expected {error_code!r}")
+            return
         note = f"{type(exc).__name__}: {str(exc)[:120]}"
         REPORT.append((name, "OK", note))
         print(f"  ok {name}  [{note}]")
@@ -493,8 +503,11 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         ),
     )
     if original is not None:
-        await wiki.page_create(
-            slug=f"{base}/clone-src/kid", title="Sweep clone kid", content="kid"
+        kid = await check(
+            "page_create (clone kid)",
+            lambda: wiki.page_create(
+                slug=f"{base}/clone-src/kid", title="Sweep clone kid", content="kid"
+            ),
         )
         copy = await check(
             "page_clone",
@@ -509,15 +522,19 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
             "page_get_by_slug (original stays)",
             lambda: wiki.page_get_by_slug(f"{base}/clone-src"),
         )
-        await check_expected_error(
-            "page_get_by_slug (children do not follow the clone)",
-            lambda: wiki.page_get_by_slug(f"{base}/clone-dst/kid"),
-            PageNotFound,
-        )
+        if kid is not None:
+            # Meaningful only when the kid exists: without it, PageNotFound
+            # on clone-dst/kid proves nothing about clone semantics.
+            await check_expected_error(
+                "page_get_by_slug (children do not follow the clone)",
+                lambda: wiki.page_get_by_slug(f"{base}/clone-dst/kid"),
+                PageNotFound,
+            )
         await check_expected_error(
             "page_clone (onto an occupied slug is refused)",
             lambda: wiki.page_clone(original.id, target=f"{base}/clone-src"),
             WikiApiError,
+            error_code="SLUG_OCCUPIED",
         )
 
     print("\n=== delete / recover cycle ===")

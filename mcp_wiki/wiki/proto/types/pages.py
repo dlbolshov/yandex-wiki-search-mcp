@@ -329,8 +329,9 @@ class GridDeleteResponse(BaseWikiModel):
 
     The endpoint answers 204 No Content (documented and verified live), so
     both fields are filled in client-side: they confirm which grid the
-    deletion was applied to. Any body the API starts sending in the future
-    still passes through validation, where the contract sweep will see it.
+    deletion was applied to. Any JSON object the API starts sending in the
+    future still passes through validation, where the contract sweep will
+    see it; a non-object body would be dropped in the client instead.
     """
 
     grid_id: str

@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     redis_password: SecretStr | None = None
     redis_pool_max_size: int = 10
 
+    @property
+    def include_local_uploads(self) -> bool:
+        """Whether page_upload_attachment may be offered at all.
+
+        The tool reads file_path from the filesystem of the machine running
+        this server, which only matches the caller's files outside multi-user
+        OAuth deployments — so under OAuth both the tool registration and its
+        mention in the server instructions are dropped.
+        """
+        return not self.oauth_enabled
+
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":
         if self.wiki_org_id and self.wiki_cloud_org_id:
