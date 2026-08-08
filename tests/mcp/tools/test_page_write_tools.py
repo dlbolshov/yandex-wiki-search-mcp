@@ -2,7 +2,11 @@ from unittest.mock import AsyncMock
 
 from mcp.client.session import ClientSession
 
-from mcp_wiki.wiki.proto.types.pages import WikiPage
+from mcp_wiki.wiki.proto.types.pages import (
+    ClonedPageRef,
+    GridDeleteResponse,
+    WikiPage,
+)
 from mcp_wiki.yfm import MAX_WARNINGS
 from tests.mcp.conftest import get_tool_result_content, get_tool_result_text
 
@@ -156,14 +160,18 @@ class TestPageWriteTools:
         client_session: ClientSession,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.grid_delete.return_value = {}
+        mock_wiki_protocol.grid_delete.return_value = GridDeleteResponse(
+            grid_id="grid-1", deleted=True
+        )
 
         result = await client_session.call_tool(
             "grid_delete",
             {"grid_id": "grid-1"},
         )
 
-        assert get_tool_result_content(result) == {}
+        content = get_tool_result_content(result)
+        assert content["grid_id"] == "grid-1"
+        assert content["deleted"] is True
         mock_wiki_protocol.grid_delete.assert_awaited_once()
         args = mock_wiki_protocol.grid_delete.await_args
         assert args.args[0] == "grid-1"
@@ -388,15 +396,15 @@ class TestPageWriteTools:
         assert args.args[0] == "grid-1"
         assert args.kwargs["column_slugs"] == ["obsolete"]
 
-    async def test_grid_move_rows_by_position(
+    async def test_grid_move_row_by_position(
         self,
         client_session: ClientSession,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.grid_move_rows.return_value = {"revision": "10"}
+        mock_wiki_protocol.grid_move_row.return_value = {"revision": "10"}
 
         result = await client_session.call_tool(
-            "grid_move_rows",
+            "grid_move_row",
             {
                 "grid_id": "grid-1",
                 "revision": "9",
@@ -406,19 +414,19 @@ class TestPageWriteTools:
         )
 
         assert get_tool_result_content(result)["revision"] == "10"
-        mock_wiki_protocol.grid_move_rows.assert_awaited_once()
-        args = mock_wiki_protocol.grid_move_rows.await_args
+        mock_wiki_protocol.grid_move_row.assert_awaited_once()
+        args = mock_wiki_protocol.grid_move_row.await_args
         assert args.args[0] == "grid-1"
         assert args.kwargs["row_id"] == "3"
         assert args.kwargs["position"] == 0
         assert args.kwargs["after_row_id"] is None
 
-    async def test_grid_move_rows_rejects_missing_target(
+    async def test_grid_move_row_rejects_missing_target(
         self,
         client_session: ClientSession,
     ) -> None:
         result = await client_session.call_tool(
-            "grid_move_rows",
+            "grid_move_row",
             {
                 "grid_id": "grid-1",
                 "revision": "9",
@@ -429,15 +437,15 @@ class TestPageWriteTools:
         assert result.isError is True
         assert "either position or after_row_id" in get_tool_result_text(result)
 
-    async def test_grid_move_columns(
+    async def test_grid_move_column(
         self,
         client_session: ClientSession,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.grid_move_columns.return_value = {"revision": "11"}
+        mock_wiki_protocol.grid_move_column.return_value = {"revision": "11"}
 
         result = await client_session.call_tool(
-            "grid_move_columns",
+            "grid_move_column",
             {
                 "grid_id": "grid-1",
                 "revision": "10",
@@ -447,8 +455,8 @@ class TestPageWriteTools:
         )
 
         assert get_tool_result_content(result)["revision"] == "11"
-        mock_wiki_protocol.grid_move_columns.assert_awaited_once()
-        args = mock_wiki_protocol.grid_move_columns.await_args
+        mock_wiki_protocol.grid_move_column.assert_awaited_once()
+        args = mock_wiki_protocol.grid_move_column.await_args
         assert args.args[0] == "grid-1"
         assert args.kwargs["column_slug"] == "status"
         assert args.kwargs["position"] == 0
@@ -569,6 +577,70 @@ class TestPageWriteTools:
         assert "grid" in warnings[0]
         assert "grid_* tools" in warnings[0]
         assert "legacy" not in warnings[0]
+
+    async def test_page_clone_by_slug(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
+            id=10
+        )
+        mock_wiki_protocol.page_clone.return_value = ClonedPageRef.model_validate(
+            {"id": 77, "slug": "users/test/copy"}
+        )
+
+        result = await client_session.call_tool(
+            "page_clone",
+            {"slug": "users/test/page", "target": "users/test/copy"},
+        )
+
+        assert get_tool_result_content(result)["slug"] == "users/test/copy"
+        mock_wiki_protocol.page_get_by_slug.assert_awaited_once()
+        mock_wiki_protocol.page_clone.assert_awaited_once()
+        args = mock_wiki_protocol.page_clone.await_args
+        assert args.args[0] == 10
+        assert args.kwargs["target"] == "users/test/copy"
+        assert args.kwargs["title"] is None
+
+    async def test_page_clone_by_page_id_passes_the_title(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_clone.return_value = ClonedPageRef.model_validate(
+            {"id": 78, "slug": "users/test/copy"}
+        )
+
+        result = await client_session.call_tool(
+            "page_clone",
+            {"page_id": 7, "target": "users/test/copy", "title": "Copy title"},
+        )
+
+        assert result.isError is False
+        mock_wiki_protocol.page_get_by_slug.assert_not_awaited()
+        mock_wiki_protocol.page_get.assert_not_awaited()
+        args = mock_wiki_protocol.page_clone.await_args
+        assert args.args[0] == 7
+        assert args.kwargs["title"] == "Copy title"
+
+    async def test_page_clone_rejects_both_locators(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        result = await client_session.call_tool(
+            "page_clone",
+            {
+                "page_id": 7,
+                "slug": "users/test/page",
+                "target": "users/test/copy",
+            },
+        )
+
+        assert result.isError is True
+        assert "exactly one of page_id or slug" in get_tool_result_text(result)
+        mock_wiki_protocol.page_clone.assert_not_awaited()
 
     async def test_page_update_rejects_missing_title_and_content(
         self,

@@ -324,6 +324,19 @@ class GridCellsResponse(BaseWikiModel):
     cells: list[Any] | None = None
 
 
+class GridDeleteResponse(BaseWikiModel):
+    """Acknowledgment for `DELETE /grids/{id}`.
+
+    The endpoint answers 204 No Content (documented and verified live), so
+    both fields are filled in client-side: they confirm which grid the
+    deletion was applied to. Any body the API starts sending in the future
+    still passes through validation, where the contract sweep will see it.
+    """
+
+    grid_id: str
+    deleted: bool
+
+
 class GridUpdateResponse(DynamicWikiModel):
     id: str | int | None = None
     title: str | None = None
@@ -347,6 +360,29 @@ class GridOperationResponse(BaseWikiModel):
     operation: GridOperationRef | None = None
     dry_run: bool | None = None
     status_url: str | None = None
+
+
+class ClonedPageRef(BaseWikiModel):
+    """The clone operation's result: where the copy landed.
+
+    `POST /pages/{id}/clone` is a deferred operation; the client polls it to
+    completion and returns this instead of the operation envelope, so callers
+    get the useful fact (the new page's id and slug) rather than a status URL.
+    """
+
+    id: int
+    slug: str
+
+
+class PageCloneStatusResult(BaseWikiModel):
+    page: ClonedPageRef | None = None
+
+
+class PageCloneStatus(BaseWikiModel):
+    """`GET /operations/clone/{id}` envelope, polled until terminal."""
+
+    status: str | None = None
+    result: PageCloneStatusResult | None = None
 
 
 class DeletePageResponse(BaseWikiModel):

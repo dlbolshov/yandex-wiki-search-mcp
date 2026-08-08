@@ -19,7 +19,7 @@ from mcp_wiki.mcp.params import (
     PageSize,
     ResourceTypes,
     SearchQuery,
-    SearchResultPageSize,
+    SearchResultLimit,
 )
 from mcp_wiki.mcp.tools.common import (
     ToolContext,
@@ -52,6 +52,11 @@ FETCH_ALL_BUDGET_SECONDS = 25.0
 _FETCH_ALL_MAX_REQUESTS = 50
 
 EnvelopeT = TypeVar("EnvelopeT", bound=CursorEnvelope)
+
+# openWorldHint=False: every tool talks to exactly one configured Wiki
+# organization — a closed domain, unlike e.g. web search. Left unset it
+# defaults to true.
+READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 
 
 async def _drain_cursor(
@@ -129,14 +134,14 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
             "slug to read full content. Wrap multi-word exact phrases in double quotes. "
             "Search is global: there is no server-side section filter. slug_prefix and "
             "result_type are applied client-side AFTER fetching, so combine them with "
-            "page_size=50 to avoid missing matches."
+            "limit=50 to avoid missing matches."
         ),
-        annotations=ToolAnnotations(readOnlyHint=True),
+        annotations=READ_ONLY,
     )
     async def page_search(
         ctx: ToolContext,
         query: SearchQuery,
-        page_size: SearchResultPageSize = 10,
+        limit: SearchResultLimit = 10,
         slug_prefix: Annotated[
             str | None,
             Field(
@@ -153,7 +158,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         app_context = ctx.request_context.lifespan_context
         response = await app_context.wiki.page_search(
             query,
-            page_size=page_size,
+            limit=limit,
             auth=get_yandex_auth(ctx),
         )
         if slug_prefix:
@@ -175,7 +180,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
     @mcp.tool(
         title="Get Wiki Page",
         description="Get a Yandex Wiki page by page_id or slug.",
-        annotations=ToolAnnotations(readOnlyHint=True),
+        annotations=READ_ONLY,
     )
     async def page_get(
         ctx: ToolContext,
@@ -213,7 +218,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
             "if the result comes back truncated=true, continue via next_cursor "
             "or narrow down by calling this tool on a subsection's slug."
         ),
-        annotations=ToolAnnotations(readOnlyHint=True),
+        annotations=READ_ONLY,
     )
     async def page_get_descendants(
         ctx: ToolContext,
@@ -246,7 +251,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
     @mcp.tool(
         title="Get Page Comments",
         description="Get comments for a Yandex Wiki page.",
-        annotations=ToolAnnotations(readOnlyHint=True),
+        annotations=READ_ONLY,
     )
     async def page_get_comments(
         ctx: ToolContext,
@@ -272,7 +277,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
     @mcp.tool(
         title="Get Page Resources",
         description="Get resources linked to a Yandex Wiki page, including attachments and grids.",
-        annotations=ToolAnnotations(readOnlyHint=True),
+        annotations=READ_ONLY,
     )
     async def page_get_resources(
         ctx: ToolContext,
@@ -320,7 +325,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
     @mcp.tool(
         title="Get Page Grids",
         description="Get dynamic tables attached to a Yandex Wiki page.",
-        annotations=ToolAnnotations(readOnlyHint=True),
+        annotations=READ_ONLY,
     )
     async def page_get_grids(
         ctx: ToolContext,
@@ -356,7 +361,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
     @mcp.tool(
         title="Get Wiki Grid",
         description="Get a Yandex Wiki dynamic table by grid ID.",
-        annotations=ToolAnnotations(readOnlyHint=True),
+        annotations=READ_ONLY,
     )
     async def grid_get(
         ctx: ToolContext,
@@ -403,7 +408,7 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
     @mcp.tool(
         title="Get Page Attachments",
         description="Get attachments for a Yandex Wiki page.",
-        annotations=ToolAnnotations(readOnlyHint=True),
+        annotations=READ_ONLY,
     )
     async def page_get_attachments(
         ctx: ToolContext,

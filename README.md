@@ -13,10 +13,10 @@
 ![Demo: search a wiki page and summarize it via MCP](docs/assets/demo.gif)
 
 Connect Claude, Cursor, Windsurf, or any MCP client to **Yandex Wiki**: full-text search,
-pages, comments, attachments, and dynamic tables ("grids") — **26 tools** with typed schemas.
+pages, comments, attachments, and dynamic tables ("grids") — **27 tools** with typed schemas.
 
 - 🔍 **Full-text search** across the entire wiki — the same backend that powers the Wiki web search bar, up to 50 results per query
-- 📄 **Full page lifecycle** — create, update, append (top / bottom / anchor), delete with a recovery token, comments, file uploads
+- 📄 **Full page lifecycle** — create, update, append (top / bottom / anchor), clone, delete with a recovery token, comments, file uploads
 - 📊 **Dynamic tables (grids)** — 11 write tools: rows, columns, cells, copy, sort
 - 🔒 **Server-side read-only mode** — `WIKI_READ_ONLY=true` simply doesn't register write tools, so the agent can't bypass it
 - 🧩 **Typed tool surface** — every tool ships input *and* output JSON schemas plus safety annotations (read-only / destructive / idempotent hints)
@@ -103,7 +103,7 @@ claude mcp add yandex-wiki-search \
 
 ## Tools
 
-26 tools. All write tools disappear when `WIKI_READ_ONLY=true`.
+27 tools. All write tools disappear when `WIKI_READ_ONLY=true`.
 
 ### Search & read (8)
 
@@ -118,17 +118,18 @@ claude mcp add yandex-wiki-search \
 | `page_get_grids` | List grids attached to a page (`fetch_all` supported) |
 | `grid_get` | Get a grid by `grid_id` with row/column/revision filters |
 
-### Pages: write (7)
+### Pages: write (8)
 
 | Tool | What it does |
 |---|---|
 | `page_create` | Create a page |
 | `page_update` | Update page title and/or full content |
 | `page_append_content` | Append content to top, bottom, or a named anchor |
+| `page_clone` | Copy a page to a new slug — the copy gets a new id; children, comments, and history stay with the original; occupied slugs are refused. The API has no true move/rename ([details](docs/api-notes.md#pages)) |
 | `page_add_comment` | Add a comment or reply in a thread |
 | `page_delete` | Delete a page and receive a recovery token |
 | `page_recover` | Recover a deleted page by recovery token |
-| `page_upload_attachment` | Upload a local file in chunks and attach it to a page |
+| `page_upload_attachment` | Upload a local file in chunks and attach it to a page — not registered under `OAUTH_ENABLED=true`, where "local" would mean the shared server's filesystem |
 
 ### Grids: write (11)
 
@@ -144,10 +145,10 @@ claude mcp add yandex-wiki-search \
 | `grid_add_rows` | Add rows at a position or after a given row |
 | `grid_update_cells` | Update individual cells by row + column |
 | `grid_delete_rows` | Delete rows |
-| `grid_move_rows` | Move a row |
+| `grid_move_row` | Move a row |
 | `grid_add_columns` | Add typed columns |
 | `grid_delete_columns` | Delete columns by slug |
-| `grid_move_columns` | Move a column |
+| `grid_move_column` | Move a column |
 
 Grid specifics:
 
@@ -160,12 +161,13 @@ Grid specifics:
 
 ## How it compares
 
-Facts verified against the alternatives' docs and published code, July 2026.
+Facts verified against the alternatives' docs and published code, July–August 2026.
 
 | | **yandex-wiki-search-mcp** | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) | [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) |
 |---|---|---|---|---|---|
 | Full-text search | ✅ up to 50 results, client-side filters | ❌ | ✅ up to 10 results | ❌ | ❌ |
-| Pages: create / update / append / delete + recover | ✅ all | ✅ all | partial — no append / recover | partial — no delete / recover | partial — no recover; has clone |
+| Pages: create / update / append / delete + recover | ✅ all | ✅ all | partial — no append / recover | partial — no delete / recover | partial — no recover |
+| Pages: clone to a new slug | ✅ `page_clone` | ❌ | ❌ | ❌ | ✅ |
 | Grids: write tools | ✅ 11 | ✅ 11 | ❌ read-only | ❌ no grid tools | ✅ 11, incl. clone |
 | Comments, attachment upload | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Server-side read-only mode | ✅ | ✅ | ❌ | ✅ separate `-ro` entry point | ❌ |
@@ -192,8 +194,8 @@ This project is a fork of `ya-yandex-wiki-mcp` and builds on findings from
 backend that powers the Wiki web search bar. Search first, then open a result with
 `page_get` by its `slug`.
 
-- Up to **50** results per call (`page_size` is clamped to 1–50; the API rejects anything else).
-- Search is **global only** — `slug_prefix` and `result_type` filters are applied client-side after fetching, so combine them with `page_size=50` to avoid missing matches.
+- Up to **50** results per call (`limit` is clamped to 1–50; the API rejects anything else).
+- Search is **global only** — `slug_prefix` and `result_type` filters are applied client-side after fetching, so combine them with `limit=50` to avoid missing matches.
 - Quoted `"exact phrase"` queries work; `page` results get absolute `https://wiki.yandex.ru/...` links, `file` results get direct download links.
 
 More verified API behavior (scopes, 403 semantics, error envelopes, limits): [docs/api-notes.md](docs/api-notes.md).
@@ -221,7 +223,9 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 
 With `OAUTH_ENABLED=true` the server becomes an OAuth provider: each MCP user
 authorizes with their own Yandex account, and requests to the Wiki API are made with
-their personal token.
+their personal token. `page_upload_attachment` is not registered in this mode: it
+reads files from the machine the server runs on, which is not the caller's machine
+in a shared deployment.
 
 | Variable | Default | Description |
 |---|---|---|

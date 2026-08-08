@@ -39,7 +39,8 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
 
 - The result-count knob is **`limit` in the POST body**: 1–50, anything else → HTTP 400.
   `page_size`, `page` and `offset` are accepted but **ignored** (you get the default 10
-  results). The tool keeps its `page_size` argument and sends it as `limit`, clamped to 1–50.
+  results). The tool exposes the same `limit` argument end-to-end (renamed from
+  `page_size` in 1.0.0), clamped to 1–50.
 - The envelope is `results` + `next_cursor`/`prev_cursor`. The cursors are **always
   `null`**, and a request `cursor` is validated (garbage → 400) but never satisfiable —
   the pagination machinery exists in the schema only. You get the top ≤50 hits, full stop.
@@ -50,7 +51,7 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   `...?download=1` download link).
 - Size, measured with `scripts/token_probe.py` on 2026-08-04 at `limit=50`: a 48-hit
   response is ~28k chars, of which ~14k are snippets — 33 of 48 snippets exceed 200
-  chars. Worth knowing before raising `page_size`: the endpoint honoring `limit`
+  chars. Worth knowing before raising `limit`: the endpoint honoring `limit`
   (fixed in 0.8.0) made a full-size search roughly 5x heavier than the 10-result
   replies it used to return.
 - There is still **no server-side filtering** — section/type body params are ignored.
@@ -81,6 +82,20 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   (title search within one page's attachments/grids) — exposed via `page_get_resources`.
 - `page_type` in `POST /pages` is **ignored** — any value, even garbage, yields a
   `wysiwyg` page with no error (verified 2026-07-27).
+- **There is no move/rename** (probed live 2026-08-08). `POST /pages/{id}` with a
+  `slug` field answers 200 and **silently ignores it** — the documented update body is
+  `title`/`content`/`redirect`/`access_policy`/`owner`, no slug. No `/move` endpoint
+  exists in v1 or v2 (404). Moving a page is a web-UI-only capability. Beware of MCP
+  servers advertising "move" over this API: implemented via `POST /pages/{id}` it is a
+  silent no-op that reports success.
+- **`POST /pages/{id}/clone` is the only relocation primitive** — a deferred operation
+  (`operation.id` + `status_url`; polled `GET /operations/clone/{id}` reaches
+  `status: "success"` in about a second). The copy gets a **new page id**, copies title
+  and content only, and **children do not follow** (verified 2026-08-08: `src/kid` did
+  not appear under `dst/`). Comments, attachments, and history stay with the original.
+  Slug collisions are refused on the initial POST with `SLUG_OCCUPIED` (400), before
+  the operation starts. Exposed as `page_clone`, which polls the operation and returns
+  the copy's id and slug.
 - `POST /pages/{id}/append-content` responds with the **full updated page object**
   (id, content, breadcrumbs, access data, owner…), not a status stub.
 - Descendants items carry **only `id` and `slug`** — no titles; a `fields` query param is

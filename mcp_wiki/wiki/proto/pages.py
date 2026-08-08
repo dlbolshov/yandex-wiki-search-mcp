@@ -4,11 +4,13 @@ from mcp_wiki.wiki.proto.common import YandexAuth
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
     AttachmentResultsResponse,
+    ClonedPageRef,
     CommentsResponse,
     DeletePageResponse,
     DescendantsResponse,
     GridCellsResponse,
     GridCreateRequest,
+    GridDeleteResponse,
     GridMutationResponse,
     GridOperationResponse,
     GridsResponse,
@@ -50,7 +52,7 @@ class WikiProtocol(Protocol):
         self,
         query: str,
         *,
-        page_size: int = 10,
+        limit: int = 10,
         auth: YandexAuth | None = None,
     ) -> SearchResponse: ...
 
@@ -141,7 +143,7 @@ class WikiProtocol(Protocol):
         grid_id: str,
         *,
         auth: YandexAuth | None = None,
-    ) -> dict[str, Any]: ...
+    ) -> GridDeleteResponse: ...
 
     async def grid_copy(
         self,
@@ -188,7 +190,7 @@ class WikiProtocol(Protocol):
         auth: YandexAuth | None = None,
     ) -> GridMutationResponse: ...
 
-    async def grid_move_rows(
+    async def grid_move_row(
         self,
         grid_id: str,
         *,
@@ -199,7 +201,7 @@ class WikiProtocol(Protocol):
         auth: YandexAuth | None = None,
     ) -> GridMutationResponse: ...
 
-    async def grid_move_columns(
+    async def grid_move_column(
         self,
         grid_id: str,
         *,
@@ -226,6 +228,15 @@ class WikiProtocol(Protocol):
         content: str,
         auth: YandexAuth | None = None,
     ) -> WikiPage: ...
+
+    async def page_clone(
+        self,
+        page_id: int,
+        *,
+        target: str,
+        title: str | None = None,
+        auth: YandexAuth | None = None,
+    ) -> ClonedPageRef: ...
 
     async def page_update(
         self,

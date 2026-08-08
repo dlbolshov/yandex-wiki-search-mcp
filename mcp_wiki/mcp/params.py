@@ -29,6 +29,16 @@ PageSlug = Annotated[
         )
     ),
 ]
+CloneTargetSlug = Annotated[
+    str,
+    Field(
+        description=(
+            "Slug for the copy, like 'users/login/project/copy-name'. "
+            "A full Wiki page URL is also accepted. Must not be occupied "
+            "by an existing page."
+        )
+    ),
+]
 RecoveryToken = Annotated[
     str,
     Field(description="Recovery token returned by the page_delete tool."),
@@ -94,7 +104,7 @@ SearchQuery = Annotated[
         min_length=1,
     ),
 ]
-SearchResultPageSize = Annotated[
+SearchResultLimit = Annotated[
     int,
     Field(
         description="Number of search results to return (1-50). "
@@ -233,8 +243,8 @@ Use these tools to:
 - Traverse a page subtree
 - Read comments, resources, and attachments
 - Read page grids and get dynamic tables
-- Create, copy, and update dynamic tables; add and delete grid rows; add grid columns
-- Create, update, append to, delete, and recover pages
+- Create, update, copy, and delete dynamic tables; add, move, and delete grid rows and columns; update cells
+- Create, update, append to, clone, delete, and recover pages
 - Add comments and upload attachments from the local filesystem
 
 In russian Yandex Wiki is called "Яндекс Вики" or "Вики".

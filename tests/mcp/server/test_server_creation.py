@@ -38,10 +38,11 @@ NON_READ_TOOL_NAMES = [
     "grid_delete_rows",
     "grid_add_columns",
     "grid_delete_columns",
-    "grid_move_rows",
-    "grid_move_columns",
+    "grid_move_row",
+    "grid_move_column",
     "page_create",
     "page_update",
+    "page_clone",
     "page_append_content",
     "page_add_comment",
     "page_delete",
@@ -84,6 +85,39 @@ class TestReadOnlyModeToolRegistration:
         result = await client_session_read_only.list_tools()
         tool_names = [tool.name for tool in result.tools]
         assert tool_name not in tool_names
+
+
+class TestToolAnnotations:
+    async def test_every_tool_declares_a_closed_world(
+        self,
+        client_session: ClientSession,
+    ) -> None:
+        # openWorldHint left unset defaults to true; every tool here talks
+        # to one configured Wiki organization, so all must say otherwise.
+        result = await client_session.list_tools()
+        for tool in result.tools:
+            assert tool.annotations is not None, tool.name
+            assert tool.annotations.openWorldHint is False, tool.name
+
+
+class TestOAuthUploadGating:
+    async def test_local_upload_tool_is_hidden_under_oauth(self) -> None:
+        settings = create_test_settings()
+        settings.oauth_enabled = True
+        settings.oauth_client_id = "client-id"
+        settings.oauth_client_secret = SecretStr("client-secret")
+        settings.mcp_server_public_url = AnyHttpUrl("https://mcp.example.com")
+
+        server = create_mcp_server(
+            settings=settings,
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        tool_names = [tool.name for tool in await server.list_tools()]
+        assert "page_upload_attachment" not in tool_names
+        # only the local-filesystem tool is gated; other writes stay
+        assert "page_clone" in tool_names
+        assert "page_create" in tool_names
 
 
 class TestResourceRegistration:
