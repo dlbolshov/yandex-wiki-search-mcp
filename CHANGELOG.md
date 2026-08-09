@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- The server now reports a one-line `description` — a short summary for a client's server list, distinct from the long-form `instructions` addressed to the model. Reaches clients on every protocol revision, and is read from package metadata so it cannot drift from `pyproject.toml`
+- Cache hints (SEP-2549) on `tools/list` and `resources/list`, whose contents are fixed for the lifetime of the process: a 5-minute TTL saves re-sending 27 tool schemas on every connection. Deliberately **not** on `resources/read` — clients cache it per URI, while `wiki-mcp://configuration` varies with the `?orgId=`/`?cloudOrgId=` on the endpoint, so a hint there would report one tenant's organization to the next. Hints travel only on protocol `2026-07-28`; every earlier revision sees exactly the traffic it saw before
+
 ### Changed
 - Migrated to MCP Python SDK v2 (`mcp[cli]>=2,<3`). **Nothing changes for clients**: one v2 server answers every protocol revision back to `2024-11-05` alongside the modern `2026-07-28`, the 27 tools and their schemas are identical, and `wiki-mcp://configuration` keeps its URI and its place in `resources/list`. Reinstalling is not required — `uvx` and the Docker tags pick the new version up on their own. If you need the old SDK in a shared environment, `pip install "yandex-wiki-search-mcp<2"` still resolves to the 1.x line, which stays on PyPI
 - The upper bound is now `<3` rather than `<2`. Within 2.x the range stays open on purpose: `uv.lock` is what pins the Docker image, and freezing an exact version in `pyproject.toml` would only strand `uvx`/`pip` users on it
