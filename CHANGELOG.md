@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.0.1] - 2026-08-09
 
 ### Fixed
 - `1.0.0` could not be installed: the `mcp` dependency was declared as `>=1.21` with no upper bound, and `mcp` 2.0.0 (released 2026-07-28) removed `FastMCP` entirely. Every fresh install — `uvx yandex-wiki-search-mcp`, `pip install`, the Glama build — resolved to 2.0.0 and died on `ImportError: cannot import name 'FastMCP' from 'mcp.server'` before the server could answer a single request. The constraint is now `>=1.21,<2`, which states a real compatibility boundary: this server subclasses `FastMCP` and reaches into its internals for custom routes, the low-level server and the auth provider, so a major bump of the SDK is a rewrite, not an upgrade. Migrating to the 2.x API (`MCPServer`) is separate work
