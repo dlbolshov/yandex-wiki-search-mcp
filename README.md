@@ -325,11 +325,12 @@ weekly when the `DRIFT_*` repository secrets are configured
 
 ## Credits
 
-This project is a fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
+This project began as a fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
 (`ya-yandex-wiki-mcp`) by Aleksandr Ponkratov, an excellent, well-tested Python MCP server
-for the Yandex Wiki API, licensed under Apache-2.0. This fork adds full-text search
-(`page_search`), typed tool schemas, and more; the original copyright and license are
-preserved (see [LICENSE](LICENSE) and [NOTICE](NOTICE)).
+for the Yandex Wiki API, licensed under Apache-2.0. It has since grown its own surface —
+full-text search, typed input *and* output schemas across all 27 tools, YFM helpers,
+cursor draining, multi-user OAuth and a live contract sweep against the API — while the
+original copyright and license are preserved (see [LICENSE](LICENSE) and [NOTICE](NOTICE)).
 
 The idea and key API findings behind full-text search come from
 [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) (JavaScript, MIT):

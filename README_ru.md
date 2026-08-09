@@ -327,11 +327,13 @@ Workflow [API drift check](.github/workflows/api-drift.yml) гоняет тот 
 
 ## Благодарности
 
-Проект — форк [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
+Проект начинался как форк [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
 (`ya-yandex-wiki-mcp`) Александра Понкратова — отличного, хорошо протестированного Python
-MCP-сервера для Yandex Wiki API под лицензией Apache-2.0. Форк добавляет полнотекстовый
-поиск (`page_search`), типизированные схемы тулзов и многое другое; оригинальные копирайт
-и лицензия сохранены (см. [LICENSE](LICENSE) и [NOTICE](NOTICE)).
+MCP-сервера для Yandex Wiki API под лицензией Apache-2.0. С тех пор он оброс собственной
+поверхностью: полнотекстовый поиск, типизированные схемы входа *и* выхода у всех 27 тулзов,
+YFM-хелперы, автоматический обход курсоров, многопользовательский OAuth и живой contract
+sweep по API. Оригинальные копирайт и лицензия сохранены (см. [LICENSE](LICENSE) и
+[NOTICE](NOTICE)).
 
 Идея и ключевые находки по API для полнотекстового поиска — из
 [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) (JavaScript, MIT):
