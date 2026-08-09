@@ -285,8 +285,15 @@ flowchart LR
 
 ```bash
 docker run --env-file .env -e TRANSPORT=streamable-http -p 8000:8000 \
+  --log-opt max-size=10m --log-opt max-file=3 \
   ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
 ```
+
+> [!NOTE]
+> The server writes no log files of its own — everything goes to stderr, which
+> Docker's default `json-file` driver stores **without a size limit**. The
+> `--log-opt` flags above cap it; drop them only if your daemon already sets a
+> default.
 
 <details>
 <summary><b>Docker Compose</b></summary>
@@ -301,6 +308,11 @@ services:
       - WIKI_TOKEN=${WIKI_TOKEN}
       - WIKI_ORG_ID=${WIKI_ORG_ID}
       - TRANSPORT=streamable-http
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 ```
 
 For Redis-backed OAuth storage, use the existing [`compose.yaml`](compose.yaml) as the baseline.
