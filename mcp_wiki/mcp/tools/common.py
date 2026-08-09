@@ -1,13 +1,14 @@
-from typing import Any, TypeAlias
+from typing import TypeAlias
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from starlette.requests import Request
 
 from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.utils import get_yandex_auth, resolve_page_locator
 from mcp_wiki.wiki.proto.pages import WikiProtocol
 
-ToolContext: TypeAlias = Context[Any, AppContext, Request]
+# v2 dropped the leading ServerSessionT parameter: Context[Lifespan, Request].
+ToolContext: TypeAlias = Context[AppContext, Request]
 
 
 def get_wiki(ctx: ToolContext) -> WikiProtocol:

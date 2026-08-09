@@ -3,7 +3,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, TypeVar
 
-from mcp.server import FastMCP
+from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
@@ -53,10 +53,10 @@ _FETCH_ALL_MAX_REQUESTS = 50
 
 EnvelopeT = TypeVar("EnvelopeT", bound=CursorEnvelope)
 
-# openWorldHint=False: every tool talks to exactly one configured Wiki
+# open_world_hint=False: every tool talks to exactly one configured Wiki
 # organization — a closed domain, unlike e.g. web search. Left unset it
 # defaults to true.
-READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 
 
 async def _drain_cursor(
@@ -123,7 +123,7 @@ async def _paginate(
     return response
 
 
-def register_page_read_tools(mcp: FastMCP[Any]) -> None:
+def register_page_read_tools(mcp: MCPServer[Any]) -> None:
     @mcp.tool(
         title="Search Wiki",
         description=(

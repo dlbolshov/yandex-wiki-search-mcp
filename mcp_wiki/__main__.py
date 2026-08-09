@@ -3,7 +3,7 @@ import sys
 
 from pydantic import ValidationError
 
-from mcp_wiki.mcp.server import create_mcp_server
+from mcp_wiki.mcp.server import create_mcp_server, run_options
 from mcp_wiki.settings import Settings, suspicious_env_keys
 
 logger = logging.getLogger("mcp_wiki")
@@ -60,7 +60,7 @@ def main() -> None:
         settings.log_level,
     )
 
-    create_mcp_server(settings).run(transport=settings.transport)
+    create_mcp_server(settings).run(settings.transport, **run_options(settings))
 
 
 if __name__ == "__main__":

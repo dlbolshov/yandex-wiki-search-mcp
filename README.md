@@ -87,6 +87,22 @@ claude mcp add yandex-wiki-search \
 
 3. Ask your agent something — see below.
 
+<details>
+<summary><b>Need the 1.x line?</b></summary>
+
+The server runs on MCP Python SDK v2. That is invisible to clients — one v2 server
+answers every protocol revision back to `2024-11-05` as well as the current one, so
+there is nothing to change on your side and nothing to reinstall.
+
+The only reason to stay on 1.x is a shared environment that pins `mcp<2` for something
+else. Every 1.x release stays on PyPI:
+
+```bash
+pip install "yandex-wiki-search-mcp<2"
+```
+
+</details>
+
 ## What can it do
 
 > *"Find our onboarding docs and summarize the key steps."*
@@ -269,8 +285,15 @@ flowchart LR
 
 ```bash
 docker run --env-file .env -e TRANSPORT=streamable-http -p 8000:8000 \
+  --log-opt max-size=10m --log-opt max-file=3 \
   ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
 ```
+
+> [!NOTE]
+> The server writes no log files of its own — everything goes to stderr, which
+> Docker's default `json-file` driver stores **without a size limit**. The
+> `--log-opt` flags above cap it; drop them only if your daemon already sets a
+> default.
 
 <details>
 <summary><b>Docker Compose</b></summary>
@@ -285,6 +308,11 @@ services:
       - WIKI_TOKEN=${WIKI_TOKEN}
       - WIKI_ORG_ID=${WIKI_ORG_ID}
       - TRANSPORT=streamable-http
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 ```
 
 For Redis-backed OAuth storage, use the existing [`compose.yaml`](compose.yaml) as the baseline.

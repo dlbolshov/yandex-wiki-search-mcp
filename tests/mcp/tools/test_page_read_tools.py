@@ -3,7 +3,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from mcp.client.session import ClientSession
+from mcp import Client
 
 from mcp_wiki.mcp.tools.page_read import _FETCH_ALL_MAX_REQUESTS, _drain_cursor
 from mcp_wiki.wiki.custom.errors import WikiTransportError
@@ -181,7 +181,7 @@ class TestDrainCursor:
 class TestPageReadTools:
     async def test_page_search(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
@@ -191,7 +191,7 @@ class TestPageReadTools:
             ],
         )
 
-        result = await client_session.call_tool("page_search", {"query": "hello"})
+        result = await client.call_tool("page_search", {"query": "hello"})
 
         content = get_tool_result_content(result)
         assert content["results"][0]["slug"] == "a/b"
@@ -199,7 +199,7 @@ class TestPageReadTools:
 
     async def test_page_search_result_type_filter(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
@@ -209,7 +209,7 @@ class TestPageReadTools:
             ],
         )
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_search", {"query": "x", "result_type": "page"}
         )
 
@@ -219,7 +219,7 @@ class TestPageReadTools:
 
     async def test_page_search_slug_prefix_filter_and_url_normalization(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
@@ -233,7 +233,7 @@ class TestPageReadTools:
             ],
         )
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_search", {"query": "x", "slug_prefix": "/Tech-Doc/ML/"}
         )
 
@@ -245,7 +245,7 @@ class TestPageReadTools:
     @pytest.mark.parametrize("slug_prefix", ["/", "   ", "///"])
     async def test_page_search_rejects_a_prefix_that_normalizes_to_empty(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
         slug_prefix: str,
     ) -> None:
@@ -255,16 +255,16 @@ class TestPageReadTools:
             results=[SearchResultItem.model_construct(slug="tech-doc/ml", type="page")],
         )
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_search", {"query": "x", "slug_prefix": slug_prefix}
         )
 
-        assert result.isError is True
+        assert result.is_error is True
         assert "slug_prefix must not be empty" in get_tool_result_text(result)
 
     async def test_page_get_by_slug(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
@@ -273,7 +273,7 @@ class TestPageReadTools:
             title="Page title",
         )
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_get",
             {"slug": "users/test/page"},
         )
@@ -283,7 +283,7 @@ class TestPageReadTools:
 
     async def test_page_get_descendants(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_get_descendants.return_value = {
@@ -292,7 +292,7 @@ class TestPageReadTools:
             "prev_cursor": None,
         }
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_get_descendants",
             {"slug": "users/test/page", "include_self": True},
         )
@@ -304,7 +304,7 @@ class TestPageReadTools:
 
     async def test_page_get_descendants_fetch_all(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_get_descendants.side_effect = [
@@ -313,7 +313,7 @@ class TestPageReadTools:
             _tree_page(4, 1, None),
         ]
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_get_descendants",
             {"slug": "users/test/page", "fetch_all": True},
         )
@@ -333,7 +333,7 @@ class TestPageReadTools:
     )
     async def test_every_cursor_tool_drains_with_fetch_all(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
         tool_name: str,
         method: str,
@@ -348,7 +348,7 @@ class TestPageReadTools:
             _cursor_page(envelope, item, 2, 1, None),
         ]
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             tool_name,
             {"slug": "users/test/page", "fetch_all": True},
         )
@@ -366,7 +366,7 @@ class TestPageReadTools:
     )
     async def test_every_cursor_tool_stays_on_one_page_by_default(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
         tool_name: str,
         method: str,
@@ -380,7 +380,7 @@ class TestPageReadTools:
             envelope, item, 0, 2, "c1"
         )
 
-        result = await client_session.call_tool(tool_name, {"slug": "users/test/page"})
+        result = await client.call_tool(tool_name, {"slug": "users/test/page"})
 
         content = get_tool_result_content(result)
         assert len(content["results"]) == 2
@@ -390,12 +390,12 @@ class TestPageReadTools:
 
     async def test_page_get_descendants_single_page_has_no_truncated_flag(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_get_descendants.return_value = _tree_page(0, 1, None)
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_get_descendants",
             {"slug": "users/test/page"},
         )
@@ -406,7 +406,7 @@ class TestPageReadTools:
 
     async def test_page_get_with_fields(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
@@ -415,7 +415,7 @@ class TestPageReadTools:
             content="Page content",
         )
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_get",
             {"page_id": 10, "fields": ["content", "breadcrumbs"]},
         )
@@ -431,7 +431,7 @@ class TestPageReadTools:
 
     async def test_page_get_resources(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_get_resources.return_value = {
@@ -443,7 +443,7 @@ class TestPageReadTools:
             id=10
         )
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_get_resources",
             {"slug": "users/test/page", "resource_types": ["attachment"]},
         )
@@ -454,7 +454,7 @@ class TestPageReadTools:
 
     async def test_page_get_resources_with_attachment_filter(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_get_resources.return_value = {
@@ -463,7 +463,7 @@ class TestPageReadTools:
             "prev_cursor": None,
         }
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_get_resources",
             {"page_id": 10, "resource_types": ["attachment"]},
         )
@@ -490,7 +490,7 @@ class TestPageReadTools:
 
     async def test_page_get_grids(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.page_get_grids.return_value = {
@@ -502,7 +502,7 @@ class TestPageReadTools:
             id=10
         )
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_get_grids",
             {"slug": "users/test/page", "order_by": "title", "order_direction": "asc"},
         )
@@ -523,7 +523,7 @@ class TestPageReadTools:
 
     async def test_grid_get(
         self,
-        client_session: ClientSession,
+        client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         mock_wiki_protocol.grid_get.return_value = WikiGrid.model_construct(
@@ -533,7 +533,7 @@ class TestPageReadTools:
             rows=[WikiGridRow.model_construct(id="row-1", row=["In progress", 3])],
         )
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "grid_get",
             {
                 "grid_id": "grid-1",
@@ -568,9 +568,9 @@ class TestPageReadTools:
 
     async def test_grid_get_rejects_empty_grid_id(
         self,
-        client_session: ClientSession,
+        client: Client,
     ) -> None:
-        result = await client_session.call_tool("grid_get", {"grid_id": "   "})
+        result = await client.call_tool("grid_get", {"grid_id": "   "})
 
-        assert result.isError is True
+        assert result.is_error is True
         assert "grid_id must not be empty" in get_tool_result_text(result)

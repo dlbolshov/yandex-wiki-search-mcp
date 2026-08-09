@@ -1,5 +1,5 @@
 import time
-from typing import Any
+from typing import Any, cast
 
 import fakeredis.aioredis
 import pytest
@@ -41,10 +41,12 @@ async def test_get_client_missing(redis_store: RedisOAuthStore) -> None:
 
 
 async def test_save_client_requires_id(redis_store: RedisOAuthStore) -> None:
-    # client_id is optional on the SDK model; keying a registration under
-    # None would make it unrecoverable.
+    # mcp 2.x types client_id as a required str, so this builds what the type
+    # system forbids on purpose: validation is bypassable, and keying a
+    # registration under None would make it unrecoverable.
     client = OAuthClientInformationFull.model_construct(
-        client_id=None, redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)]
+        client_id=cast(str, None),
+        redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)],
     )
     with pytest.raises(ValueError, match="client_id"):
         await redis_store.save_client(client)
