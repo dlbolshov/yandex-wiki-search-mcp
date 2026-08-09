@@ -4,7 +4,7 @@
 
 [![yandex-wiki-search-mcp MCP server](https://glama.ai/mcp/servers/dlbolshov/yandex-wiki-search-mcp/badges/score.svg)](https://glama.ai/mcp/servers/dlbolshov/yandex-wiki-search-mcp)
 [![PyPI](https://img.shields.io/pypi/v/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
-[![Python](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fdlbolshov%2Fyandex-wiki-search-mcp%2Fmain%2Fpyproject.toml)](https://pypi.org/project/yandex-wiki-search-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/yandex-wiki-search-mcp)](https://pypi.org/project/yandex-wiki-search-mcp/)
 [![CI](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/dlbolshov/yandex-wiki-search-mcp/actions/workflows/test.yml)
 [![codecov](https://img.shields.io/codecov/c/github/dlbolshov/yandex-wiki-search-mcp?logo=codecov&logoColor=white)](https://app.codecov.io/gh/dlbolshov/yandex-wiki-search-mcp)
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
