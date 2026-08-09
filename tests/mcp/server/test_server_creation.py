@@ -266,12 +266,14 @@ class TestServerDescription:
         assert server_description() == summary
         assert summary
 
-    def test_is_empty_when_the_package_is_not_installed(self) -> None:
+    def test_is_none_when_the_package_is_not_installed(self) -> None:
+        # None rather than "": the field is optional on the wire, so an
+        # uninstalled dev tree advertises no description instead of a blank.
         with patch(
             "importlib.metadata.metadata",
             side_effect=importlib.metadata.PackageNotFoundError,
         ):
-            assert server_description() == ""
+            assert server_description() is None
 
 
 class TestParseEncryptionKeys:

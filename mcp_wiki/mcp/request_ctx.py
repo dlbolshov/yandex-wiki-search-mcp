@@ -10,11 +10,12 @@ Rather than turn the URI into a template (which would move it out of
 `resources/list` and give the organization a second, divergent source), a
 middleware stashes the inbound request here and the handler reads it back.
 
-`Server.middleware` is marked provisional in the SDK, so this module is
-deliberately the only place that touches it: if the signature moves, this file
-is the whole repair. The read side degrades rather than breaks — with nothing
-stashed, `current_request()` is None and callers fall back to the configured
-organization, which is already what happens on stdio.
+`Server.middleware` is marked provisional in the SDK, so its surface is kept
+to two small modules: this one and mcp_wiki.mcp.middleware (the debug log).
+If the signature moves, those two files are the whole repair. The read side
+degrades rather than breaks — with nothing stashed, `current_request()` is
+None and callers fall back to the configured organization, which is already
+what happens on stdio.
 """
 
 import contextvars

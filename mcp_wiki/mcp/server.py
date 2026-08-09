@@ -37,18 +37,20 @@ def server_version() -> str:
         return "dev"
 
 
-def server_description() -> str:
+def server_description() -> str | None:
     """The one-line summary clients show in a server list.
 
     Read from package metadata rather than repeated here: the same sentence
     already lives in pyproject.toml, manifest.json and server.json, and a
     fourth copy is a fourth thing to forget. Distinct from `instructions`,
-    which is long-form guidance addressed to the model.
+    which is long-form guidance addressed to the model. None rather than ""
+    when the package is not installed: the field is optional on the wire,
+    and an absent description reads better than a blank one.
     """
     try:
         return importlib.metadata.metadata("yandex-wiki-search-mcp")["Summary"]
     except importlib.metadata.PackageNotFoundError:
-        return ""
+        return None
 
 
 # How long a client may treat a listing as fresh. The tool and resource sets
@@ -252,7 +254,7 @@ def create_mcp_server(
 
     # Transport settings (host, port, stateless_http, json_response) are no
     # longer constructor arguments in mcp 2.x — they belong to run() and
-    # streamable_http_app(), which build_http_app()/__main__ pass them to.
+    # streamable_http_app(), fed by run_options()/http_app_options() below.
     server = WikiMCPServer(
         name="Yandex Wiki Search MCP",
         description=server_description(),
