@@ -63,7 +63,6 @@ class TestAbandonedRecordsAreReclaimed:
         # Only the second batch is still alive.
         assert len(store._states) == ENOUGH_TO_SWEEP
         assert not any(key.startswith("abandoned-") for key in store._states)
-        assert len(store._state_expiry) == len(store._states)
 
     async def test_live_records_are_never_dropped(
         self, store: InMemoryOAuthStore, clock: FakeClock
@@ -130,6 +129,36 @@ class TestAbandonedRecordsAreReclaimed:
         await store.save_client(make_client("client-fresh"))
 
         assert len(store._dynamic_clients) == ENOUGH_TO_SWEEP + 1
+
+
+class TestRecordsCarryTheirDeadline:
+    """A record and its deadline live in one entry, so neither can go missing."""
+
+    async def test_a_state_stores_its_own_deadline(
+        self, store: InMemoryOAuthStore, clock: FakeClock
+    ) -> None:
+        await store.save_state(make_state(), state_id="k", ttl=STATE_TTL)
+
+        entry = store._states["k"]
+        assert entry.value == make_state()
+        assert entry.expires_at == clock.now + STATE_TTL
+
+    async def test_a_state_saved_without_a_ttl_never_expires(
+        self, store: InMemoryOAuthStore, clock: FakeClock
+    ) -> None:
+        await store.save_state(make_state(), state_id="k")
+
+        assert store._states["k"].expires_at is None
+        clock.advance(10 * 365 * 24 * 60 * 60)
+        assert await store.get_state("k") is not None
+
+    async def test_a_state_is_spent_at_its_deadline_not_after(
+        self, store: InMemoryOAuthStore, clock: FakeClock
+    ) -> None:
+        await store.save_state(make_state(), state_id="k", ttl=STATE_TTL)
+
+        clock.advance(STATE_TTL)
+        assert await store.get_state("k") is None
 
 
 class TestSweepCost:
