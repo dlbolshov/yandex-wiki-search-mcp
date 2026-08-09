@@ -5,7 +5,9 @@ This file provides guidance for working on the `yandex-wiki-search-mcp` package.
 ## Project Overview
 
 `yandex-wiki-search-mcp` is an MCP server for the public Yandex Wiki API with full-text search.
-It exposes Wiki-oriented tools through FastMCP and keeps the code organized around a dedicated Wiki domain model.
+It exposes Wiki-oriented tools through the MCP Python SDK's `MCPServer` and keeps the code organized around a dedicated Wiki domain model.
+
+The SDK is pinned to `mcp[cli]>=2,<3`. One v2 server answers both protocol eras — every handshake revision back to `2024-11-05` plus the modern `2026-07-28` — so nothing here needs a per-era branch.
 
 Main capabilities:
 - full-text search across the whole Wiki
@@ -51,10 +53,18 @@ task test
   `pages.py` defines the `WikiProtocol`.
 
 - `mcp_wiki/mcp/server.py`
-  FastMCP server creation, lifespan wiring, optional OAuth provider registration, and resource/tool registration.
+  `MCPServer` creation, lifespan wiring, optional OAuth provider registration, and resource/tool registration.
+  Also `run_options()` / `http_app_options()`, which assemble the transport keywords `run()` and `streamable_http_app()` take — these are no longer constructor arguments.
+  **Always pass `host`**: the SDK defaults it to `127.0.0.1` and auto-arms DNS rebinding protection on loopback, so an app built without it answers every MCP request behind a real hostname with `421` while `/healthz` still returns `200`.
+
+- `mcp_wiki/mcp/request_ctx.py`
+  Contextvar holding the transport request of the message being handled, published by a `Server.middleware` entry.
+  Exists because the SDK injects no `Context` into a static-URI resource, which `wiki-mcp://configuration` is.
+  `Server.middleware` is provisional upstream, so this module is deliberately the only place that touches it.
 
 - `mcp_wiki/mcp/resources.py`
-  Configuration resource exposed as `wiki-mcp://configuration`.
+  Configuration resource exposed as `wiki-mcp://configuration`, plus the YFM cheat sheet.
+  Neither handler takes a `Context` — a static URI paired with one raises at registration.
 
 - `mcp_wiki/mcp/tools/page_read.py`
   Read-only Wiki tools.
@@ -106,9 +116,10 @@ Write tools:
 
 - Use `pytest` with async tests.
 - Use `aioresponses` for Wiki HTTP client tests.
-- Use `AsyncMock` for MCP tool tests through a real `FastMCP` server.
+- Use `AsyncMock` for MCP tool tests through a real `MCPServer`.
 - Keep imports at module top level.
 - Prefer explicit fixtures and narrow assertions.
+- Protocol model fields are snake_case: `is_error`, `structured_content`, `input_schema`, `server_info`, and the `ToolAnnotations` hints. camelCase still works as a constructor kwarg but not for attribute access.
 
 ### Test layout
 
@@ -127,9 +138,15 @@ Write tools:
 - `tests/mcp/tools/test_page_write_tools.py`
   Write-tool behavior against mocked Wiki protocol.
 
+- `tests/mcp/server/test_request_ctx.py`
+  The middleware that publishes the inbound request, covered over real HTTP.
+  This is the guard on a provisional SDK API — keep it end-to-end rather than calling the handler directly.
+
 ### MCP tool tests
 
-Use `client_session.call_tool(...)` and extract output with `get_tool_result_content(...)` from `tests/mcp/conftest.py`.
+Use the `client` fixture (an in-memory `Client`, the mcp 2.x replacement for the removed `create_connected_server_and_client_session`): `client.call_tool(...)`, then extract output with `get_tool_result_content(...)` from `tests/mcp/conftest.py`.
+
+The fixture is left on the SDK default `mode="auto"`, so the suite runs against the `2026-07-28` path a modern client negotiates. Nothing here needs a back-channel; a tool that elicits, samples, or lists roots would need `mode="legacy"`.
 
 When a tool can accept both `page_id` and `slug`, test at least one of:
 - direct `page_id` path
@@ -189,3 +206,9 @@ Constraints:
 - if `WIKI_READ_ONLY=true`, write tools must not be registered
 - `page_update` replaces full content when `content` is provided
 - file upload uses Yandex Wiki multipart upload sessions
+- `HOST` must reach `run()` / `streamable_http_app()`, or HTTP transports answer `421` behind any non-loopback hostname
+
+Per-request organization override:
+- a client may append `?orgId=` or `?cloudOrgId=` to the server endpoint, and those replace the configured organization for that request
+- handlers with a `Context` read it from `ctx.request_context.request`; the configuration resource has no `Context` and reads the middleware-stashed request instead
+- both go through `get_yandex_auth()`, which prefers an explicit `ctx` so a middleware regression cannot reach the tools

@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Migrated to MCP Python SDK v2 (`mcp[cli]>=2,<3`). **Nothing changes for clients**: one v2 server answers every protocol revision back to `2024-11-05` alongside the modern `2026-07-28`, the 27 tools and their schemas are identical, and `wiki-mcp://configuration` keeps its URI and its place in `resources/list`. Reinstalling is not required — `uvx` and the Docker tags pick the new version up on their own. If you need the old SDK in a shared environment, `pip install "yandex-wiki-search-mcp<2"` still resolves to the 1.x line, which stays on PyPI
+- The upper bound is now `<3` rather than `<2`. Within 2.x the range stays open on purpose: `uv.lock` is what pins the Docker image, and freezing an exact version in `pyproject.toml` would only strand `uvx`/`pip` users on it
+- Dependency footprint moved with the SDK: `httpx`/`httpx-sse` are replaced by `httpx2`, `sse-starlette` jumps to `>=3`, and `opentelemetry-api` and `mcp-types` are new. `httpx2` verifies TLS against the operating system trust store rather than certifi's bundle — irrelevant here, since this server talks to the Wiki API over `aiohttp`, but worth knowing if you build a minimal image with no system CA store
+
+### Fixed
+- `HOST` is now passed to `run()` and `streamable_http_app()`, where mcp 2.x expects it. It was a constructor argument in 1.x; left out, the SDK defaults to `127.0.0.1` and arms DNS rebinding protection, which answers every MCP request behind a real hostname with `421 Misdirected Request` while `/healthz` keeps returning `200` — up to every probe, down to every client. Two tests pin both halves
+
+### Internal
+- `wiki-mcp://configuration` no longer reaches for an ambient context. The SDK removed `get_context()` and now refuses to inject a `Context` into a static-URI resource, so a middleware publishes the inbound request through a contextvar (`mcp_wiki/mcp/request_ctx.py`) and the handler reads it back. The alternative — making the URI a template — would have moved the resource out of `resources/list` and given the per-request organization a second source that can disagree with the one tools read
+- Custom routes (`/healthz`, the OAuth callback) are registered through the public `custom_route()` instead of the private `_custom_starlette_routes` list
+- Tests drive an in-memory `Client`, replacing the removed `create_connected_server_and_client_session`, on the SDK default `mode="auto"` — so the suite exercises the `2026-07-28` path a modern client negotiates
+
 ## [1.0.1] - 2026-08-09
 
 ### Fixed
