@@ -5,6 +5,10 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthState
 
+# Yandex refresh token lifetime, shared so the stores cannot disagree:
+# https://yandex.cloud/en-ru/docs/iam/concepts/authorization/refresh-token#token-lifetime
+REFRESH_TOKEN_TTL_SECONDS = 31 * 24 * 60 * 60
+
 
 class OAuthStore(Protocol):
     async def save_client(self, client: OAuthClientInformationFull) -> None: ...

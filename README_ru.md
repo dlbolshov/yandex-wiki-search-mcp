@@ -213,6 +213,7 @@ claude mcp add yandex-wiki-search \
 | `WIKI_READ_ONLY` | нет | `false` | `true` отключает все write-тулзы на сервере |
 | `TRANSPORT` | нет | `stdio` | `stdio` \| `sse` \| `streamable-http` |
 | `HOST` / `PORT` | нет | `0.0.0.0` / `8000` | Только для HTTP-транспортов |
+| `STATELESS_HTTP` / `JSON_RESPONSE` | нет | `true` / `true` | Только для `streamable-http`: не хранить состояние сессии / отвечать JSON вместо SSE |
 | `LOG_LEVEL` | нет | `INFO` | Логи в stderr; `DEBUG` дополнительно логирует запросы к API (метод, путь, статус, длительность — без заголовков и тел) |
 | `WIKI_API_BASE_URL` | нет | `https://api.wiki.yandex.net` | Эндпоинт Wiki API |
 | `WIKI_WEB_BASE_URL` | нет | `https://wiki.yandex.ru` | База для абсолютных ссылок в результатах `page_search` |
@@ -297,6 +298,7 @@ services:
 - **Wiki API не проверяет OAuth-скоупы** (проверено живьём — см. [docs/api-notes_ru.md](docs/api-notes_ru.md)): токен с `wiki:read` может писать, поэтому полагайтесь на read-only режим, а не на скоупы.
 - Секреты — `SecretStr` по всему коду: замаскированы в логах и `repr`; `DEBUG`-логирование HTTP никогда не пишет заголовки и тела.
 - Удаление обратимо: `page_delete` возвращает токен восстановления для `page_recover`.
+- Посторонние ключи в общем `.env` игнорируются, но опечатка в названии настройки (`WIKI_READ_ONL`) останавливает сервер, а не откатывает его молча на значение по умолчанию, которое вы не выбирали.
 
 ## Разработка
 

@@ -75,7 +75,10 @@ class YandexOAuthAuthorizationServerProvider(
             url=construct_redirect_uri(
                 str(state.redirect_uri),
                 code=new_code,
-                state=yandex_cb_data.state,
+                # The client's own state, not the lookup key we sent Yandex.
+                # None when the client sent none — construct_redirect_uri
+                # drops parameters that are None.
+                state=state.client_state,
             ),
             status_code=302,
             headers={"Cache-Control": "no-store"},
@@ -90,7 +93,14 @@ class YandexOAuthAuthorizationServerProvider(
     async def authorize(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
     ) -> str:
-        state_id = params.state or secrets.token_hex(16)
+        # Always server-generated, never the client's `state`. Using the
+        # client value as the store key let anyone who learned it start an
+        # authorization under the same key and overwrite the pending record:
+        # the victim's callback would then mint a code bound to the
+        # attacker's client_id, redirect_uri and code_challenge, and hand it
+        # to the attacker's redirect_uri. PKCE does not help there — the
+        # stored challenge is the attacker's too.
+        state_id = secrets.token_hex(16)
         redirect_uri = client.validate_redirect_uri(params.redirect_uri)
         scopes = None
         if self._use_scopes:
@@ -108,6 +118,7 @@ class YandexOAuthAuthorizationServerProvider(
                 client_id=client.client_id,
                 resource=params.resource,
                 scopes=scopes,
+                client_state=params.state,
             ),
             state_id=state_id,
             ttl=600,

@@ -161,8 +161,14 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
             limit=limit,
             auth=get_yandex_auth(ctx),
         )
-        if slug_prefix:
+        if slug_prefix is not None:
             prefix = normalize_slug(slug_prefix).lower()
+            if not prefix:
+                # '/' and whitespace normalize to '', which used to match
+                # nothing and return an empty result set with no explanation.
+                raise ValueError(
+                    "slug_prefix must not be empty. Omit it to search the whole Wiki."
+                )
             response.results = [
                 r
                 for r in response.results

@@ -8,12 +8,13 @@ from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthSt
 CLIENT_REDIRECT_URI = "http://localhost:3000/callback"
 
 
-def make_state() -> YandexOAuthState:
+def make_state(client_state: str | None = "state-1") -> YandexOAuthState:
     return YandexOAuthState(
         redirect_uri=AnyUrl(CLIENT_REDIRECT_URI),
         code_challenge="challenge-1",
         redirect_uri_provided_explicitly=True,
         client_id="client-1",
+        client_state=client_state,
     )
 
 

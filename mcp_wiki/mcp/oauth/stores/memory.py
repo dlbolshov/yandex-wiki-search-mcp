@@ -3,7 +3,7 @@ import time
 from mcp.server.auth.provider import AccessToken, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from mcp_wiki.mcp.oauth.store import OAuthStore
+from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS, OAuthStore
 from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthState
 
 from .crypto import hash_token
@@ -118,10 +118,14 @@ class InMemoryOAuthStore(OAuthStore):
         if token.refresh_token is not None:
             refresh_token_hash = hash_token(token.refresh_token)
 
+            # expires_at matters: get_refresh_token already checks it, but
+            # without a value set here the check never fired and in-memory
+            # refresh tokens outlived the Redis ones by the process lifetime.
             self._refresh_tokens[refresh_token_hash] = RefreshToken(
                 token=token.refresh_token,
                 client_id=client_id,
                 scopes=scopes,
+                expires_at=int(time.time()) + REFRESH_TOKEN_TTL_SECONDS,
             )
 
             # Map refresh token hash to access token hash for cleanup

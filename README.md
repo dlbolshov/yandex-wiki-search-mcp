@@ -211,6 +211,7 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 | `WIKI_READ_ONLY` | no | `false` | `true` disables all write tools server-side |
 | `TRANSPORT` | no | `stdio` | `stdio` \| `sse` \| `streamable-http` |
 | `HOST` / `PORT` | no | `0.0.0.0` / `8000` | HTTP transports only |
+| `STATELESS_HTTP` / `JSON_RESPONSE` | no | `true` / `true` | `streamable-http` only: keep no per-session state / answer with JSON instead of SSE |
 | `LOG_LEVEL` | no | `INFO` | Logs go to stderr; `DEBUG` additionally logs Wiki API requests (method, path, status, duration — never headers or bodies) |
 | `WIKI_API_BASE_URL` | no | `https://api.wiki.yandex.net` | Wiki API endpoint |
 | `WIKI_WEB_BASE_URL` | no | `https://wiki.yandex.ru` | Base for absolute page links in `page_search` results |
@@ -295,6 +296,7 @@ For Redis-backed OAuth storage, use the existing [`compose.yaml`](compose.yaml) 
 - **Wiki API does not enforce OAuth scopes** (verified live — see [docs/api-notes.md](docs/api-notes.md)): a `wiki:read` token can write, so use the read-only mode rather than relying on token scopes.
 - Secrets are `SecretStr` throughout — masked in logs and `repr`; `DEBUG` HTTP logging never includes headers or bodies.
 - Deletion is recoverable: `page_delete` returns a recovery token for `page_recover`.
+- Unrelated keys in a shared `.env` are ignored, but a misspelled setting (`WIKI_READ_ONL`) stops the server instead of silently falling back to a default you did not choose.
 
 ## Development
 

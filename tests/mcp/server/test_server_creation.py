@@ -58,7 +58,7 @@ MANIFEST_PATH = Path(__file__).resolve().parents[3] / "manifest.json"
 
 
 def load_manifest() -> dict[str, Any]:
-    return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+    return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
 
 class TestToolRegistration:
@@ -166,9 +166,9 @@ class TestManifestSync:
     ) -> None:
         # manifest.json is the MCPB bundle metadata: its tools list is what
         # clients show before installing. Nothing generates it from the code,
-        # so renames and additions silently drift apart without this check
-        # (v1.0.0 shipped with grid_move_row still listed under its old
-        # plural name and no page_clone at all).
+        # so renames and additions silently drift apart without this check —
+        # the v1.0.0 branch still listed grid_move_row under its old plural
+        # name and had no page_clone at all until this test caught it.
         manifest = load_manifest()
 
         manifest_names = [tool["name"] for tool in manifest["tools"]]

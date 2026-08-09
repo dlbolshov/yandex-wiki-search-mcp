@@ -5,7 +5,7 @@ from aiocache import BaseCache, Cache
 from mcp.server.auth.provider import AccessToken, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from mcp_wiki.mcp.oauth.store import OAuthStore
+from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS, OAuthStore
 from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthState
 
 from .crypto import FieldEncryptor, hash_token
@@ -53,9 +53,7 @@ class RedisOAuthStore(OAuthStore):
             pool_max_size=pool_max_size,
             **kwargs,
         )
-        self._refresh_token_ttl = (
-            31 * 24 * 60 * 60
-        )  # 31 days - https://yandex.cloud/en-ru/docs/iam/concepts/authorization/refresh-token#token-lifetime
+        self._refresh_token_ttl = REFRESH_TOKEN_TTL_SECONDS
 
     def _client_key(self, client_id: str) -> str:
         """Build Redis key for client storage."""

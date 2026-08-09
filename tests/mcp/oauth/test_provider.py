@@ -15,6 +15,7 @@ from tests.aioresponses_utils import RequestCapture
 from tests.mcp.oauth.helpers import (
     CLIENT_REDIRECT_URI,
     make_auth_code,
+    make_client,
     make_state,
     make_token,
 )
@@ -69,13 +70,18 @@ async def test_authorize_redirects_to_yandex_and_saves_state(
     assert url.query["response_type"] == "code"
     assert url.query["client_id"] == "yandex-app-id"
     assert url.query["redirect_uri"] == CALLBACK_URL
-    assert url.query["state"] == "state-1"
     assert url.query["scope"] == "wiki:read"
 
-    state = await memory_store.get_state("state-1")
+    # The state we hand Yandex is our own unguessable key, never the
+    # client's — which is kept as data and echoed back at the end.
+    state_id = url.query["state"]
+    assert state_id != "state-1"
+
+    state = await memory_store.get_state(state_id)
     assert state is not None
     assert state.client_id == "client-1"
     assert state.code_challenge == "challenge-1"
+    assert state.client_state == "state-1"
     assert str(state.redirect_uri) == CLIENT_REDIRECT_URI
 
 
@@ -136,6 +142,61 @@ async def test_callback_mints_code_and_redirects_to_client(
 
     # State is single-use and must be consumed by the callback
     assert await memory_store.get_state("state-1") is None
+
+
+async def test_a_second_authorization_cannot_hijack_the_first(
+    provider: YandexOAuthAuthorizationServerProvider,
+    memory_store: InMemoryOAuthStore,
+    client_info: OAuthClientInformationFull,
+) -> None:
+    """Reusing another client's `state` must not overwrite its pending record.
+
+    When the store was keyed by the client-supplied `state`, an attacker who
+    learned it could re-authorize under the same key with their own
+    redirect_uri and code_challenge. The victim's callback then minted a code
+    bound to the attacker and redirected the victim's browser there — PKCE
+    included, since the stored challenge was the attacker's too.
+    """
+    victim_url = yarl.URL(await provider.authorize(client_info, make_params()))
+    attacker = make_client(client_id="client-2")
+    await provider.authorize(attacker, make_params())
+
+    victim_state_id = victim_url.query["state"]
+    victim_state = await memory_store.get_state(victim_state_id)
+
+    assert victim_state is not None, "the victim's pending record was overwritten"
+    assert victim_state.client_id == "client-1"
+
+
+async def test_client_state_is_echoed_back_not_the_lookup_key(
+    provider: YandexOAuthAuthorizationServerProvider,
+    client_info: OAuthClientInformationFull,
+) -> None:
+    url = yarl.URL(await provider.authorize(client_info, make_params()))
+    state_id = url.query["state"]
+
+    response = await provider.handle_yandex_callback(
+        make_callback_request(f"code=ya-code-1&state={state_id}")
+    )
+
+    location = yarl.URL(response.headers["location"])
+    assert location.query["state"] == "state-1"
+
+
+async def test_no_state_is_returned_when_the_client_sent_none(
+    provider: YandexOAuthAuthorizationServerProvider,
+    memory_store: InMemoryOAuthStore,
+) -> None:
+    await memory_store.save_state(
+        make_state(client_state=None), state_id="key-1", ttl=600
+    )
+
+    response = await provider.handle_yandex_callback(
+        make_callback_request("code=ya-code-1&state=key-1")
+    )
+
+    location = yarl.URL(response.headers["location"])
+    assert "state" not in location.query
 
 
 async def test_callback_rejects_unknown_state(
