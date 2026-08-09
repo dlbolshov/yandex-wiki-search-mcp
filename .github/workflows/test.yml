@@ -48,6 +48,54 @@ jobs:
     - name: Run mypy
       run: uv run mypy .
 
+  install:
+    # Everything else installs from uv.lock, so the version ranges in
+    # pyproject.toml are never exercised and a dependency's breaking major
+    # release reaches users before it reaches CI. This job resolves them
+    # fresh from the built wheel, the way `uvx` and `pip install` do.
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.13"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        cache-suffix: install
+
+    - name: Build the wheel
+      run: uv build
+
+    - name: Install it, resolving dependencies from scratch
+      run: |
+        uv venv /tmp/smoke
+        uv pip install --python /tmp/smoke/bin/python dist/*.whl
+
+    - name: Report what the ranges actually resolved to
+      run: /tmp/smoke/bin/python -m pip list 2>/dev/null || uv pip list --python /tmp/smoke/bin/python
+
+    - name: Build the server and count its tools
+      env:
+        WIKI_TOKEN: dummy-token
+        WIKI_ORG_ID: "1"
+      run: |
+        /tmp/smoke/bin/python - <<'PY'
+        import asyncio
+        from mcp_wiki.mcp.server import create_mcp_server
+        from mcp_wiki.settings import Settings
+
+        server = create_mcp_server(Settings())
+        tools = asyncio.run(server.list_tools())
+        print(f"{len(tools)} tools registered")
+        assert len(tools) == 27, f"expected 27 tools, got {len(tools)}"
+        PY
+
   test:
     strategy:
       fail-fast: false

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- `1.0.0` could not be installed: the `mcp` dependency was declared as `>=1.21` with no upper bound, and `mcp` 2.0.0 (released 2026-07-28) removed `FastMCP` entirely. Every fresh install — `uvx yandex-wiki-search-mcp`, `pip install`, the Glama build — resolved to 2.0.0 and died on `ImportError: cannot import name 'FastMCP' from 'mcp.server'` before the server could answer a single request. The constraint is now `>=1.21,<2`, which states a real compatibility boundary: this server subclasses `FastMCP` and reaches into its internals for custom routes, the low-level server and the auth provider, so a major bump of the SDK is a rewrite, not an upgrade. Migrating to the 2.x API (`MCPServer`) is separate work
+- CI never installed the package the way a user does. Both jobs run `uv sync --dev`, which resolves from `uv.lock` and so pins whatever was locked — the version ranges in `pyproject.toml` were exercised nowhere, which is exactly why a broken release shipped. A new `install` job builds the wheel, installs it with a fresh resolve, then constructs the server and counts its tools; it fails on the combination that reached users
+
 ## [1.0.0] - 2026-08-09
 
 First stable release. The tool surface is now a compatibility promise: breaking
