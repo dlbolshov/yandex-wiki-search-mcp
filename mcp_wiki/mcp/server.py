@@ -8,6 +8,7 @@ from typing import Any
 import yarl
 from mcp.server import MCPServer
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+from mcp.server.caching import CacheableMethod, CacheHint
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextContent
 from starlette.requests import Request
@@ -33,6 +34,28 @@ def server_version() -> str:
         return importlib.metadata.version("yandex-wiki-search-mcp")
     except importlib.metadata.PackageNotFoundError:
         return "dev"
+
+
+# How long a client may treat a listing as fresh. The tool and resource sets
+# are fixed when the server is constructed and never change while it runs, so
+# the only staleness this can cause is a redeploy that adds or removes a tool:
+# clients keep the old listing for up to this long. Five minutes trades a
+# little of that against re-sending 27 tool schemas on every connection.
+#
+# Deliberately not on `resources/read`: the client caches it per URI, and
+# `wiki-mcp://configuration` varies with the `?orgId=`/`?cloudOrgId=` on the
+# *endpoint*, which is not part of the URI. A hint there would make it report
+# one tenant's organization to another. Nor on `server/discover`, where a
+# stale capability set would outlive a redeploy that changed it.
+#
+# Only 2026-07-28 clients see these; on every earlier revision the hints are
+# not sent and traffic is byte-for-byte what it was.
+LISTING_CACHE_TTL_MS = 5 * 60 * 1000
+
+STATIC_LISTING_CACHE_HINTS: dict[CacheableMethod, CacheHint] = {
+    "tools/list": CacheHint(ttl_ms=LISTING_CACHE_TTL_MS, scope="private"),
+    "resources/list": CacheHint(ttl_ms=LISTING_CACHE_TTL_MS, scope="private"),
+}
 
 
 async def healthz(_request: Request) -> PlainTextResponse:
@@ -222,6 +245,7 @@ def create_mcp_server(
             read_only=settings.wiki_read_only,
         ),
         version=server_version(),
+        cache_hints=STATIC_LISTING_CACHE_HINTS,
         log_level=settings.log_level,
         lifespan=lifespan,
         auth_server_provider=auth_server_provider,
