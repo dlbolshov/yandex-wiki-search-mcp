@@ -17,6 +17,7 @@ from mcp_wiki.mcp.server import (
     create_mcp_server,
     http_app_options,
     run_options,
+    server_description,
     server_version,
 )
 from tests.mcp.conftest import (
@@ -220,6 +221,16 @@ class TestServerConfiguration:
     ) -> None:
         assert client.instructions
 
+    async def test_server_has_a_description(
+        self,
+        client: Client,
+    ) -> None:
+        # Short, for a client's server list — distinct from `instructions`,
+        # which is long-form guidance for the model.
+        assert client.server_info is not None
+        assert client.server_info.description == server_description()
+        assert client.server_info.description != client.instructions
+
     async def test_server_info_reports_package_version(
         self,
         client: Client,
@@ -245,6 +256,22 @@ class TestServerVersion:
             side_effect=importlib.metadata.PackageNotFoundError,
         ):
             assert server_version() == "dev"
+
+
+class TestServerDescription:
+    def test_comes_from_package_metadata(self) -> None:
+        # Not repeated in the source: the same sentence is already in
+        # pyproject.toml, manifest.json and server.json.
+        summary = importlib.metadata.metadata("yandex-wiki-search-mcp")["Summary"]
+        assert server_description() == summary
+        assert summary
+
+    def test_is_empty_when_the_package_is_not_installed(self) -> None:
+        with patch(
+            "importlib.metadata.metadata",
+            side_effect=importlib.metadata.PackageNotFoundError,
+        ):
+            assert server_description() == ""
 
 
 class TestParseEncryptionKeys:

@@ -36,6 +36,20 @@ def server_version() -> str:
         return "dev"
 
 
+def server_description() -> str:
+    """The one-line summary clients show in a server list.
+
+    Read from package metadata rather than repeated here: the same sentence
+    already lives in pyproject.toml, manifest.json and server.json, and a
+    fourth copy is a fourth thing to forget. Distinct from `instructions`,
+    which is long-form guidance addressed to the model.
+    """
+    try:
+        return importlib.metadata.metadata("yandex-wiki-search-mcp")["Summary"]
+    except importlib.metadata.PackageNotFoundError:
+        return ""
+
+
 # How long a client may treat a listing as fresh. The tool and resource sets
 # are fixed when the server is constructed and never change while it runs, so
 # the only staleness this can cause is a redeploy that adds or removes a tool:
@@ -240,6 +254,7 @@ def create_mcp_server(
     # streamable_http_app(), which build_http_app()/__main__ pass them to.
     server = WikiMCPServer(
         name="Yandex Wiki Search MCP",
+        description=server_description(),
         instructions=build_instructions(
             include_local_uploads=settings.include_local_uploads,
             read_only=settings.wiki_read_only,
