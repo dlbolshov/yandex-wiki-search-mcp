@@ -215,7 +215,7 @@
       `POST /pages/{id}/clone` (отложенная операция, клиент поллит до success): копия с
       новым id, дети/комментарии/история остаются у оригинала, занятый slug — отказ
       (`SLUG_OCCUPIED`). Подробности и пробы — docs/api-notes.md «Страницы»
-- [ ] Стабилизация перед 1.0: ревизия «что ещё ломать» (после 1.0 breaking = major bump);
+- [x] Стабилизация перед 1.0: ревизия «что ещё ломать» (после 1.0 breaking = major bump);
       классификатор в pyproject `4 - Beta` → `5 - Production/Stable`; README-таблица сравнения
       (YFM «planned» → done, строка про page_clone)
 
@@ -287,3 +287,13 @@
   пустая строка), невозможность выбрать cloud-организацию per-request на сервере с обычным
   `WIKI_ORG_ID`, старт вообще без организации (падал на первом же запросе). 344 теста зелёные.
   Следующий шаг — v1.0.0: `page_move` + стабилизация.
+- 2026-08-09: v1.0.0 — стабильный релиз. PR #9: `page_move` оказался невозможен (API молча
+  игнорирует `slug` в апдейте, `/move` нет — свип поймал no-op четырьмя фейлами до релиза),
+  вместо него `page_clone` поверх реального `POST /pages/{id}/clone`; breaking-пакет перед
+  обещанием стабильности: `grid_move_row`/`grid_move_column` (единственное число),
+  `page_search.limit`, типизированный `grid_delete`, гейтинг `page_upload_attachment` под
+  OAuth, `openWorldHint=false` везде. PR #10: OAuth state hijack (ключ хранения теперь
+  серверный), цикл импортов `normalize_slug`, свип истёкших записей в in-memory store,
+  `extra="ignore"` + typo-детект в настройках, общий `select_org`. Следом: синк
+  manifest.json с дрифт-тестом, покрытие 100% (statements + branches) с гейтом в CI,
+  542 теста. Классификатор `5 - Production/Stable`; дальше breaking = major bump.

@@ -2,7 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.0.0] - 2026-08-09
+
+First stable release. The tool surface is now a compatibility promise: breaking
+changes from here on mean a major version bump, which is why this release
+bundles every planned rename and removal below.
 
 ### Added
 - `page_clone` tool — copy a page to a new slug via `POST /pages/{id}/clone`, the API's only relocation primitive. It is a deferred operation: the client polls the returned `status_url` to completion (~1s live) and returns the copy's id and slug instead of an operation handle. An operation that fails, outlives the polling deadline, or comes back without a pollable `status_url` raises the new `WikiOperationError` — every HTTP exchange succeeded there, so a `WikiApiError` reading "failed with status 200" would blame the one layer that worked. The tool description states plainly what live probes proved (2026-08-08, `docs/api-notes.md`): the copy gets a new page id, children/comments/attachments/history stay with the original, and an occupied target slug is refused with `SLUG_OCCUPIED`. A `page_move` tool was briefly on this branch, built on `POST /pages/{id}` with a `slug` field — the contract sweep then proved that call is a silent no-op (200, nothing moves; the documented update body has no `slug`, and no `/move` endpoint exists), so it never shipped. There is no move/rename in the public API; to relocate a page, clone and delete the original. The sweep exercises the clone cycle, including both refusal contracts
@@ -30,6 +34,7 @@ All notable changes to this project are documented in this file.
 - The `wiki-mcp://configuration` resource reported an organization no request ever carries. It derived `org_id` and `cloud_org_id` independently, so a request with `?cloudOrgId=` against a server defaulting to a plain `WIKI_ORG_ID` was answered with both at once — the very pair the settings validator forbids — while the call itself went out with only the cloud one. This is the 0.8.0 client fix that never reached the resource; both now share a single `select_org`, with a test asserting they agree
 - `page_search` silently returned nothing for `slug_prefix="/"` (or whitespace): the prefix normalized to an empty string that matched no slug, and the empty result looked like an empty wiki rather than a bad filter. Such a prefix is now rejected with a message pointing at omitting it instead
 - In-memory OAuth refresh tokens never expired. `get_refresh_token` checked `expires_at` all along, but the in-memory store never set it, so those tokens outlived their Redis counterparts by the whole process lifetime. Both stores now share one `REFRESH_TOKEN_TTL_SECONDS`
+- `manifest.json` advertised a tool list that had drifted from the registered surface: the retired plural names `grid_move_rows`/`grid_move_columns` were still listed and `page_clone` was missing. The list is synced, and a test now compares it against the actually registered tools so the MCPB listing cannot drift again
 - Under `WIKI_READ_ONLY=true` the server instructions still advertised every write capability — creating pages, mutating grids, YFM write guidance — while none of those tools were registered. Instructions are now built from the same settings that gate tool registration: a read-only server says so and lists only what it can actually do
 - The contract sweep could only ever run once per slug. A run interrupted between creating its root page and the cleanup step left the slug taken, and every later run died on `page_create` with `SLUG_OCCUPIED` — reported as a problem, so a weekly job would have gone red permanently after one bad night. It now clears its own leftovers and retries, but only when the slug holds a page this sweep created; anything else is someone's real page and it refuses with an explanation instead of deleting it
 - The sweep reported grid `409 CONFLICTING_OPERATION` as a contract problem. Grid mutations are serialized per grid, so firing them back to back hits a lock, not drift. Conflicts are now retried with a short backoff (documented in `docs/api-notes.md`)
