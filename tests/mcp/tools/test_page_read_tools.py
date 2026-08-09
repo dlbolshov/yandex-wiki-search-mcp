@@ -249,8 +249,8 @@ class TestPageReadTools:
         mock_wiki_protocol: AsyncMock,
         slug_prefix: str,
     ) -> None:
-        # These used to match nothing and hand back an empty result set with
-        # no hint that the filter, not the wiki, was the reason.
+        # These match no slug at all, and an empty result set gives no hint
+        # that the filter, rather than the wiki, is the reason.
         mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
             results=[SearchResultItem.model_construct(slug="tech-doc/ml", type="page")],
         )

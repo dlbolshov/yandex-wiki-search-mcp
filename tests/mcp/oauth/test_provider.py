@@ -151,11 +151,11 @@ async def test_a_second_authorization_cannot_hijack_the_first(
 ) -> None:
     """Reusing another client's `state` must not overwrite its pending record.
 
-    When the store was keyed by the client-supplied `state`, an attacker who
-    learned it could re-authorize under the same key with their own
-    redirect_uri and code_challenge. The victim's callback then minted a code
-    bound to the attacker and redirected the victim's browser there — PKCE
-    included, since the stored challenge was the attacker's too.
+    Were the store keyed by the client-supplied `state`, anyone who learned
+    it could authorize under the same key with their own redirect_uri and
+    code_challenge; the victim's callback would then mint a code bound to
+    the attacker and redirect the victim's browser there — PKCE included,
+    since the stored challenge would be the attacker's too.
     """
     victim_url = yarl.URL(await provider.authorize(client_info, make_params()))
     attacker = make_client(client_id="client-2")

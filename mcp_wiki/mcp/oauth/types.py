@@ -10,10 +10,10 @@ class YandexOAuthState(BaseModel):
     client_id: str
     resource: str | None = None  # RFC 8707 resource indicator
     # The client's own `state`, echoed back on the final redirect. Kept as
-    # data rather than used as the storage key: the key must be
-    # unguessable, and `state` is a CSRF nonce that travels in URLs, browser
-    # history and proxy logs (RFC 6749 §10.12) — not a secret. Defaults to
-    # None so records written by an older version still validate.
+    # data rather than used as the storage key: the key must be unguessable,
+    # and `state` is a CSRF nonce that travels in URLs, browser history and
+    # proxy logs (RFC 6749 §10.12), not a secret. Optional because a client
+    # need not send one.
     client_state: str | None = None
 
 

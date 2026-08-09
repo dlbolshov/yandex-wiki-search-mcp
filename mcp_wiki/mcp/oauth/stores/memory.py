@@ -76,10 +76,10 @@ class InMemoryOAuthStore(OAuthStore):
             del self._refresh_tokens[token_hash]
             self._refresh2access_tokens.pop(token_hash, None)
 
-        # Registrations expire on the secret the SDK stamped at /register and
-        # enforces on every client authentication; dropping them here just
+        # Registrations expire on the secret the SDK stamps at /register and
+        # enforces on every client authentication; dropping them here only
         # reclaims what is already dead. Without client_secret_expiry_seconds
-        # configured there is no expiry and they stay, as before.
+        # configured there is no expiry to act on and they stay.
         for client_id in [
             cid
             for cid, client in self._dynamic_clients.items()
@@ -196,9 +196,9 @@ class InMemoryOAuthStore(OAuthStore):
         if token.refresh_token is not None:
             refresh_token_hash = hash_token(token.refresh_token)
 
-            # expires_at matters: get_refresh_token already checks it, but
-            # without a value set here the check never fired and in-memory
-            # refresh tokens outlived the Redis ones by the process lifetime.
+            # get_refresh_token enforces this deadline and the sweep
+            # reclaims on it; without it an in-memory refresh token would
+            # live as long as the process.
             self._refresh_tokens[refresh_token_hash] = RefreshToken(
                 token=token.refresh_token,
                 client_id=client_id,

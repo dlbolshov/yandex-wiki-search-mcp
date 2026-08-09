@@ -153,7 +153,7 @@ class TestUnrelatedEnvFileKeys:
 
 
 class TestTypoDetection:
-    """What extra="forbid" used to give, in both channels rather than one."""
+    """A misspelled setting is caught in either channel, not just the file."""
 
     def test_typo_in_the_env_file_is_reported(self, env_dir: Path) -> None:
         write_env(env_dir, "WIKI_TOKEN=abc\nWIKI_ORG_ID=123\nWIKI_READ_ONL=true\n")
@@ -163,9 +163,9 @@ class TestTypoDetection:
     def test_typo_in_a_real_environment_variable_is_reported(
         self, env_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # This channel was never protected: pydantic-settings only reads the
-        # names it knows, so the misspelling vanished without a trace and the
-        # server ran with write tools registered.
+        # pydantic-settings reads only the names it knows, so nothing else
+        # notices a misspelling here — without this check the server would
+        # come up with write tools registered and say nothing.
         monkeypatch.setenv("WIKI_READ_ONL", "true")
 
         assert suspicious_env_keys() == {"wiki_read_onl": "wiki_read_only"}

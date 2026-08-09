@@ -165,10 +165,9 @@ class TestManifestSync:
         mcp_server: FastMCP[Any],
     ) -> None:
         # manifest.json is the MCPB bundle metadata: its tools list is what
-        # clients show before installing. Nothing generates it from the code,
-        # so renames and additions silently drift apart without this check —
-        # the v1.0.0 branch still listed grid_move_row under its old plural
-        # name and had no page_clone at all until this test caught it.
+        # clients show before installing. Nothing generates it from the
+        # code, so without this check a rename on one side or an addition on
+        # the other drifts apart in silence.
         manifest = load_manifest()
 
         manifest_names = [tool["name"] for tool in manifest["tools"]]

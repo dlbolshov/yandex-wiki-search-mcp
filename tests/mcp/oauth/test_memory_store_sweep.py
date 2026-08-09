@@ -1,9 +1,9 @@
 """The in-memory store reclaims what it declared expired.
 
-Redis expires records on its own; here nothing did. The store accepted a
-`ttl`, recorded the deadline, and then only ever acted on it when someone
-looked up that exact key — so an abandoned login (or a flood of them, since
-/authorize is unauthenticated) left records behind for the process lifetime.
+Redis expires records on its own; here they have to be swept. Acting on a
+deadline only when someone looks up that exact key is not enough: nobody
+ever looks up an abandoned login, and /authorize is unauthenticated, so
+those records are also the cheapest way to fill the store on purpose.
 """
 
 import pytest

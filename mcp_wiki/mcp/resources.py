@@ -28,9 +28,10 @@ def register_resources(settings: Settings, mcp: FastMCP[Any]) -> None:
     async def wiki_mcp_configuration() -> YandexWikiMCPConfigurationResponse:
         ctx = cast(Context[Any, AppContext, Request], mcp.get_context())
         # Same selection the client applies to the request headers, so the
-        # reported organization is the one calls actually go to. Deriving
-        # each id independently used to report both at once — a pair the
-        # settings validator forbids and no request ever carries.
+        # reported organization is the one calls actually go to. The pair
+        # moves as a unit: naming an org_id alongside a cloud_org_id would
+        # report a combination the settings validator forbids and no
+        # request ever carries.
         org_id, cloud_org_id = select_org(
             get_yandex_auth(ctx),
             default_org_id=settings.wiki_org_id,

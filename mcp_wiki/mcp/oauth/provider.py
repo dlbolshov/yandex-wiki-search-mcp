@@ -93,13 +93,12 @@ class YandexOAuthAuthorizationServerProvider(
     async def authorize(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
     ) -> str:
-        # Always server-generated, never the client's `state`. Using the
-        # client value as the store key let anyone who learned it start an
-        # authorization under the same key and overwrite the pending record:
-        # the victim's callback would then mint a code bound to the
-        # attacker's client_id, redirect_uri and code_challenge, and hand it
-        # to the attacker's redirect_uri. PKCE does not help there — the
-        # stored challenge is the attacker's too.
+        # Always server-generated, never the client's `state`. The key has
+        # to be unguessable: anyone able to predict it could authorize under
+        # the same key, overwrite the pending record, and collect the
+        # victim's code bound to their own client_id, redirect_uri and
+        # code_challenge. PKCE would not stand in the way — the stored
+        # challenge would be theirs as well.
         state_id = secrets.token_hex(16)
         redirect_uri = client.validate_redirect_uri(params.redirect_uri)
         scopes = None

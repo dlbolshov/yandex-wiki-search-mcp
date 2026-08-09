@@ -133,9 +133,8 @@ async def test_refresh_token_roundtrip(memory_store: InMemoryOAuthStore) -> None
 async def test_refresh_token_expires_like_the_redis_one(
     memory_store: InMemoryOAuthStore, clock: FakeClock
 ) -> None:
-    # get_refresh_token always checked expires_at, but nothing set it here,
-    # so in-memory refresh tokens outlived their Redis counterparts by the
-    # whole process lifetime.
+    # Both stores hand out refresh tokens with the same lifetime; without
+    # expires_at set here an in-memory one would live as long as the process.
     await memory_store.save_oauth_token(make_token(), "client-1", ["wiki:read"], None)
 
     refresh = await memory_store.get_refresh_token("ya-refresh-1")

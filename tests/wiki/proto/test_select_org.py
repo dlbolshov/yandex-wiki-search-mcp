@@ -1,9 +1,9 @@
 """The organization is chosen once, by one function, for everyone.
 
-Deriving `org_id` and `cloud_org_id` independently is the bug this guards
-against: a request carrying ?cloudOrgId= on a server whose default is a
-plain WIKI_ORG_ID would report — or send — both at once, a pair the settings
-validator forbids and no request ever actually carries.
+The two ids move as a unit. Derived independently, a request carrying
+?cloudOrgId= on a server whose default is a plain WIKI_ORG_ID would send —
+or report — both at once, a pair the settings validator forbids and no
+request ever actually carries.
 """
 
 import pytest

@@ -7,8 +7,8 @@ from starlette.requests import Request
 from mcp_wiki.wiki.custom.slugs import normalize_slug
 from mcp_wiki.wiki.proto.common import YandexAuth
 
-# normalize_slug now lives in the Wiki layer (the HTTP client needs it and
-# must not import from here); re-exported so existing callers keep working.
+# normalize_slug lives in the Wiki layer (the HTTP client needs it and must
+# not import from here); re-exported for callers that reach for it here.
 __all__ = ["get_yandex_auth", "normalize_slug", "resolve_page_locator"]
 
 

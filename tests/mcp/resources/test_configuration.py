@@ -33,8 +33,8 @@ async def read_configuration(auth: YandexAuth) -> dict[str, str | bool | None]:
 class TestReportedOrganization:
     """The resource must report the organization calls actually go to.
 
-    Deriving each id independently used to answer with both at once — the
-    server-wide org_id paired with the request's cloud_org_id, a combination
+    The pair moves as a unit. Derived independently, the answer would pair
+    the server-wide org_id with the request's cloud_org_id — a combination
     the settings validator forbids and no request ever carries.
     """
 

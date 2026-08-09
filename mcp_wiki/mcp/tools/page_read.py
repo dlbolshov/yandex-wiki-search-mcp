@@ -164,8 +164,9 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
         if slug_prefix is not None:
             prefix = normalize_slug(slug_prefix).lower()
             if not prefix:
-                # '/' and whitespace normalize to '', which used to match
-                # nothing and return an empty result set with no explanation.
+                # '/' and whitespace normalize to '', which matches no slug
+                # at all — an empty result reads as an empty wiki rather
+                # than as a filter that threw everything away.
                 raise ValueError(
                     "slug_prefix must not be empty. Omit it to search the whole Wiki."
                 )

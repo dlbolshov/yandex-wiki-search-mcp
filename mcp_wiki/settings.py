@@ -22,13 +22,12 @@ TYPO_SIMILARITY = 0.8
 
 
 class Settings(BaseSettings):
-    # extra="ignore", not the pydantic-settings default of "forbid": the
-    # env file is a directory-level convention shared with every other tool,
-    # not this server's private config, so an unrelated key there must not
-    # stop the server from starting. Typo protection does not come from
-    # strictness here anyway — it only ever applied to the file, while the
-    # same typo passed as a real environment variable was silently dropped.
-    # suspicious_env_keys() restores it for both channels.
+    # extra="ignore", not the pydantic-settings default of "forbid": the env
+    # file is a directory-level convention shared with every other tool, not
+    # this server's private config, so an unrelated key there must not stop
+    # the server from starting. Misspelled settings are caught by
+    # suspicious_env_keys(), which covers environment variables as well —
+    # strictness here reaches only the file.
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
@@ -64,7 +63,7 @@ class Settings(BaseSettings):
     # registrations that never expire accumulate without bound — in Redis as
     # well as in memory. The SDK stamps this on the record at /register and
     # rejects an expired client, and both stores drop what it marks dead.
-    # None disables the expiry (registrations then live forever, as before).
+    # None disables the expiry, and registrations then live indefinitely.
     oauth_client_secret_expiry_seconds: int | None = Field(
         default=30 * 24 * 60 * 60, ge=1
     )
@@ -144,9 +143,8 @@ def suspicious_env_keys() -> dict[str, str]:
 
     Only keys inside this server's namespaces are considered, and only those
     close enough to a real field to be a slip rather than an unrelated
-    variable. That keeps the protection `extra="forbid"` used to give for
-    the env file — and extends it to environment variables, where it never
-    worked — without failing on a REDIS_URL that belongs to something else.
+    variable — so a misspelled setting is caught in either channel while a
+    REDIS_URL belonging to something else passes untouched.
     """
     known = set(Settings.model_fields)
     candidates = sorted(

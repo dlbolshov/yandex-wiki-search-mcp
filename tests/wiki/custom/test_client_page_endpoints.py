@@ -1,9 +1,10 @@
-"""HTTP-level contract for the page endpoints that only the live sweep covered.
+"""HTTP-level contract for the page endpoints.
 
-The tool-layer tests for these run against a mocked WikiProtocol, so until
-now nothing offline asserted the URL, the query parameters or the request
-body — a typo in a path would have passed the whole suite and surfaced only
-in the weekly (opt-in) contract sweep.
+The tool-layer tests for these run against a mocked WikiProtocol, which
+asserts nothing about the URL, the query parameters or the request body.
+Without the checks here a typo in a path passes the whole suite and shows
+up only in the weekly contract sweep, which is opt-in and does not run on
+forks.
 """
 
 import re

@@ -92,10 +92,10 @@ class RedisOAuthStore(OAuthStore):
         """Save a client to Redis, expiring with its secret.
 
         `/register` is unauthenticated by protocol design, so without a TTL
-        every registration ever made stays in Redis forever. The lifetime is
-        the one the SDK already stamped on the record and enforces on every
-        client authentication — no TTL when the server did not configure
-        `client_secret_expiry_seconds`, which is the previous behavior.
+        every registration ever made would stay in Redis indefinitely. The
+        lifetime is the one the SDK stamps on the record and enforces on
+        every client authentication; with no `client_secret_expiry_seconds`
+        configured there is no expiry, and so no TTL.
         """
         if client.client_id is None:
             raise ValueError("client_id must be provided")

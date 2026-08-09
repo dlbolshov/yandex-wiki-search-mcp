@@ -2,9 +2,8 @@
 
 The suite cannot catch this in-process: by the time any test runs, conftest
 has already imported the package in an order that happens to work. A cycle
-only shows up when a module is the *first* thing imported, which is exactly
-what a library consumer does — `mcp_wiki.mcp.utils` used to raise ImportError
-there, because the HTTP client reached back into it for normalize_slug.
+shows up only when a module is the *first* thing imported, which is exactly
+what a library consumer does, so each one is imported in its own process.
 """
 
 import subprocess  # noqa: S404
