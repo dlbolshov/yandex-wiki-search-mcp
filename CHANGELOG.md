@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.1.0] - 2026-08-09
 
 ### Added
 - `LOG_LEVEL=DEBUG` now logs every inbound MCP message with the time spent serving it (`tools/call page_get (52 ms)`). The Wiki client already logs its own HTTP calls with durations, so the two subtract: a slow tool call is now attributable to the Wiki API or to us without attaching a profiler. Nothing is emitted at the default `INFO`
@@ -10,7 +10,7 @@ All notable changes to this project are documented in this file.
 - Cache hints (SEP-2549) on `tools/list` and `resources/list`, whose contents are fixed for the lifetime of the process: a 5-minute TTL saves re-sending 27 tool schemas on every connection. Deliberately **not** on `resources/read` — clients cache it per URI, while `wiki-mcp://configuration` varies with the `?orgId=`/`?cloudOrgId=` on the endpoint, so a hint there would report one tenant's organization to the next. Hints travel only on protocol `2026-07-28`; every earlier revision sees exactly the traffic it saw before
 
 ### Changed
-- Migrated to MCP Python SDK v2 (`mcp[cli]>=2,<3`). **Nothing changes for clients**: one v2 server answers every protocol revision back to `2024-11-05` alongside the modern `2026-07-28`, the 27 tools and their schemas are identical, and `wiki-mcp://configuration` keeps its URI and its place in `resources/list`. Reinstalling is not required — `uvx` and the Docker tags pick the new version up on their own. If you need the old SDK in a shared environment, `pip install "yandex-wiki-search-mcp<2"` still resolves to the 1.x line, which stays on PyPI
+- Migrated to MCP Python SDK v2 (`mcp[cli]>=2,<3`). **Nothing changes for clients**: one v2 server answers every protocol revision back to `2024-11-05` alongside the modern `2026-07-28`, the 27 tools and their schemas are identical, and `wiki-mcp://configuration` keeps its URI and its place in `resources/list`. Reinstalling is not required — `uvx` and the Docker tags pick the new version up on their own. If you need the old SDK in a shared environment, pin `pip install "yandex-wiki-search-mcp<1.1"` — `1.0.1` is the last release built on the 1.x SDK and stays on PyPI. Note that `<2` is not that pin: it matches this release too
 - The upper bound is now `<3` rather than `<2`. Within 2.x the range stays open on purpose: `uv.lock` is what pins the Docker image, and freezing an exact version in `pyproject.toml` would only strand `uvx`/`pip` users on it
 - Dependency footprint moved with the SDK: `httpx`/`httpx-sse` are replaced by `httpx2`, `sse-starlette` jumps to `>=3`, and `opentelemetry-api` and `mcp-types` are new. `httpx2` verifies TLS against the operating system trust store rather than certifi's bundle — irrelevant here, since this server talks to the Wiki API over `aiohttp`, but worth knowing if you build a minimal image with no system CA store
 
