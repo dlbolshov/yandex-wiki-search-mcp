@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- `LOG_LEVEL=DEBUG` now logs every inbound MCP message with the time spent serving it (`tools/call page_get (52 ms)`). The Wiki client already logs its own HTTP calls with durations, so the two subtract: a slow tool call is now attributable to the Wiki API or to us without attaching a profiler. Nothing is emitted at the default `INFO`
 - The server now reports a one-line `description` — a short summary for a client's server list, distinct from the long-form `instructions` addressed to the model. Reaches clients on every protocol revision, and is read from package metadata so it cannot drift from `pyproject.toml`
 - Cache hints (SEP-2549) on `tools/list` and `resources/list`, whose contents are fixed for the lifetime of the process: a 5-minute TTL saves re-sending 27 tool schemas on every connection. Deliberately **not** on `resources/read` — clients cache it per URI, while `wiki-mcp://configuration` varies with the `?orgId=`/`?cloudOrgId=` on the endpoint, so a hint there would report one tenant's organization to the next. Hints travel only on protocol `2026-07-28`; every earlier revision sees exactly the traffic it saw before
 
@@ -14,6 +15,7 @@ All notable changes to this project are documented in this file.
 - Dependency footprint moved with the SDK: `httpx`/`httpx-sse` are replaced by `httpx2`, `sse-starlette` jumps to `>=3`, and `opentelemetry-api` and `mcp-types` are new. `httpx2` verifies TLS against the operating system trust store rather than certifi's bundle — irrelevant here, since this server talks to the Wiki API over `aiohttp`, but worth knowing if you build a minimal image with no system CA store
 
 ### Fixed
+- The documented Docker commands now cap container logs (`--log-opt max-size=10m --log-opt max-file=3`, and the equivalent `logging:` block in Compose). The server writes no log files of its own, but Docker's default `json-file` driver stores stderr without a size limit, so a long-running container grew `/var/lib/docker/containers` until the disk ran out
 - `HOST` is now passed to `run()` and `streamable_http_app()`, where mcp 2.x expects it. It was a constructor argument in 1.x; left out, the SDK defaults to `127.0.0.1` and arms DNS rebinding protection, which answers every MCP request behind a real hostname with `421 Misdirected Request` while `/healthz` keeps returning `200` — up to every probe, down to every client. Two tests pin both halves
 
 ### Internal

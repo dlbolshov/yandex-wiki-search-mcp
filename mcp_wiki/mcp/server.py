@@ -15,6 +15,7 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
 from mcp_wiki.mcp.context import AppContext
+from mcp_wiki.mcp.middleware import log_inbound_middleware
 from mcp_wiki.mcp.oauth.provider import YandexOAuthAuthorizationServerProvider
 from mcp_wiki.mcp.oauth.store import OAuthStore
 from mcp_wiki.mcp.oauth.stores.memory import InMemoryOAuthStore
@@ -266,7 +267,9 @@ def create_mcp_server(
         auth_server_provider=auth_server_provider,
         auth=auth_settings,
         tool_result_text=settings.tool_result_text,
-        middleware=[stash_request_middleware],
+        # Order matters only in that the logger wraps the stash, so its
+        # timing covers the whole chain rather than part of it.
+        middleware=[log_inbound_middleware, stash_request_middleware],
     )
 
     # custom_route() returns a decorator, so it is applied by call here: the

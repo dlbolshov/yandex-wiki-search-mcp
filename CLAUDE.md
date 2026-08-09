@@ -57,6 +57,10 @@ task test
   Also `run_options()` / `http_app_options()`, which assemble the transport keywords `run()` and `streamable_http_app()` take — these are no longer constructor arguments.
   **Always pass `host`**: the SDK defaults it to `127.0.0.1` and auto-arms DNS rebinding protection on loopback, so an app built without it answers every MCP request behind a real hostname with `421` while `/healthz` still returns `200`.
 
+- `mcp_wiki/mcp/middleware.py`
+  DEBUG log of every inbound message with the time spent serving it, so it subtracts against the Wiki client's own per-request timings.
+  Silent at the default `LOG_LEVEL=INFO`; a per-request line at INFO would stall a stdio server whose client does not drain stderr.
+
 - `mcp_wiki/mcp/request_ctx.py`
   Contextvar holding the transport request of the message being handled, published by a `Server.middleware` entry.
   Exists because the SDK injects no `Context` into a static-URI resource, which `wiki-mcp://configuration` is.
