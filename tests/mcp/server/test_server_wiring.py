@@ -78,7 +78,9 @@ class TestWikiLifespan:
     def test_the_server_builds_its_own_lifespan_when_given_none(self) -> None:
         server = create_mcp_server(settings=create_test_settings())
 
-        assert server._mcp_server.lifespan is not None
+        # `settings` is the public home of the lifespan in mcp 2.x; the
+        # private `_mcp_server` this used to read became `_lowlevel_server`.
+        assert server.settings.lifespan is not None
 
 
 class TestOAuthStoreSelection:

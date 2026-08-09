@@ -6,8 +6,8 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp.client.session import ClientSession
-from mcp.server import FastMCP
+from mcp import Client
+from mcp.server import MCPServer
 from pydantic import AnyHttpUrl, SecretStr
 from starlette.testclient import TestClient
 
@@ -15,9 +15,16 @@ from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.server import (
     _parse_encryption_keys,
     create_mcp_server,
+    http_app_options,
+    run_options,
     server_version,
 )
-from tests.mcp.conftest import create_test_settings, make_test_lifespan
+from tests.mcp.conftest import (
+    MCP_HTTP_HEADERS,
+    create_test_settings,
+    initialize_request,
+    make_test_lifespan,
+)
 
 READ_ONLY_TOOL_NAMES = [
     "page_search",
@@ -65,10 +72,10 @@ class TestToolRegistration:
     @pytest.mark.parametrize("tool_name", EXPECTED_TOOL_NAMES)
     async def test_tool_is_registered(
         self,
-        client_session: ClientSession,
+        client: Client,
         tool_name: str,
     ) -> None:
-        result = await client_session.list_tools()
+        result = await client.list_tools()
         tool_names = [tool.name for tool in result.tools]
         assert tool_name in tool_names
 
@@ -77,20 +84,20 @@ class TestReadOnlyModeToolRegistration:
     @pytest.mark.parametrize("tool_name", READ_ONLY_TOOL_NAMES)
     async def test_read_only_tools_are_registered(
         self,
-        client_session_read_only: ClientSession,
+        client_read_only: Client,
         tool_name: str,
     ) -> None:
-        result = await client_session_read_only.list_tools()
+        result = await client_read_only.list_tools()
         tool_names = [tool.name for tool in result.tools]
         assert tool_name in tool_names
 
     @pytest.mark.parametrize("tool_name", NON_READ_TOOL_NAMES)
     async def test_non_read_tools_are_not_registered(
         self,
-        client_session_read_only: ClientSession,
+        client_read_only: Client,
         tool_name: str,
     ) -> None:
-        result = await client_session_read_only.list_tools()
+        result = await client_read_only.list_tools()
         tool_names = [tool.name for tool in result.tools]
         assert tool_name not in tool_names
 
@@ -114,14 +121,14 @@ class TestReadOnlyModeToolRegistration:
 class TestToolAnnotations:
     async def test_every_tool_declares_a_closed_world(
         self,
-        client_session: ClientSession,
+        client: Client,
     ) -> None:
-        # openWorldHint left unset defaults to true; every tool here talks
+        # open_world_hint left unset defaults to true; every tool here talks
         # to one configured Wiki organization, so all must say otherwise.
-        result = await client_session.list_tools()
+        result = await client.list_tools()
         for tool in result.tools:
             assert tool.annotations is not None, tool.name
-            assert tool.annotations.openWorldHint is False, tool.name
+            assert tool.annotations.open_world_hint is False, tool.name
 
 
 class TestOAuthUploadGating:
@@ -162,7 +169,7 @@ class TestOAuthUploadGating:
 class TestManifestSync:
     async def test_manifest_tools_match_the_registered_surface(
         self,
-        mcp_server: FastMCP[Any],
+        mcp_server: MCPServer[Any],
     ) -> None:
         # manifest.json is the MCPB bundle metadata: its tools list is what
         # clients show before installing. Nothing generates it from the
@@ -184,40 +191,47 @@ class TestManifestSync:
 class TestResourceRegistration:
     async def test_configuration_resource_is_registered(
         self,
-        client_session: ClientSession,
+        client: Client,
     ) -> None:
-        result = await client_session.list_resources()
+        result = await client.list_resources()
         resource_uris = [str(resource.uri) for resource in result.resources]
         assert "wiki-mcp://configuration" in resource_uris
 
 
 class TestServerConfiguration:
+    """Identity as the client sees it.
+
+    mcp 2.x has no separate `initialize()` step on the high-level Client —
+    connecting negotiates the era and the metadata is on the object.
+    `server_info` is Implementation | None because 2026-era identity is
+    optional wire metadata, so each of these asserts it is actually sent.
+    """
+
     async def test_server_has_correct_name(
         self,
-        client_session: ClientSession,
+        client: Client,
     ) -> None:
-        result = await client_session.initialize()
-        assert result.serverInfo.name == "Yandex Wiki Search MCP"
+        assert client.server_info is not None
+        assert client.server_info.name == "Yandex Wiki Search MCP"
 
     async def test_server_has_instructions(
         self,
-        client_session: ClientSession,
+        client: Client,
     ) -> None:
-        result = await client_session.initialize()
-        assert result.instructions
+        assert client.instructions
 
-    async def test_initialize_reports_package_version(
+    async def test_server_info_reports_package_version(
         self,
-        client_session: ClientSession,
+        client: Client,
     ) -> None:
-        result = await client_session.initialize()
         expected = importlib.metadata.version("yandex-wiki-search-mcp")
-        assert result.serverInfo.version == expected
+        assert client.server_info is not None
+        assert client.server_info.version == expected
 
 
 class TestHealthz:
-    def test_healthz_returns_200(self, mcp_server: FastMCP[Any]) -> None:
-        app = mcp_server.streamable_http_app()
+    def test_healthz_returns_200(self, mcp_server: MCPServer[Any]) -> None:
+        app = mcp_server.streamable_http_app(**http_app_options(create_test_settings()))
         with TestClient(app) as client:
             response = client.get("/healthz")
         assert response.status_code == 200
@@ -301,7 +315,7 @@ class TestOAuthCallbackRoute:
             lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
         )
 
-        app = server.streamable_http_app()
+        app = server.streamable_http_app(**http_app_options(settings))
         with TestClient(app) as client:
             healthz = client.get("/healthz")
             callback = client.get("/oauth/yandex/callback?code=x&state=missing")
@@ -313,6 +327,8 @@ class TestOAuthCallbackRoute:
 class TestHttpTransportSettings:
     @pytest.mark.parametrize("flag", [True, False])
     def test_stateless_http_and_json_response_follow_settings(self, flag: bool) -> None:
+        # mcp 2.x moved these off the constructor, so `mcp.settings` no longer
+        # carries them; they land on the session manager the app is built with.
         settings = create_test_settings()
         settings.stateless_http = flag
         settings.json_response = flag
@@ -321,6 +337,80 @@ class TestHttpTransportSettings:
             settings=settings,
             lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
         )
+        server.streamable_http_app(**http_app_options(settings))
 
-        assert server.settings.stateless_http is flag
-        assert server.settings.json_response is flag
+        assert server.session_manager.stateless is flag
+        assert server.session_manager.json_response is flag
+
+
+class TestRunOptions:
+    """run() is overloaded per transport and rejects foreign keywords."""
+
+    def test_stdio_takes_none(self) -> None:
+        settings = create_test_settings()
+        settings.transport = "stdio"
+
+        assert run_options(settings) == {}
+
+    def test_sse_takes_the_binding_only(self) -> None:
+        # json_response/stateless_http are streamable-http concepts; passing
+        # them to the SSE transport is a TypeError when it starts.
+        settings = create_test_settings()
+        settings.transport = "sse"
+
+        assert run_options(settings) == {"host": "0.0.0.0", "port": 8000}
+
+    def test_streamable_http_takes_the_binding_and_the_behaviour(self) -> None:
+        settings = create_test_settings()
+        settings.transport = "streamable-http"
+
+        assert run_options(settings) == {
+            "host": "0.0.0.0",
+            "port": 8000,
+            "json_response": True,
+            "stateless_http": True,
+        }
+
+
+class TestHostIsPassedToTheApp:
+    """The 421 trap.
+
+    mcp 2.x auto-arms DNS rebinding protection when `host` is a loopback
+    address and no transport_security is given — and streamable_http_app()
+    defaults `host` to 127.0.0.1. A server built without the setting's host
+    therefore rejects every MCP request behind a real hostname with 421 while
+    /healthz keeps answering 200, so nothing that watches the health endpoint
+    would notice. These two tests pin both halves.
+    """
+
+    @staticmethod
+    def _server() -> MCPServer[Any]:
+        return create_mcp_server(
+            settings=create_test_settings(),
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+    def test_configured_host_serves_a_foreign_host_header(self) -> None:
+        # TestClient sends `Host: testserver`, which the loopback allowlist
+        # rejects — exactly what a real hostname runs into.
+        settings = create_test_settings()
+        assert settings.host == "0.0.0.0"
+
+        app = self._server().streamable_http_app(**http_app_options(settings))
+        with TestClient(app) as client:
+            response = client.post(
+                "/mcp", json=initialize_request(), headers=MCP_HTTP_HEADERS
+            )
+
+        assert response.status_code == 200
+
+    def test_omitting_the_host_would_reject_it(self) -> None:
+        # Not a wish, a guard: this is what the deployment does if
+        # http_app_options() ever stops carrying `host`.
+        app = self._server().streamable_http_app()
+        with TestClient(app) as client:
+            response = client.post(
+                "/mcp", json=initialize_request(), headers=MCP_HTTP_HEADERS
+            )
+
+        assert response.status_code == 421

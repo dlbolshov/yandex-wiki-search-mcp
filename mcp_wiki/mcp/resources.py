@@ -1,11 +1,8 @@
-from typing import Any, cast
+from typing import Any
 
-from mcp.server import FastMCP
-from mcp.server.fastmcp import Context
+from mcp.server import MCPServer
 from pydantic import BaseModel
-from starlette.requests import Request
 
-from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.utils import get_yandex_auth
 from mcp_wiki.settings import Settings
 from mcp_wiki.wiki.proto.common import select_org
@@ -20,20 +17,24 @@ class YandexWikiMCPConfigurationResponse(BaseModel):
     oauth_enabled: bool
 
 
-def register_resources(settings: Settings, mcp: FastMCP[Any]) -> None:
+def register_resources(settings: Settings, mcp: MCPServer[Any]) -> None:
     @mcp.resource(
         "wiki-mcp://configuration",
         description="Retrieve configured Yandex Wiki MCP configuration.",
     )
     async def wiki_mcp_configuration() -> YandexWikiMCPConfigurationResponse:
-        ctx = cast(Context[Any, AppContext, Request], mcp.get_context())
+        # No `ctx` parameter: the SDK refuses to inject a Context into a
+        # static-URI resource, and get_context() is gone in mcp 2.x. The
+        # per-request organization comes from the middleware-stashed request
+        # instead — see mcp_wiki.mcp.request_ctx.
+        #
         # Same selection the client applies to the request headers, so the
         # reported organization is the one calls actually go to. The pair
         # moves as a unit: naming an org_id alongside a cloud_org_id would
         # report a combination the settings validator forbids and no
         # request ever carries.
         org_id, cloud_org_id = select_org(
-            get_yandex_auth(ctx),
+            get_yandex_auth(),
             default_org_id=settings.wiki_org_id,
             default_cloud_org_id=settings.wiki_cloud_org_id,
         )

@@ -6,9 +6,10 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 
 import yarl
-from mcp.server import FastMCP
+from mcp.server import MCPServer
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
-from mcp.types import TextContent
+from mcp.server.mcpserver import Context
+from mcp.types import CallToolResult, TextContent
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
@@ -18,12 +19,13 @@ from mcp_wiki.mcp.oauth.store import OAuthStore
 from mcp_wiki.mcp.oauth.stores.memory import InMemoryOAuthStore
 from mcp_wiki.mcp.oauth.stores.redis import RedisOAuthStore
 from mcp_wiki.mcp.params import build_instructions
+from mcp_wiki.mcp.request_ctx import stash_request_middleware
 from mcp_wiki.mcp.resources import register_resources
 from mcp_wiki.mcp.tools import register_all_tools
 from mcp_wiki.settings import Settings, ToolResultText
 from mcp_wiki.wiki.custom.client import WikiClient
 
-Lifespan = Callable[[FastMCP[Any]], AbstractAsyncContextManager[AppContext]]
+Lifespan = Callable[[MCPServer[Any]], AbstractAsyncContextManager[AppContext]]
 
 
 def server_version() -> str:
@@ -37,11 +39,11 @@ async def healthz(_request: Request) -> PlainTextResponse:
     return PlainTextResponse("ok")
 
 
-class WikiFastMCP(FastMCP):
-    """FastMCP with a configurable text duplicate of structured tool results.
+class WikiMCPServer(MCPServer[Any]):
+    """MCPServer with a configurable text duplicate of structured tool results.
 
-    The MCP spec recommends (SHOULD) mirroring structuredContent as a text
-    block for backwards compatibility; FastMCP renders it with indent=2.
+    The MCP spec recommends (SHOULD) mirroring structured_content as a text
+    block for backwards compatibility; the SDK renders it with indent=2.
     `tool_result_text` keeps that default ("pretty"), shrinks it to one line
     ("compact"), or omits the duplicate entirely ("none") — structured
     content and its schema validation are untouched.
@@ -56,22 +58,32 @@ class WikiFastMCP(FastMCP):
         super().__init__(*args, **kwargs)
         self._tool_result_text = tool_result_text
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        result = await super().call_tool(name, arguments)
-        if self._tool_result_text == "pretty" or not (
-            isinstance(result, tuple) and len(result) == 2
-        ):
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Context[Any, Any] | None = None,
+    ) -> Any:
+        result = await super().call_tool(name, arguments, context)
+        if self._tool_result_text == "pretty" or not isinstance(result, CallToolResult):
             return result
-        unstructured, structured = result
+        # Nothing to duplicate, so nothing to trim: an error result or a tool
+        # with no output schema carries text that is the payload itself.
+        if result.structured_content is None:
+            return result
         # Only the JSON duplicate is ours to drop or shrink. A tool that
         # returns real content blocks — an image, a downloaded attachment —
         # must keep them, so leave anything non-textual alone.
-        if not all(isinstance(block, TextContent) for block in unstructured):
+        if not all(isinstance(block, TextContent) for block in result.content):
             return result
         if self._tool_result_text == "none":
-            return [], structured
-        compact_text = json.dumps(structured, ensure_ascii=False, separators=(",", ":"))
-        return [TextContent(type="text", text=compact_text)], structured
+            return result.model_copy(update={"content": []})
+        compact_text = json.dumps(
+            result.structured_content, ensure_ascii=False, separators=(",", ":")
+        )
+        return result.model_copy(
+            update={"content": [TextContent(type="text", text=compact_text)]}
+        )
 
 
 def _parse_encryption_keys(keys_str: str | None) -> list[bytes] | None:
@@ -97,7 +109,7 @@ def _parse_encryption_keys(keys_str: str | None) -> list[bytes] | None:
 
 def make_wiki_lifespan(settings: Settings) -> Lifespan:
     @asynccontextmanager
-    async def wiki_lifespan(_server: FastMCP[Any]) -> AsyncIterator[AppContext]:
+    async def wiki_lifespan(_server: MCPServer[Any]) -> AsyncIterator[AppContext]:
         wiki = WikiClient(
             base_url=settings.wiki_api_base_url,
             token=settings.wiki_token.get_secret_value()
@@ -123,7 +135,7 @@ def make_wiki_lifespan(settings: Settings) -> Lifespan:
 def create_mcp_server(
     settings: Settings,
     lifespan: Lifespan | None = None,
-) -> FastMCP[Any]:
+) -> MCPServer[Any]:
     if lifespan is None:
         lifespan = make_wiki_lifespan(settings)
 
@@ -200,23 +212,23 @@ def create_mcp_server(
             ),
         )
 
-    server = WikiFastMCP(
+    # Transport settings (host, port, stateless_http, json_response) are no
+    # longer constructor arguments in mcp 2.x — they belong to run() and
+    # streamable_http_app(), which build_http_app()/__main__ pass them to.
+    server = WikiMCPServer(
         name="Yandex Wiki Search MCP",
         instructions=build_instructions(
             include_local_uploads=settings.include_local_uploads,
             read_only=settings.wiki_read_only,
         ),
-        host=settings.host,
-        port=settings.port,
+        version=server_version(),
         log_level=settings.log_level,
         lifespan=lifespan,
         auth_server_provider=auth_server_provider,
-        stateless_http=settings.stateless_http,
-        json_response=settings.json_response,
         auth=auth_settings,
         tool_result_text=settings.tool_result_text,
+        middleware=[stash_request_middleware],
     )
-    server._mcp_server.version = server_version()
 
     # custom_route() returns a decorator, so it is applied by call here: the
     # server does not exist at import time, and the OAuth callback is a bound
@@ -233,3 +245,36 @@ def create_mcp_server(
     register_resources(settings, server)
     register_all_tools(settings, server)
     return server
+
+
+def http_app_options(settings: Settings) -> dict[str, Any]:
+    """Keywords for streamable_http_app().
+
+    `host` is load-bearing rather than decorative. mcp 2.x arms DNS rebinding
+    protection automatically when host is 127.0.0.1/localhost/::1 and no
+    transport_security is given — and streamable_http_app() *defaults* host to
+    127.0.0.1. Leave it out and a server behind a real hostname answers every
+    MCP request with 421 Misdirected Request while /healthz keeps returning
+    200, which reads as "up" to every probe that matters.
+    """
+    return {
+        "host": settings.host,
+        "json_response": settings.json_response,
+        "stateless_http": settings.stateless_http,
+    }
+
+
+def run_options(settings: Settings) -> dict[str, Any]:
+    """Keywords for run(transport=settings.transport).
+
+    run() is overloaded per transport and rejects keywords the chosen one does
+    not take: stdio accepts none, and only streamable-http knows about
+    json_response/stateless_http.
+    """
+    match settings.transport:
+        case "stdio":
+            return {}
+        case "sse":
+            return {"host": settings.host, "port": settings.port}
+        case _:
+            return {"port": settings.port, **http_app_options(settings)}

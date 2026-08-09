@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 import pytest
@@ -214,10 +214,13 @@ async def test_load_refresh_token_reads_the_store(
 
 
 class TestClientWithoutAnId:
-    """`client_id` is optional on the SDK model, so every path checks it.
+    """Every path that stores by `client_id` checks it is there.
 
-    A client that reached the store without one would key its tokens under
-    `None` and be unrecoverable.
+    mcp 2.x made the field required on `OAuthClientInformationFull`, so the
+    type system now forbids what these tests build with `model_construct`.
+    The checks stay: validation is bypassable, and a client that reached the
+    store without an id would key its tokens under `None` and be
+    unrecoverable.
     """
 
     @staticmethod
@@ -225,7 +228,7 @@ class TestClientWithoutAnId:
         # Valid in every respect the earlier checks look at, so the failure
         # is the missing id and nothing else.
         return OAuthClientInformationFull.model_construct(
-            client_id=None,
+            client_id=cast(str, None),
             redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)],
             scope="wiki:read wiki:write",
         )

@@ -1,9 +1,8 @@
 import json
 from unittest.mock import AsyncMock, patch
 
-from mcp.client.session import ClientSession
+from mcp import Client
 from mcp.types import TextResourceContents
-from pydantic import AnyUrl
 
 from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.server import create_mcp_server
@@ -11,7 +10,7 @@ from mcp_wiki.wiki.proto.common import YandexAuth
 from tests.mcp.conftest import (
     create_test_settings,
     make_test_lifespan,
-    safe_client_session,
+    safe_client,
 )
 
 
@@ -22,8 +21,8 @@ async def read_configuration(auth: YandexAuth) -> dict[str, str | bool | None]:
         lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
     )
     with patch("mcp_wiki.mcp.resources.get_yandex_auth", return_value=auth):
-        async with safe_client_session(server) as session:
-            result = await session.read_resource(AnyUrl("wiki-mcp://configuration"))
+        async with safe_client(server) as session:
+            result = await session.read_resource("wiki-mcp://configuration")
 
     content = result.contents[0]
     assert isinstance(content, TextResourceContents)
@@ -62,9 +61,9 @@ class TestReportedOrganization:
 class TestConfigurationResource:
     async def test_read_returns_configuration(
         self,
-        client_session: ClientSession,
+        client: Client,
     ) -> None:
-        result = await client_session.read_resource(AnyUrl("wiki-mcp://configuration"))
+        result = await client.read_resource("wiki-mcp://configuration")
 
         assert len(result.contents) > 0
         content = result.contents[0]
@@ -73,9 +72,9 @@ class TestConfigurationResource:
 
     async def test_contains_expected_fields(
         self,
-        client_session: ClientSession,
+        client: Client,
     ) -> None:
-        result = await client_session.read_resource(AnyUrl("wiki-mcp://configuration"))
+        result = await client.read_resource("wiki-mcp://configuration")
 
         content = result.contents[0]
         assert isinstance(content, TextResourceContents)

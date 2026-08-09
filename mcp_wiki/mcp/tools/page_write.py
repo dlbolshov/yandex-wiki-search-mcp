@@ -1,6 +1,6 @@
 from typing import Annotated, Any
 
-from mcp.server import FastMCP
+from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
@@ -46,17 +46,17 @@ from mcp_wiki.wiki.proto.types.pages import (
 )
 from mcp_wiki.yfm import MAX_WARNINGS, validate_yfm
 
-# openWorldHint=False on all of these: the tools talk to exactly one
+# open_world_hint=False on all of these: the tools talk to exactly one
 # configured Wiki organization — a closed domain. Left unset it defaults
 # to true.
-ADDITIVE = ToolAnnotations(destructiveHint=False, openWorldHint=False)
+ADDITIVE = ToolAnnotations(destructive_hint=False, open_world_hint=False)
 ADDITIVE_IDEMPOTENT = ToolAnnotations(
-    destructiveHint=False, idempotentHint=True, openWorldHint=False
+    destructive_hint=False, idempotent_hint=True, open_world_hint=False
 )
-DESTRUCTIVE = ToolAnnotations(destructiveHint=True, openWorldHint=False)
-# destructiveHint deliberately unset (defaults to true): these overwrite
+DESTRUCTIVE = ToolAnnotations(destructive_hint=True, open_world_hint=False)
+# destructive_hint deliberately unset (defaults to true): these overwrite
 # existing state, retrying them is safe but running them is not additive.
-IDEMPOTENT = ToolAnnotations(idempotentHint=True, openWorldHint=False)
+IDEMPOTENT = ToolAnnotations(idempotent_hint=True, open_world_hint=False)
 
 YFM_CONTENT_NOTE = (
     "Content is Markdown (YFM): plain Markdown renders as-is, but GitHub-specific "
@@ -136,7 +136,7 @@ def _validate_column_slugs(column_slugs: list[str]) -> list[str]:
 
 
 def register_page_write_tools(
-    mcp: FastMCP[Any],
+    mcp: MCPServer[Any],
     *,
     include_local_uploads: bool = True,
 ) -> None:

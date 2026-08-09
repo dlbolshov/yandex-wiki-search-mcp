@@ -11,7 +11,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from mcp.client.session import ClientSession
+from mcp import Client
 
 from mcp_wiki.wiki.proto.types.pages import (
     DeletePageResponse,
@@ -24,13 +24,13 @@ from tests.mcp.conftest import get_tool_result_content, get_tool_result_text
 
 class TestPageAddComment:
     async def test_by_page_id(
-        self, client_session: ClientSession, mock_wiki_protocol: AsyncMock
+        self, client: Client, mock_wiki_protocol: AsyncMock
     ) -> None:
         mock_wiki_protocol.page_add_comment.return_value = PageComment.model_construct(
             id=7, body="looks good"
         )
 
-        result = await client_session.call_tool(
+        result = await client.call_tool(
             "page_add_comment", {"page_id": 42, "body": "looks good"}
         )
 
@@ -42,7 +42,7 @@ class TestPageAddComment:
         assert "auth" in call.kwargs
 
     async def test_by_slug_resolves_the_page_first(
-        self, client_session: ClientSession, mock_wiki_protocol: AsyncMock
+        self, client: Client, mock_wiki_protocol: AsyncMock
     ) -> None:
         mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
             id=99
@@ -51,7 +51,7 @@ class TestPageAddComment:
             id=8
         )
 
-        await client_session.call_tool(
+        await client.call_tool(
             "page_add_comment",
             {"slug": "users/test/page", "body": "re", "parent_id": 7, "thread_id": 3},
         )
@@ -65,19 +65,19 @@ class TestPageAddComment:
 
 class TestPageDeleteAndRecover:
     async def test_delete_returns_the_recovery_token(
-        self, client_session: ClientSession, mock_wiki_protocol: AsyncMock
+        self, client: Client, mock_wiki_protocol: AsyncMock
     ) -> None:
         mock_wiki_protocol.page_delete.return_value = (
             DeletePageResponse.model_construct(recovery_token="rt-1")
         )
 
-        result = await client_session.call_tool("page_delete", {"page_id": 42})
+        result = await client.call_tool("page_delete", {"page_id": 42})
 
         assert get_tool_result_content(result)["recovery_token"] == "rt-1"
         assert mock_wiki_protocol.page_delete.await_args.args[0] == 42
 
     async def test_delete_by_slug_resolves_the_page_first(
-        self, client_session: ClientSession, mock_wiki_protocol: AsyncMock
+        self, client: Client, mock_wiki_protocol: AsyncMock
     ) -> None:
         mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
             id=77
@@ -86,20 +86,18 @@ class TestPageDeleteAndRecover:
             DeletePageResponse.model_construct(recovery_token="rt-2")
         )
 
-        await client_session.call_tool("page_delete", {"slug": "users/test/page"})
+        await client.call_tool("page_delete", {"slug": "users/test/page"})
 
         assert mock_wiki_protocol.page_delete.await_args.args[0] == 77
 
     async def test_recover_forwards_the_token(
-        self, client_session: ClientSession, mock_wiki_protocol: AsyncMock
+        self, client: Client, mock_wiki_protocol: AsyncMock
     ) -> None:
         mock_wiki_protocol.page_recover.return_value = (
             RecoverPageResponse.model_construct(id=42, slug="users/test/page")
         )
 
-        result = await client_session.call_tool(
-            "page_recover", {"recovery_token": "rt-1"}
-        )
+        result = await client.call_tool("page_recover", {"recovery_token": "rt-1"})
 
         assert get_tool_result_content(result)["id"] == 42
         call = mock_wiki_protocol.page_recover.await_args
@@ -194,26 +192,26 @@ class TestRefusals:
     )
     async def test_refusal_names_the_field(
         self,
-        client_session: ClientSession,
+        client: Client,
         tool: str,
         arguments: dict[str, Any],
         expected: str,
     ) -> None:
-        result = await client_session.call_tool(tool, arguments)
+        result = await client.call_tool(tool, arguments)
 
-        assert result.isError is True
+        assert result.is_error is True
         assert expected in get_tool_result_text(result)
 
 
 class TestSlugResolutionFailure:
     async def test_a_page_without_a_slug_is_reported(
-        self, client_session: ClientSession, mock_wiki_protocol: AsyncMock
+        self, client: Client, mock_wiki_protocol: AsyncMock
     ) -> None:
         # Tools that need a slug resolve it from the id; the API answering
         # without one leaves nothing to send.
         mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(id=42)
 
-        result = await client_session.call_tool("page_get_descendants", {"page_id": 42})
+        result = await client.call_tool("page_get_descendants", {"page_id": 42})
 
-        assert result.isError is True
+        assert result.is_error is True
         assert "does not have a slug" in get_tool_result_text(result)

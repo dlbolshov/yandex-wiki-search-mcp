@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
@@ -40,8 +42,12 @@ async def test_client_roundtrip(memory_store: InMemoryOAuthStore) -> None:
 
 
 async def test_save_client_requires_id(memory_store: InMemoryOAuthStore) -> None:
+    # mcp 2.x types client_id as a required str, so this builds what the type
+    # system forbids on purpose: model_construct skips validation, and the
+    # store's own check is what must catch it.
     client = OAuthClientInformationFull.model_construct(
-        client_id=None, redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)]
+        client_id=cast(str, None),
+        redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)],
     )
     with pytest.raises(ValueError, match="client_id"):
         await memory_store.save_client(client)

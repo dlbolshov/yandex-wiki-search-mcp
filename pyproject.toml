@@ -24,11 +24,12 @@ dependencies = [
     "aiocache[redis]>=0.12.3",
     "aiohttp>=3.11.18",
     "cryptography>=44.0",
-    # Capped below 2: this server subclasses FastMCP and reaches into its
-    # internals (custom routes, the underlying low-level server, the auth
-    # provider). mcp 2.0 removed FastMCP entirely, so the upper bound states
-    # a real compatibility boundary rather than caution.
-    "mcp[cli]>=1.21,<2",
+    # Capped below 3 because a major bump of the SDK is a rewrite, not an
+    # upgrade — 1.0.0 shipped without that bound and died the day mcp 2.0
+    # landed. Within 2.x the range stays open: `uv.lock` is what pins the
+    # Docker image, and freezing an exact version here would only strand
+    # uvx/pip users on it.
+    "mcp[cli]>=2,<3",
     "pydantic>=2.12.4",
     "pydantic-settings>=2.8.1",
     "yarl>=1.20.0",
@@ -56,6 +57,9 @@ Issues = "https://github.com/dlbolshov/yandex-wiki-search-mcp/issues"
 dev = [
     "aioresponses>=0.7.7",
     "fakeredis>=2.37.0",
+    # starlette.testclient needs it, and mcp 2.x no longer pulls it in: the
+    # SDK moved to httpx2. Ours to declare now.
+    "httpx>=0.28",
     "mypy>=1.8.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",

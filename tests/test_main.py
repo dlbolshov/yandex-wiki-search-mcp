@@ -62,7 +62,9 @@ def test_unrelated_env_file_key_does_not_stop_startup(env_dir: Path) -> None:
         main()
 
     create.assert_called_once()
-    server.run.assert_called_once_with(transport="stdio")
+    # stdio takes no transport keywords in mcp 2.x — run() is overloaded per
+    # transport and rejects the ones it does not know.
+    server.run.assert_called_once_with("stdio")
 
 
 @pytest.mark.parametrize(
