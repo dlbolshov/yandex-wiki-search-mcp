@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     oauth_use_scopes: bool = True
     oauth_client_id: str | None = None
     oauth_client_secret: SecretStr | None = None
+    # Dynamic client registration is unauthenticated by protocol design, so
+    # registrations that never expire accumulate without bound — in Redis as
+    # well as in memory. The SDK stamps this on the record at /register and
+    # rejects an expired client, and both stores drop what it marks dead.
+    # None disables the expiry (registrations then live forever, as before).
+    oauth_client_secret_expiry_seconds: int | None = Field(
+        default=30 * 24 * 60 * 60, ge=1
+    )
     mcp_server_public_url: AnyHttpUrl | None = None
     oauth_encryption_keys: SecretStr | None = None
 

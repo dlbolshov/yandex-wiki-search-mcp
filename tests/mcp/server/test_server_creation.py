@@ -253,6 +253,42 @@ class TestParseEncryptionKeys:
             _parse_encryption_keys(short)
 
 
+class TestClientRegistrationExpiry:
+    @staticmethod
+    def _oauth_settings(expiry: int | None) -> Any:
+        settings = create_test_settings()
+        settings.oauth_enabled = True
+        settings.oauth_client_id = "client-id"
+        settings.oauth_client_secret = SecretStr("client-secret")
+        settings.mcp_server_public_url = AnyHttpUrl("https://mcp.example.com")
+        settings.oauth_client_secret_expiry_seconds = expiry
+        return settings
+
+    def test_registrations_are_given_a_lifetime(self) -> None:
+        # Without one, /register — unauthenticated by protocol design —
+        # grows the store without bound, in Redis as well as in memory.
+        server = create_mcp_server(
+            settings=self._oauth_settings(30 * 24 * 60 * 60),
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        assert server.settings.auth is not None
+        options = server.settings.auth.client_registration_options
+        assert options is not None
+        assert options.client_secret_expiry_seconds == 30 * 24 * 60 * 60
+
+    def test_expiry_can_be_disabled(self) -> None:
+        server = create_mcp_server(
+            settings=self._oauth_settings(None),
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        assert server.settings.auth is not None
+        options = server.settings.auth.client_registration_options
+        assert options is not None
+        assert options.client_secret_expiry_seconds is None
+
+
 class TestOAuthCallbackRoute:
     def test_oauth_enabled_registers_callback_and_healthz(self) -> None:
         settings = create_test_settings()

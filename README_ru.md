@@ -236,6 +236,7 @@ claude mcp add yandex-wiki-search \
 | `OAUTH_SERVER_URL` | `https://oauth.yandex.ru` | OAuth-сервер Яндекса |
 | `OAUTH_USE_SCOPES` | `true` | Запрашивать Wiki-скоупы при авторизации |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | — | Данные вашего OAuth-приложения Яндекса |
+| `OAUTH_CLIENT_SECRET_EXPIRY_SECONDS` | `2592000` (30 дней) | Срок жизни динамически зарегистрированного MCP-клиента. Регистрация по протоколу не требует аутентификации, поэтому без срока каждая регистрация хранится вечно; клиент узнаёт дедлайн при регистрации и перерегистрируется, когда тот истечёт. Пусто — отключить |
 | `MCP_SERVER_PUBLIC_URL` | — | Публичный URL этого сервера (OAuth-коллбэки) |
 | `OAUTH_ENCRYPTION_KEYS` | — | base64-ключи по 32 байта через запятую (обязательно для `redis`) |
 | `REDIS_ENDPOINT` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PASSWORD` / `REDIS_POOL_MAX_SIZE` | `localhost` / `6379` / `0` / — / `10` | Подключение к Redis |

@@ -89,10 +89,21 @@ class RedisOAuthStore(OAuthStore):
         return f"{self._MAPPING_KEY_PREFIX}{hash_token(refresh_token)}"
 
     async def save_client(self, client: OAuthClientInformationFull) -> None:
-        """Save a client to Redis."""
+        """Save a client to Redis, expiring with its secret.
+
+        `/register` is unauthenticated by protocol design, so without a TTL
+        every registration ever made stays in Redis forever. The lifetime is
+        the one the SDK already stamped on the record and enforces on every
+        client authentication — no TTL when the server did not configure
+        `client_secret_expiry_seconds`, which is the previous behavior.
+        """
         if client.client_id is None:
             raise ValueError("client_id must be provided")
-        await self._cache.set(self._client_key(client.client_id), client)
+
+        ttl = None
+        if client.client_secret_expires_at:
+            ttl = max(client.client_secret_expires_at - int(time.time()), 1)
+        await self._cache.set(self._client_key(client.client_id), client, ttl=ttl)
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         """Retrieve a client from Redis."""

@@ -44,10 +44,14 @@ def make_token(
     )
 
 
-def make_client(client_id: str = "client-1") -> OAuthClientInformationFull:
+def make_client(
+    client_id: str = "client-1",
+    client_secret_expires_at: int | None = None,
+) -> OAuthClientInformationFull:
     return OAuthClientInformationFull(
         client_id=client_id,
         client_secret="client-secret-1",
+        client_secret_expires_at=client_secret_expires_at,
         redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)],
         scope="wiki:read wiki:write",
     )

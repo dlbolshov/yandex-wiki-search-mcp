@@ -8,12 +8,20 @@ from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthSt
 
 from .crypto import hash_token
 
+# Below this many live entries a sweep is not worth the walk.
+SWEEP_MIN_ENTRIES = 128
+
 
 class InMemoryOAuthStore(OAuthStore):
     """In-memory implementation of OAuthStore interface.
 
     Uses hashed tokens as dictionary keys for consistency with RedisOAuthStore,
     providing some protection against accidental token exposure in logs/dumps.
+
+    Redis expires records for us; here they have to be reclaimed by hand.
+    Every write runs a sweep whose threshold doubles off the surviving size,
+    which makes the amortized cost per write constant while keeping the
+    footprint proportional to what is actually live.
     """
 
     def __init__(self) -> None:
@@ -30,20 +38,88 @@ class InMemoryOAuthStore(OAuthStore):
         self._state_expiry: dict[str, float] = {}
         self._auth_code_expiry: dict[str, float] = {}
 
+        self._sweep_threshold = SWEEP_MIN_ENTRIES
+
+    def _entry_count(self) -> int:
+        return (
+            len(self._dynamic_clients)
+            + len(self._states)
+            + len(self._auth_codes)
+            + len(self._tokens)
+            + len(self._refresh_tokens)
+        )
+
+    def _sweep_expired(self) -> None:
+        """Drop every record whose lifetime has run out."""
+        now = time.time()
+
+        for state_id in [k for k, exp in self._state_expiry.items() if exp <= now]:
+            self._states.pop(state_id, None)
+            self._state_expiry.pop(state_id, None)
+
+        for code_id in [k for k, exp in self._auth_code_expiry.items() if exp <= now]:
+            self._auth_codes.pop(code_id, None)
+            self._auth_code_expiry.pop(code_id, None)
+
+        for token_hash in [
+            k
+            for k, tok in self._tokens.items()
+            if tok.expires_at and tok.expires_at < now
+        ]:
+            del self._tokens[token_hash]
+
+        for token_hash in [
+            k
+            for k, tok in self._refresh_tokens.items()
+            if tok.expires_at and tok.expires_at < now
+        ]:
+            del self._refresh_tokens[token_hash]
+            self._refresh2access_tokens.pop(token_hash, None)
+
+        # Registrations expire on the secret the SDK stamped at /register and
+        # enforces on every client authentication; dropping them here just
+        # reclaims what is already dead. Without client_secret_expiry_seconds
+        # configured there is no expiry and they stay, as before.
+        for client_id in [
+            cid
+            for cid, client in self._dynamic_clients.items()
+            if client.client_secret_expires_at and client.client_secret_expires_at < now
+        ]:
+            del self._dynamic_clients[client_id]
+
+    def _maybe_sweep(self) -> None:
+        """Sweep when the store has grown past its threshold, then re-aim it.
+
+        Re-aiming at twice the surviving size is what keeps this amortized:
+        a sweep that frees nothing will not run again until the store has
+        doubled, and one that frees a lot pulls the next sweep back in.
+        """
+        if self._entry_count() < self._sweep_threshold:
+            return
+        self._sweep_expired()
+        self._sweep_threshold = max(SWEEP_MIN_ENTRIES, self._entry_count() * 2)
+
     async def save_client(self, client: OAuthClientInformationFull) -> None:
         """Save a client to the in-memory store."""
         if client.client_id is None:
             raise ValueError("client_id must be provided")
+        self._maybe_sweep()
         self._dynamic_clients[client.client_id] = client
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        """Retrieve a client from the in-memory store."""
+        """Retrieve a client from the in-memory store.
+
+        An expired registration is left for the sweep rather than filtered
+        here: the SDK rejects it on the authentication path regardless, so
+        this stays a plain lookup.
+        """
         return self._dynamic_clients.get(client_id)
 
     async def save_state(
         self, state: YandexOAuthState, *, state_id: str, ttl: int | None = None
     ) -> None:
         """Save an OAuth state with optional TTL."""
+        self._maybe_sweep()
         self._states[state_id] = state
         if ttl is not None:
             self._state_expiry[state_id] = time.time() + ttl
@@ -72,6 +148,7 @@ class InMemoryOAuthStore(OAuthStore):
         self, code: YandexOauthAuthorizationCode, *, ttl: int | None = None
     ) -> None:
         """Save an authorization code with optional TTL."""
+        self._maybe_sweep()
         self._auth_codes[code.code] = code
         if ttl is not None:
             self._auth_code_expiry[code.code] = time.time() + ttl
@@ -103,6 +180,7 @@ class InMemoryOAuthStore(OAuthStore):
         if token.expires_in is None:
             raise ValueError("expires_in must be provided")
 
+        self._maybe_sweep()
         access_token_hash = hash_token(token.access_token)
 
         # Save access token (keyed by hash)

@@ -235,6 +235,7 @@ in a shared deployment.
 | `OAUTH_SERVER_URL` | `https://oauth.yandex.ru` | Yandex OAuth server |
 | `OAUTH_USE_SCOPES` | `true` | Request Wiki scopes during authorization |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | — | Your Yandex OAuth app credentials |
+| `OAUTH_CLIENT_SECRET_EXPIRY_SECONDS` | `2592000` (30 days) | Lifetime of a dynamically registered MCP client. Registration is unauthenticated by protocol design, so without an expiry every registration is kept forever; clients are told the deadline at registration and re-register when it passes. Empty disables it |
 | `MCP_SERVER_PUBLIC_URL` | — | Public URL of this server (OAuth callbacks) |
 | `OAUTH_ENCRYPTION_KEYS` | — | Comma-separated base64 32-byte keys (required for `redis` store) |
 | `REDIS_ENDPOINT` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PASSWORD` / `REDIS_POOL_MAX_SIZE` | `localhost` / `6379` / `0` / — / `10` | Redis connection |
