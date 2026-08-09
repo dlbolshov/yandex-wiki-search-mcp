@@ -18,9 +18,13 @@ def make_state(client_state: str | None = "state-1") -> YandexOAuthState:
     )
 
 
-def make_auth_code(*, expires_at: float = 2_000_000.0) -> YandexOauthAuthorizationCode:
+def make_auth_code(
+    *,
+    code: str = "mcp_code-1",
+    expires_at: float = 2_000_000.0,
+) -> YandexOauthAuthorizationCode:
     return YandexOauthAuthorizationCode(
-        code="mcp_code-1",
+        code=code,
         yandex_auth_code="ya-code-1",
         client_id="client-1",
         redirect_uri=AnyUrl(CLIENT_REDIRECT_URI),

@@ -11,9 +11,16 @@ import pytest
 import mcp_wiki.mcp.oauth.stores.memory as memory_module
 from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS
 from mcp_wiki.mcp.oauth.stores.memory import SWEEP_MIN_ENTRIES, InMemoryOAuthStore
-from tests.mcp.oauth.helpers import make_client, make_state, make_token
+from tests.mcp.oauth.helpers import (
+    make_auth_code,
+    make_client,
+    make_state,
+    make_token,
+)
 
+# The lifetimes the provider hands these records.
 STATE_TTL = 600
+AUTH_CODE_TTL = 300
 # Enough writes to take the store past its first sweep threshold.
 ENOUGH_TO_SWEEP = SWEEP_MIN_ENTRIES * 2 + 1
 
@@ -63,6 +70,25 @@ class TestAbandonedRecordsAreReclaimed:
         # Only the second batch is still alive.
         assert len(store._states) == ENOUGH_TO_SWEEP
         assert not any(key.startswith("abandoned-") for key in store._states)
+
+    async def test_expired_auth_codes_do_not_accumulate(
+        self, store: InMemoryOAuthStore, clock: FakeClock
+    ) -> None:
+        # A token exchange that never happens leaks the same way an
+        # abandoned /authorize does: the code outlives its deadline with
+        # nobody left to consume it.
+        async def save_codes(prefix: str) -> None:
+            for index in range(ENOUGH_TO_SWEEP):
+                await store.save_auth_code(
+                    make_auth_code(code=f"{prefix}-{index}"), ttl=AUTH_CODE_TTL
+                )
+
+        await save_codes("abandoned")
+        clock.advance(AUTH_CODE_TTL + 1)
+        await save_codes("later")
+
+        assert len(store._auth_codes) == ENOUGH_TO_SWEEP
+        assert not any(key.startswith("abandoned-") for key in store._auth_codes)
 
     async def test_live_records_are_never_dropped(
         self, store: InMemoryOAuthStore, clock: FakeClock
