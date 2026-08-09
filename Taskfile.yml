@@ -48,7 +48,7 @@ tasks:
   test-cov:
     desc: Run tests with the CI coverage gate + HTML report
     cmds:
-      - uv run pytest --cov=mcp_wiki --cov-branch --cov-report=html --cov-report=term-missing:skip-covered --cov-fail-under=80
+      - uv run pytest --cov=mcp_wiki --cov-branch --cov-report=html --cov-report=term-missing:skip-covered --cov-fail-under=100
       - echo "Coverage report generated in htmlcov/index.html"
 
   mcpb:

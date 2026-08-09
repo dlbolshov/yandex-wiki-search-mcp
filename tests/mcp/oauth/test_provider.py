@@ -4,7 +4,7 @@ import aiohttp
 import pytest
 import yarl
 from aioresponses import aioresponses
-from mcp.server.auth.provider import AuthorizationParams
+from mcp.server.auth.provider import AuthorizationParams, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 from starlette.requests import Request
@@ -197,6 +197,68 @@ async def test_no_state_is_returned_when_the_client_sent_none(
 
     location = yarl.URL(response.headers["location"])
     assert "state" not in location.query
+
+
+async def test_load_refresh_token_reads_the_store(
+    provider: YandexOAuthAuthorizationServerProvider,
+    memory_store: InMemoryOAuthStore,
+    client_info: OAuthClientInformationFull,
+) -> None:
+    await memory_store.save_oauth_token(make_token(), "client-1", ["wiki:read"], None)
+
+    loaded = await provider.load_refresh_token(client_info, "ya-refresh-1")
+
+    assert loaded is not None
+    assert loaded.token == "ya-refresh-1"
+    assert await provider.load_refresh_token(client_info, "missing") is None
+
+
+class TestClientWithoutAnId:
+    """`client_id` is optional on the SDK model, so every path checks it.
+
+    A client that reached the store without one would key its tokens under
+    `None` and be unrecoverable.
+    """
+
+    @staticmethod
+    def _anonymous() -> OAuthClientInformationFull:
+        # Valid in every respect the earlier checks look at, so the failure
+        # is the missing id and nothing else.
+        return OAuthClientInformationFull.model_construct(
+            client_id=None,
+            redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)],
+            scope="wiki:read wiki:write",
+        )
+
+    async def test_authorize_refuses(
+        self, provider: YandexOAuthAuthorizationServerProvider
+    ) -> None:
+        with pytest.raises(ValueError, match="Client ID not provided"):
+            await provider.authorize(self._anonymous(), make_params())
+
+    async def test_exchanging_an_authorization_code_refuses(
+        self, provider: YandexOAuthAuthorizationServerProvider
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
+            with pytest.raises(ValueError, match="client_id must be provided"):
+                await provider.exchange_authorization_code(
+                    self._anonymous(), make_auth_code()
+                )
+
+    async def test_refreshing_refuses(
+        self, provider: YandexOAuthAuthorizationServerProvider
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
+            with pytest.raises(ValueError, match="client_id must be provided"):
+                await provider.exchange_refresh_token(
+                    self._anonymous(),
+                    RefreshToken(
+                        token="ya-refresh-1", client_id="client-1", scopes=["wiki:read"]
+                    ),
+                    ["wiki:read"],
+                )
 
 
 async def test_callback_rejects_unknown_state(

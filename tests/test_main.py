@@ -1,5 +1,6 @@
 """Entry point: the two ways startup refuses, and the one way it proceeds."""
 
+import logging
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -62,3 +63,39 @@ def test_unrelated_env_file_key_does_not_stop_startup(env_dir: Path) -> None:
 
     create.assert_called_once()
     server.run.assert_called_once_with(transport="stdio")
+
+
+@pytest.mark.parametrize(
+    ("env", "expected_auth"),
+    [
+        ("WIKI_TOKEN=abc\nWIKI_ORG_ID=123\n", "auth=token"),
+        ("WIKI_IAM_TOKEN=iam\nWIKI_ORG_ID=123\n", "auth=iam_token"),
+        (
+            "OAUTH_ENABLED=true\nOAUTH_CLIENT_ID=c\nOAUTH_CLIENT_SECRET=s\n"
+            "MCP_SERVER_PUBLIC_URL=https://mcp.test\n",
+            "auth=oauth",
+        ),
+        (
+            "OAUTH_ENABLED=true\nOAUTH_CLIENT_ID=c\nOAUTH_CLIENT_SECRET=s\n"
+            "MCP_SERVER_PUBLIC_URL=https://mcp.test\nWIKI_TOKEN=abc\n",
+            "auth=oauth+token",
+        ),
+    ],
+)
+def test_startup_line_names_the_authentication_mode(
+    env_dir: Path,
+    caplog: pytest.LogCaptureFixture,
+    env: str,
+    expected_auth: str,
+) -> None:
+    # The one line an operator has to diagnose a misconfigured deployment:
+    # it must say which credential the server actually picked up.
+    write_env(env_dir, env)
+
+    with (
+        caplog.at_level(logging.INFO, logger="mcp_wiki"),
+        patch("mcp_wiki.__main__.create_mcp_server", return_value=MagicMock()),
+    ):
+        main()
+
+    assert expected_auth in caplog.records[-1].getMessage()

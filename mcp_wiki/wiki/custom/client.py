@@ -326,7 +326,11 @@ class WikiClient(WikiProtocol):
                 raise build_api_error(status, payload)
             return payload
 
-        raise RuntimeError("unreachable: request loop exited without a result")
+        # The loop always returns or raises; this only keeps the function's
+        # return type honest if that ever stops being true.
+        raise RuntimeError(  # pragma: no cover
+            "unreachable: request loop exited without a result"
+        )
 
     @staticmethod
     def _json_or_empty(payload: bytes) -> Any:

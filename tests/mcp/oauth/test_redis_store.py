@@ -3,10 +3,13 @@ from typing import Any
 
 import fakeredis.aioredis
 import pytest
+from mcp.shared.auth import OAuthClientInformationFull
+from pydantic import AnyUrl
 
 from mcp_wiki.mcp.oauth.stores.crypto import hash_token
 from mcp_wiki.mcp.oauth.stores.redis import RedisOAuthStore
 from tests.mcp.oauth.helpers import (
+    CLIENT_REDIRECT_URI,
     make_auth_code,
     make_client,
     make_state,
@@ -35,6 +38,16 @@ async def test_client_roundtrip_and_secret_encrypted_at_rest(
 
 async def test_get_client_missing(redis_store: RedisOAuthStore) -> None:
     assert await redis_store.get_client("missing") is None
+
+
+async def test_save_client_requires_id(redis_store: RedisOAuthStore) -> None:
+    # client_id is optional on the SDK model; keying a registration under
+    # None would make it unrecoverable.
+    client = OAuthClientInformationFull.model_construct(
+        client_id=None, redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)]
+    )
+    with pytest.raises(ValueError, match="client_id"):
+        await redis_store.save_client(client)
 
 
 async def test_client_expires_with_its_secret(redis_store: RedisOAuthStore) -> None:

@@ -40,7 +40,10 @@ async def resolve_page_id_and_type(
     page_id, slug = resolve_page_locator(page_id=page_id, slug=slug)
     if page_id is not None:
         return page_id, None
-    if slug is None:
+    if slug is None:  # pragma: no cover - narrowing; resolve_page_locator
+        # already raised unless exactly one of the two is set, so reaching
+        # here with neither is impossible. The branch exists for the type
+        # checker, which cannot see that guarantee across the call.
         raise ValueError("Either page_id or slug must be provided.")
 
     page = await get_wiki(ctx).page_get_by_slug(
@@ -59,7 +62,7 @@ async def resolve_page_slug(
     page_id, slug = resolve_page_locator(page_id=page_id, slug=slug)
     if slug is not None:
         return slug
-    if page_id is None:
+    if page_id is None:  # pragma: no cover - narrowing, see above
         raise ValueError("Either page_id or slug must be provided.")
 
     page = await get_wiki(ctx).page_get(

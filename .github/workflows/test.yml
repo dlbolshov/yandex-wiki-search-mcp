@@ -73,7 +73,7 @@ jobs:
       run: uv sync --dev
 
     - name: Run tests
-      run: uv run pytest --cov=mcp_wiki --cov-branch --cov-report=xml --cov-fail-under=80 .
+      run: uv run pytest --cov=mcp_wiki --cov-branch --cov-report=xml --cov-fail-under=100 .
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'

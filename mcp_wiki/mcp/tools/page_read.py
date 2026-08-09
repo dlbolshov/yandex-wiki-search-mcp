@@ -205,7 +205,8 @@ def register_page_read_tools(mcp: FastMCP[Any]) -> None:
                 fields=field_names,
                 auth=auth,
             )
-        if slug is None:
+        if slug is None:  # pragma: no cover - narrowing for the type checker;
+            # resolve_page_locator raises unless exactly one is set.
             raise ValueError("Either page_id or slug must be provided.")
 
         return await get_wiki(ctx).page_get_by_slug(

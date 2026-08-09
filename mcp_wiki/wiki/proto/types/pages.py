@@ -28,7 +28,7 @@ class BaseWikiModel(BaseModel):
         data = handler(self)
         if isinstance(data, dict):
             return {key: value for key, value in data.items() if value is not None}
-        return data
+        return data  # pragma: no cover - a model always serializes to a dict
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -38,7 +38,7 @@ class BaseWikiModel(BaseModel):
         json_schema = dict(handler(core_schema))
         json_schema.pop("title", None)
         for prop in json_schema.get("properties", {}).values():
-            if isinstance(prop, dict):
+            if isinstance(prop, dict):  # pragma: no branch - always a dict
                 prop.pop("title", None)
         return json_schema
 
@@ -57,7 +57,7 @@ class DynamicWikiModel(BaseWikiModel):
     @model_serializer(mode="wrap")
     def _drop_none(self, handler: SerializerFunctionWrapHandler) -> Any:
         data = handler(self)
-        if not isinstance(data, dict):
+        if not isinstance(data, dict):  # pragma: no cover - always a dict
             return data
         extras = self.model_extra or {}
         return {

@@ -131,6 +131,19 @@ no-lines-before = []
 [tool.ruff.lint.pep8-naming]
 classmethod-decorators = ["cached_classproperty", "classproperty"]
 
+[tool.coverage.run]
+branch = true
+source = ["mcp_wiki"]
+
+[tool.coverage.report]
+# Extends coverage's defaults (which already honor `# pragma: no cover`).
+exclude_also = [
+    # Runs only when the module is executed as a script, which the suite
+    # never does — it imports and calls main() directly.
+    'if __name__ == "__main__":',
+    "if TYPE_CHECKING:",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
