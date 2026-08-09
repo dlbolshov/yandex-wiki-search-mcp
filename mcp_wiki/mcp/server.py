@@ -11,7 +11,6 @@ from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.types import TextContent
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
-from starlette.routing import Route
 
 from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.oauth.provider import YandexOAuthAuthorizationServerProvider
@@ -219,24 +218,17 @@ def create_mcp_server(
     )
     server._mcp_server.version = server_version()
 
-    server._custom_starlette_routes.append(
-        Route(
-            path="/healthz",
-            endpoint=healthz,
-            methods=["GET"],
-            name="healthz",
-        )
-    )
+    # custom_route() returns a decorator, so it is applied by call here: the
+    # server does not exist at import time, and the OAuth callback is a bound
+    # method of a provider built a few lines above.
+    server.custom_route("/healthz", methods=["GET"], name="healthz")(healthz)
 
     if auth_server_provider is not None:
-        server._custom_starlette_routes.append(
-            Route(
-                path="/oauth/yandex/callback",
-                endpoint=auth_server_provider.handle_yandex_callback,
-                methods=["GET"],
-                name="oauth_yandex_callback",
-            )
-        )
+        server.custom_route(
+            "/oauth/yandex/callback",
+            methods=["GET"],
+            name="oauth_yandex_callback",
+        )(auth_server_provider.handle_yandex_callback)
 
     register_resources(settings, server)
     register_all_tools(settings, server)
