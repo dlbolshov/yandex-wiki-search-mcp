@@ -8,18 +8,23 @@ from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthSt
 CLIENT_REDIRECT_URI = "http://localhost:3000/callback"
 
 
-def make_state() -> YandexOAuthState:
+def make_state(client_state: str | None = "state-1") -> YandexOAuthState:
     return YandexOAuthState(
         redirect_uri=AnyUrl(CLIENT_REDIRECT_URI),
         code_challenge="challenge-1",
         redirect_uri_provided_explicitly=True,
         client_id="client-1",
+        client_state=client_state,
     )
 
 
-def make_auth_code(*, expires_at: float = 2_000_000.0) -> YandexOauthAuthorizationCode:
+def make_auth_code(
+    *,
+    code: str = "mcp_code-1",
+    expires_at: float = 2_000_000.0,
+) -> YandexOauthAuthorizationCode:
     return YandexOauthAuthorizationCode(
-        code="mcp_code-1",
+        code=code,
         yandex_auth_code="ya-code-1",
         client_id="client-1",
         redirect_uri=AnyUrl(CLIENT_REDIRECT_URI),
@@ -43,10 +48,14 @@ def make_token(
     )
 
 
-def make_client(client_id: str = "client-1") -> OAuthClientInformationFull:
+def make_client(
+    client_id: str = "client-1",
+    client_secret_expires_at: int | None = None,
+) -> OAuthClientInformationFull:
     return OAuthClientInformationFull(
         client_id=client_id,
         client_secret="client-secret-1",
+        client_secret_expires_at=client_secret_expires_at,
         redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)],
         scope="wiki:read wiki:write",
     )

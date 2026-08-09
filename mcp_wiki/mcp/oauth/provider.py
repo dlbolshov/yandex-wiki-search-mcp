@@ -75,7 +75,10 @@ class YandexOAuthAuthorizationServerProvider(
             url=construct_redirect_uri(
                 str(state.redirect_uri),
                 code=new_code,
-                state=yandex_cb_data.state,
+                # The client's own state, not the lookup key we sent Yandex.
+                # None when the client sent none — construct_redirect_uri
+                # drops parameters that are None.
+                state=state.client_state,
             ),
             status_code=302,
             headers={"Cache-Control": "no-store"},
@@ -90,7 +93,13 @@ class YandexOAuthAuthorizationServerProvider(
     async def authorize(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
     ) -> str:
-        state_id = params.state or secrets.token_hex(16)
+        # Always server-generated, never the client's `state`. The key has
+        # to be unguessable: anyone able to predict it could authorize under
+        # the same key, overwrite the pending record, and collect the
+        # victim's code bound to their own client_id, redirect_uri and
+        # code_challenge. PKCE would not stand in the way — the stored
+        # challenge would be theirs as well.
+        state_id = secrets.token_hex(16)
         redirect_uri = client.validate_redirect_uri(params.redirect_uri)
         scopes = None
         if self._use_scopes:
@@ -108,6 +117,7 @@ class YandexOAuthAuthorizationServerProvider(
                 client_id=client.client_id,
                 resource=params.resource,
                 scopes=scopes,
+                client_state=params.state,
             ),
             state_id=state_id,
             ttl=600,

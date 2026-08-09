@@ -1,11 +1,15 @@
 from typing import Any
-from urllib.parse import unquote, urlparse
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import Context
 from starlette.requests import Request
 
+from mcp_wiki.wiki.custom.slugs import normalize_slug
 from mcp_wiki.wiki.proto.common import YandexAuth
+
+# normalize_slug lives in the Wiki layer (the HTTP client needs it and must
+# not import from here); re-exported for callers that reach for it here.
+__all__ = ["get_yandex_auth", "normalize_slug", "resolve_page_locator"]
 
 
 def get_yandex_auth(ctx: Context[Any, Any, Request]) -> YandexAuth:
@@ -25,14 +29,6 @@ def get_yandex_auth(ctx: Context[Any, Any, Request]) -> YandexAuth:
             auth.org_id = org_id.strip() or None
 
     return auth
-
-
-def normalize_slug(slug_or_url: str) -> str:
-    candidate = slug_or_url.strip()
-    parsed = urlparse(candidate)
-    if parsed.scheme and parsed.netloc:
-        candidate = unquote(parsed.path)
-    return candidate.strip("/")
 
 
 def resolve_page_locator(

@@ -8,6 +8,7 @@ from starlette.requests import Request
 from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.utils import get_yandex_auth
 from mcp_wiki.settings import Settings
+from mcp_wiki.wiki.proto.common import select_org
 from mcp_wiki.yfm import YFM_CHEATSHEET
 
 
@@ -26,12 +27,21 @@ def register_resources(settings: Settings, mcp: FastMCP[Any]) -> None:
     )
     async def wiki_mcp_configuration() -> YandexWikiMCPConfigurationResponse:
         ctx = cast(Context[Any, AppContext, Request], mcp.get_context())
-        auth = get_yandex_auth(ctx)
+        # Same selection the client applies to the request headers, so the
+        # reported organization is the one calls actually go to. The pair
+        # moves as a unit: naming an org_id alongside a cloud_org_id would
+        # report a combination the settings validator forbids and no
+        # request ever carries.
+        org_id, cloud_org_id = select_org(
+            get_yandex_auth(ctx),
+            default_org_id=settings.wiki_org_id,
+            default_cloud_org_id=settings.wiki_cloud_org_id,
+        )
 
         return YandexWikiMCPConfigurationResponse(
             api_base_url=settings.wiki_api_base_url,
-            cloud_org_id=auth.cloud_org_id or settings.wiki_cloud_org_id,
-            org_id=auth.org_id or settings.wiki_org_id,
+            cloud_org_id=cloud_org_id,
+            org_id=org_id,
             read_only=settings.wiki_read_only,
             oauth_enabled=settings.oauth_enabled,
         )

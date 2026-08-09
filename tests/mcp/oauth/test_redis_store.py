@@ -1,3 +1,4 @@
+import time
 from typing import Any
 
 import fakeredis.aioredis
@@ -34,6 +35,28 @@ async def test_client_roundtrip_and_secret_encrypted_at_rest(
 
 async def test_get_client_missing(redis_store: RedisOAuthStore) -> None:
     assert await redis_store.get_client("missing") is None
+
+
+async def test_client_expires_with_its_secret(redis_store: RedisOAuthStore) -> None:
+    # /register is unauthenticated by protocol design, so a registration
+    # without a TTL would stay in Redis indefinitely.
+    expiry = 30 * 24 * 60 * 60
+    await redis_store.save_client(
+        make_client(client_secret_expires_at=int(time.time()) + expiry)
+    )
+
+    ttl = await raw_client(redis_store).ttl("oauth:client:client-1")
+    assert 0 < ttl <= expiry
+
+
+async def test_client_without_an_expiry_is_kept_indefinitely(
+    redis_store: RedisOAuthStore,
+) -> None:
+    # client_secret_expiry_seconds unset on the server: nothing to expire on.
+    await redis_store.save_client(make_client())
+
+    # -1 is redis for "key exists, no TTL".
+    assert await raw_client(redis_store).ttl("oauth:client:client-1") == -1
 
 
 async def test_state_single_use_with_ttl(redis_store: RedisOAuthStore) -> None:
@@ -74,7 +97,7 @@ async def test_token_saved_encrypted_with_ttls(redis_store: RedisOAuthStore) -> 
     refresh_key = f"oauth:refresh:{hash_token('ya-refresh-1')}"
     assert 0 < await client.ttl(refresh_key) <= REFRESH_TTL
 
-    # Regression: the refresh->access mapping must expire together with the
+    # The refresh->access mapping must expire together with the
     # refresh token instead of living in Redis forever.
     mapping_key = f"oauth:mapping:{hash_token('ya-refresh-1')}"
     assert 0 < await client.ttl(mapping_key) <= REFRESH_TTL

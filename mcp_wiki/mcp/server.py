@@ -197,6 +197,7 @@ def create_mcp_server(
                 enabled=True,
                 valid_scopes=scopes,
                 default_scopes=scopes,
+                client_secret_expiry_seconds=settings.oauth_client_secret_expiry_seconds,
             ),
         )
 

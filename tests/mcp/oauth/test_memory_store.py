@@ -3,6 +3,7 @@ from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 
 import mcp_wiki.mcp.oauth.stores.memory as memory_module
+from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS
 from mcp_wiki.mcp.oauth.stores.memory import InMemoryOAuthStore
 from tests.mcp.oauth.helpers import (
     CLIENT_REDIRECT_URI,
@@ -127,6 +128,21 @@ async def test_refresh_token_roundtrip(memory_store: InMemoryOAuthStore) -> None
     assert refresh.token == "ya-refresh-1"
     assert refresh.client_id == "client-1"
     assert refresh.scopes == ["wiki:read"]
+
+
+async def test_refresh_token_expires_like_the_redis_one(
+    memory_store: InMemoryOAuthStore, clock: FakeClock
+) -> None:
+    # Both stores hand out refresh tokens with the same lifetime; without
+    # expires_at set here an in-memory one would live as long as the process.
+    await memory_store.save_oauth_token(make_token(), "client-1", ["wiki:read"], None)
+
+    refresh = await memory_store.get_refresh_token("ya-refresh-1")
+    assert refresh is not None
+    assert refresh.expires_at == int(clock.now) + REFRESH_TOKEN_TTL_SECONDS
+
+    clock.advance(REFRESH_TOKEN_TTL_SECONDS + 1)
+    assert await memory_store.get_refresh_token("ya-refresh-1") is None
 
 
 async def test_token_without_refresh(memory_store: InMemoryOAuthStore) -> None:

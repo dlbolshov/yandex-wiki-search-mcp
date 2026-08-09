@@ -1,12 +1,13 @@
 import os
+from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import AnyHttpUrl, SecretStr, ValidationError
 
-from mcp_wiki.settings import Settings
+from mcp_wiki.settings import Settings, suspicious_env_keys
 
-_ENV_PREFIXES = ("WIKI_", "OAUTH_", "REDIS_", "MCP_")
+_ENV_PREFIXES = ("WIKI_", "OAUTH_", "REDIS_", "MCP_", "TOOL_")
 _ENV_NAMES = {"HOST", "PORT", "TRANSPORT", "LOG_LEVEL"}
 
 
@@ -110,3 +111,72 @@ def test_max_retries_zero_disables_retries() -> None:
         wiki_token=SecretStr("token"), wiki_org_id="1", wiki_max_retries=0
     )
     assert settings.wiki_max_retries == 0
+
+
+@pytest.fixture
+def env_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An empty working directory, so only what a test writes is read."""
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def write_env(env_dir: Path, body: str) -> None:
+    (env_dir / ".env").write_text(body, encoding="utf-8")
+
+
+class TestUnrelatedEnvFileKeys:
+    """The env file is shared with every other tool in the directory.
+
+    It is not this server's private config, so a key that belongs to
+    something else must not stop the server from starting.
+    """
+
+    def test_unrelated_key_does_not_block_startup(self, env_dir: Path) -> None:
+        write_env(
+            env_dir,
+            "WIKI_TOKEN=abc\nWIKI_ORG_ID=123\nOPENAI_API_KEY=sk-whatever\n",
+        )
+
+        settings = Settings()
+
+        assert settings.wiki_org_id == "123"
+        assert suspicious_env_keys() == {}
+
+    def test_unrelated_key_under_a_shared_prefix_is_not_a_typo(
+        self, env_dir: Path
+    ) -> None:
+        # REDIS_ is a namespace we answer to, but REDIS_URL is nobody's typo.
+        write_env(env_dir, "WIKI_TOKEN=abc\nWIKI_ORG_ID=123\nREDIS_URL=redis://x\n")
+
+        assert Settings().wiki_org_id == "123"
+        assert suspicious_env_keys() == {}
+
+
+class TestTypoDetection:
+    """A misspelled setting is caught in either channel, not just the file."""
+
+    def test_typo_in_the_env_file_is_reported(self, env_dir: Path) -> None:
+        write_env(env_dir, "WIKI_TOKEN=abc\nWIKI_ORG_ID=123\nWIKI_READ_ONL=true\n")
+
+        assert suspicious_env_keys() == {"wiki_read_onl": "wiki_read_only"}
+
+    def test_typo_in_a_real_environment_variable_is_reported(
+        self, env_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # pydantic-settings reads only the names it knows, so nothing else
+        # notices a misspelling here — without this check the server would
+        # come up with write tools registered and say nothing.
+        monkeypatch.setenv("WIKI_READ_ONL", "true")
+
+        assert suspicious_env_keys() == {"wiki_read_onl": "wiki_read_only"}
+
+    def test_a_correctly_spelled_setting_is_never_reported(
+        self, env_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIKI_READ_ONLY", "true")
+
+        assert suspicious_env_keys() == {}
+
+    def test_missing_env_file_is_fine(self, env_dir: Path) -> None:
+        assert not (env_dir / ".env").exists()
+        assert suspicious_env_keys() == {}

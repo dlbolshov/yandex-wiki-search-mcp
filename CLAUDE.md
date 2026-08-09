@@ -81,6 +81,7 @@ Write tools:
 - `page_create`
 - `page_update`
 - `page_append_content`
+- `page_clone`
 - `page_add_comment`
 - `page_delete`
 - `page_recover`
@@ -94,8 +95,10 @@ Write tools:
 - `grid_update_cells`
 - `grid_add_columns`
 - `grid_delete_columns`
-- `grid_move_rows`
-- `grid_move_columns`
+- `grid_move_row`
+- `grid_move_column`
+
+`manifest.json` lists the same set; a registration test asserts the two stay in sync.
 
 ## Testing
 

@@ -242,6 +242,26 @@ class TestPageReadTools:
         assert [r["slug"] for r in content["results"]] == ["tech-doc/ml/page"]
         assert content["results"][0]["url"] == "https://wiki.yandex.ru/tech-doc/ml/page"
 
+    @pytest.mark.parametrize("slug_prefix", ["/", "   ", "///"])
+    async def test_page_search_rejects_a_prefix_that_normalizes_to_empty(
+        self,
+        client_session: ClientSession,
+        mock_wiki_protocol: AsyncMock,
+        slug_prefix: str,
+    ) -> None:
+        # These match no slug at all, and an empty result set gives no hint
+        # that the filter, rather than the wiki, is the reason.
+        mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
+            results=[SearchResultItem.model_construct(slug="tech-doc/ml", type="page")],
+        )
+
+        result = await client_session.call_tool(
+            "page_search", {"query": "x", "slug_prefix": slug_prefix}
+        )
+
+        assert result.isError is True
+        assert "slug_prefix must not be empty" in get_tool_result_text(result)
+
     async def test_page_get_by_slug(
         self,
         client_session: ClientSession,

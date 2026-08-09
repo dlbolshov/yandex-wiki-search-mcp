@@ -4,7 +4,7 @@ import sys
 from pydantic import ValidationError
 
 from mcp_wiki.mcp.server import create_mcp_server
-from mcp_wiki.settings import Settings
+from mcp_wiki.settings import Settings, suspicious_env_keys
 
 logger = logging.getLogger("mcp_wiki")
 
@@ -15,6 +15,21 @@ def main() -> None:
         settings = Settings()
     except ValidationError as exc:
         sys.stderr.write(str(exc) + "\n")
+        sys.exit(1)
+
+    # Refuse to start on a misspelled setting rather than run with a default
+    # the operator did not choose: WIKI_READ_ONL=true would otherwise leave
+    # every write tool registered, silently.
+    if suspects := suspicious_env_keys():
+        listed = "\n".join(
+            f"  {key.upper()} — did you mean {field.upper()}?"
+            for key, field in suspects.items()
+        )
+        sys.stderr.write(
+            f"Unrecognized setting(s) that look like a typo:\n{listed}\n"
+            "Fix or remove them; unrelated variables outside this server's "
+            "namespaces are ignored.\n"
+        )
         sys.exit(1)
 
     logging.basicConfig(

@@ -19,7 +19,6 @@ from aiohttp import (
     TraceRequestStartParams,
 )
 
-from mcp_wiki.mcp.utils import normalize_slug
 from mcp_wiki.wiki.custom.anchors import append_content_to_anchor_source
 from mcp_wiki.wiki.custom.errors import (
     GridNotFound,
@@ -31,7 +30,8 @@ from mcp_wiki.wiki.custom.errors import (
     WikiTransportError,
     build_api_error,
 )
-from mcp_wiki.wiki.proto.common import YandexAuth
+from mcp_wiki.wiki.custom.slugs import normalize_slug
+from mcp_wiki.wiki.proto.common import YandexAuth, select_org
 from mcp_wiki.wiki.proto.pages import WikiProtocol
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
@@ -216,15 +216,11 @@ class WikiClient(WikiProtocol):
                 "No authentication method provided. Configure wiki_token, wiki_iam_token, or OAuth."
             )
 
-        # Per-request auth replaces the organization as a unit. Picking each
-        # id independently would pair a request's cloud_org_id with the
-        # server-wide org_id and fail as "only one of" — so under OAuth a
-        # client could not select a cloud organization on a server that has a
-        # plain org configured as its default.
-        if auth and (auth.org_id or auth.cloud_org_id):
-            org_id, cloud_org_id = auth.org_id, auth.cloud_org_id
-        else:
-            org_id, cloud_org_id = self._org_id, self._cloud_org_id
+        org_id, cloud_org_id = select_org(
+            auth,
+            default_org_id=self._org_id,
+            default_cloud_org_id=self._cloud_org_id,
+        )
 
         if org_id and cloud_org_id:
             raise WikiConfigError(
