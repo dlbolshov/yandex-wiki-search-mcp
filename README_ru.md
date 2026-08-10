@@ -1,8 +1,8 @@
 [English](README.md) | **Русский**
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/logo/logo-primary.svg" alt="Логотип yandex-wiki-search-mcp" width="104">
-</p>
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/logo/logo-primary.svg" alt="Логотип yandex-wiki-search-mcp" width="120">
 
 # Yandex Wiki Search MCP
 
@@ -13,6 +13,8 @@
 [![codecov](https://img.shields.io/codecov/c/github/dlbolshov/yandex-wiki-search-mcp?logo=codecov&logoColor=white)](https://app.codecov.io/gh/dlbolshov/yandex-wiki-search-mcp)
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
+
+</div>
 
 ![Демо: поиск страницы в вики и саммари через MCP](https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/demo.gif)
 
