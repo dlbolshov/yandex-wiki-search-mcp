@@ -419,7 +419,9 @@ class WikiClient(WikiProtocol):
         ``?slug=`` as the root and answers with every page in the
         organization, all nesting levels, top-level pages included. It is a
         deliberate contract rather than a fallback for bad input — an
-        unresolvable slug 404s instead (verified live 2026-08-10).
+        unresolvable slug 404s instead (verified live 2026-08-10). A 404 on
+        the empty slug therefore stays a plain API error: there is no page
+        for ``PageNotFound("")`` to name.
         """
         normalized_slug = normalize_slug(slug)
         params: dict[str, Any] = {
@@ -435,7 +437,9 @@ class WikiClient(WikiProtocol):
             "v1/pages/descendants",
             params=params,
             auth=auth,
-            not_found=lambda: PageNotFound(normalized_slug),
+            not_found=(
+                (lambda: PageNotFound(normalized_slug)) if normalized_slug else None
+            ),
         )
         return DescendantsResponse.model_validate_json(payload)
 

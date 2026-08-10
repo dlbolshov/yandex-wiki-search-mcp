@@ -279,7 +279,28 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
                     "with page_id or slug."
                 )
             resolved_slug = ""
+            # Dropped rather than forwarded: the parameter's description
+            # promises it is ignored here, and the root is no page to
+            # include — so the promise holds on this side of the wire
+            # instead of relying on the API to keep ignoring it.
+            include_self = False
         else:
+            if page_id is None and slug is None:
+                raise ValueError(
+                    "Provide exactly one of page_id or slug, or pass "
+                    "from_root=true to traverse the whole Wiki."
+                )
+            # '/' and '' are how a caller reaches for the root before
+            # finding from_root, and normalize_slug turns both into ''.
+            # resolve_page_locator would answer "Slug must not be empty",
+            # which is a dead end for the one caller who most needs the
+            # flag. Skipped when page_id is also set: there the exclusivity
+            # violation is the real error, and that caller has a page.
+            if page_id is None and slug is not None and not normalize_slug(slug):
+                raise ValueError(
+                    "Slug must not be empty. Pass from_root=true to traverse "
+                    "the whole Wiki."
+                )
             resolved_slug = await resolve_page_slug(ctx, page_id=page_id, slug=slug)
         auth = get_yandex_auth(ctx)
 

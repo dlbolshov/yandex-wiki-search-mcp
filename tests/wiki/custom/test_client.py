@@ -1051,3 +1051,24 @@ class TestWikiClient:
 
         assert [item.slug for item in response.results] == ["tech-doc"]
         capture.last_request.assert_param("slug", "")
+
+    async def test_page_get_descendants_root_404_stays_an_api_error(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        """A 404 on the root walk is not a missing page.
+
+        The contract rules it out — an empty slug answers 200 — so if one
+        ever arrives, PageNotFound("") would name nothing. The plain
+        WikiApiError with its status is the honest report.
+        """
+        capture = RequestCapture(status=404, payload={})
+        with aioresponses() as mocked:
+            mocked.get(
+                re.compile(r"https://api\.wiki\.yandex\.net/v1/pages/descendants.*"),
+                callback=capture.callback,
+            )
+            with pytest.raises(WikiApiError) as exc_info:
+                await wiki_client.page_get_descendants("")
+
+        assert exc_info.value.status == 404
