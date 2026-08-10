@@ -3,6 +3,18 @@
   "name": "io.github.dlbolshov/yandex-wiki-search-mcp",
   "version": "1.2.0",
   "description": "MCP server for Yandex Wiki with full-text search.",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/logo/icon-512.png",
+      "sizes": ["512x512"],
+      "mimeType": "image/png"
+    },
+    {
+      "src": "https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/logo/logo-primary.svg",
+      "sizes": ["any"],
+      "mimeType": "image/svg+xml"
+    }
+  ],
   "packages": [
     {
       "registryType": "pypi",
