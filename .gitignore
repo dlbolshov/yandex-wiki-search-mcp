@@ -172,3 +172,7 @@ requirements.txt
 # Live API probe output (real org data) - never commit
 raw/
 scripts/raw/
+
+# Logo generator output and fonts (docs/assets/logo/build.py)
+docs/assets/logo/dist/
+docs/assets/logo/fonts/
