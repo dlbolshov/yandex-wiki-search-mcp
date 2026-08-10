@@ -283,10 +283,10 @@ Query-параметр важнее общесерверной настройк�
 
 ```mermaid
 flowchart LR
-    C["MCP-клиент<br/>Claude / Cursor / Windsurf / VS Code"]
+    C["MCP-клиент&lt;br/&gt;Claude / Cursor / Windsurf / VS Code"]
     S["yandex-wiki-search-mcp"]
     W["Yandex Wiki API"]
-    R[("Redis<br/>опциональное хранилище OAuth-токенов")]
+    R[("Redis&lt;br/&gt;опциональное хранилище OAuth-токенов")]
     C -- "stdio (локально, один пользователь)" --> S
     C -- "streamable-http (+ OAuth, много пользователей)" --> S
     S --> W
