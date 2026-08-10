@@ -125,9 +125,9 @@ pip install "yandex-wiki-search-mcp<2"
 
 | Tool | What it does |
 |---|---|
-| `page_search` | Full-text search across the entire Wiki (pages and files), up to 50 ranked results with snippets |
+| `page_search` | Full-text search across the entire Wiki (pages and files), up to 50 ranked results with a text excerpt each |
 | `page_get` | Get a page by `page_id` or `slug` (accepts full Wiki URLs too) |
-| `page_get_descendants` | Traverse a page subtree — one flat list of `{id, slug}` from all nesting levels; `fetch_all` drains the cursor in one call |
+| `page_get_descendants` | Traverse a page subtree — one flat list of `{id, slug}` from all nesting levels; `from_root=true` walks the whole Wiki; `fetch_all` drains the cursor in one call |
 | `page_get_comments` | List page comments (`fetch_all` supported) |
 | `page_get_resources` | List page resources (attachments + grids) with server-side title search (`fetch_all` supported) |
 | `page_get_attachments` | List page attachments (`fetch_all` supported) |
@@ -213,6 +213,15 @@ backend that powers the Wiki web search bar. Search first, then open a result wi
 - Up to **50** results per call (`limit` is clamped to 1–50; the API rejects anything else).
 - Search is **global only** — `slug_prefix` and `result_type` filters are applied client-side after fetching, so combine them with `limit=50` to avoid missing matches.
 - Quoted `"exact phrase"` queries work; `page` results get absolute `https://wiki.yandex.ru/...` links, `file` results get direct download links.
+- `content` is a **~510-character excerpt, not the page and not a summary**: it is cut from wherever the match sits, nothing is highlighted, the query terms need not be inside it, and its line breaks and tabs are the page's own layout (table cells arrive tab-separated) rather than separators between fragments. Read the page with `page_get` before answering from it. Empty for `file` results.
+
+## Traversing the tree
+
+`page_get_descendants` returns a subtree as one flat list of `{id, slug}` from every
+nesting level. Passing `from_root=true` instead of `page_id`/`slug` walks the **whole
+Wiki** — the way in when no starting slug is known, so search is not the only entry
+point. Prefer a section slug when you have one: wikis run to thousands of pages, and
+`fetch_all` stops at its ~500-item cap with `truncated: true`.
 
 More verified API behavior (scopes, 403 semantics, error envelopes, limits): [docs/api-notes.md](docs/api-notes.md).
 

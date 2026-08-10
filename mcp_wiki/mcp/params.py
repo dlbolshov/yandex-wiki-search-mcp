@@ -248,7 +248,7 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
     capabilities = [
         "- Discover pages across the whole Wiki with page_search, then open a result by its slug with page_get.",
         "- Read Wiki pages by slug or ID",
-        "- Traverse a page subtree",
+        "- Traverse a page subtree, or the whole Wiki with page_get_descendants(from_root=true)",
         "- Read comments, resources, and attachments",
         "- Read page grids and get dynamic tables",
     ]
@@ -264,6 +264,7 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
     notes = [
         'In russian Yandex Wiki is called "Яндекс Вики" or "Вики".',
         "If a tool accepts `page_id` and `slug`, provide exactly one of them.",
+        "The `content` on a `page_search` result is an excerpt of at most ~510 characters taken from wherever the match sits in the page — not the page and not a summary, unhighlighted, and sometimes without the query terms in it. Use it to pick a result, then read the page with `page_get` before answering from it.",
         "When you need a full list from a cursor-paginated tool, pass `fetch_all=true` — the server follows the cursors for you and returns everything in one call. Only if the reply carries `truncated: true` is the list incomplete: continue from `next_cursor`, or narrow the request. Walk cursors by hand only when a tool has no `fetch_all`.",
     ]
     if read_only:

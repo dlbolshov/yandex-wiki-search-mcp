@@ -36,7 +36,7 @@
   "tools": [
     {
       "name": "page_search",
-      "description": "Full-text search across the entire Yandex Wiki"
+      "description": "Full-text search across the entire Yandex Wiki; each result carries a ~510-character text excerpt, not the page"
     },
     {
       "name": "page_get_grids",
@@ -52,7 +52,7 @@
     },
     {
       "name": "page_get_descendants",
-      "description": "Get a page subtree as one flat list of {id, slug} from all nesting levels"
+      "description": "Get a page subtree as one flat list of {id, slug} from all nesting levels, or the whole Wiki with from_root=true"
     },
     {
       "name": "page_get_comments",

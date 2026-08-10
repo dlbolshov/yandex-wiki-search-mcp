@@ -129,12 +129,18 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         description=(
             "Full-text search across the entire Yandex Wiki. Returns up to 50 results "
             "(pages and files) ranked by relevance, each with a title, slug, url, and a "
-            "short text snippet in `content` (there is no deeper pagination). Use this "
+            "text excerpt in `content` (there is no deeper pagination). Use this "
             "to DISCOVER pages, then call page_get with a result's "
-            "slug to read full content. Wrap multi-word exact phrases in double quotes. "
-            "Search is global: there is no server-side section filter. slug_prefix and "
-            "result_type are applied client-side AFTER fetching, so combine them with "
-            "limit=50 to avoid missing matches."
+            "slug to read full content. `content` is an excerpt of at most ~510 "
+            "characters cut from wherever the match sits in the page — not the page "
+            "and not a summary of it, with no highlighting and no guarantee the query "
+            "terms are even inside it — so treat it as a relevance signal and read the "
+            "page before answering from it. Wrap multi-word exact phrases in double "
+            "quotes. Search is global: there is no server-side section filter. "
+            "slug_prefix and result_type are applied client-side AFTER fetching, so "
+            "combine them with limit=50 to avoid missing matches. To enumerate a "
+            "section (or the whole Wiki) rather than search it, use "
+            "page_get_descendants."
         ),
         annotations=READ_ONLY,
     )
@@ -224,7 +230,13 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
             "'<parent>/x'), so the tree can be reconstructed without further "
             "calls. Combine with fetch_all=true to map a whole section at once; "
             "if the result comes back truncated=true, continue via next_cursor "
-            "or narrow down by calling this tool on a subsection's slug."
+            "or narrow down by calling this tool on a subsection's slug. "
+            "Pass from_root=true instead of page_id/slug to enumerate the WHOLE "
+            "Wiki, top-level pages included — the way to inventory an "
+            "organization when no starting slug is known. Prefer a section slug "
+            "when you have one: a full wiki is routinely thousands of pages, so "
+            "a root walk costs many requests and a large reply, and fetch_all "
+            "stops at its ~500-item cap with truncated=true."
         ),
         annotations=READ_ONLY,
     )
@@ -232,17 +244,64 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         ctx: ToolContext,
         page_id: OptionalPageID = None,
         slug: OptionalPageSlug = None,
+        from_root: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Traverse the whole Wiki instead of one page's subtree. "
+                    "Mutually exclusive with page_id and slug."
+                )
+            ),
+        ] = False,
         include_self: Annotated[
             bool,
             Field(
-                description="Whether to include the root page itself in the subtree."
+                description=(
+                    "Whether to include the parent page itself in the subtree. "
+                    "Ignored with from_root=true — the root is not a page."
+                )
             ),
         ] = False,
         page_size: PageSize = 100,
         cursor: Cursor = None,
         fetch_all: FetchAll = False,
     ) -> DescendantsResponse:
-        resolved_slug = await resolve_page_slug(ctx, page_id=page_id, slug=slug)
+        # The Wiki API reads an empty ?slug= as "the whole organization" — a
+        # deliberate contract, not a fallback: an unresolvable slug 404s
+        # instead (verified live 2026-08-10, docs/api-notes.md). It stays
+        # behind an explicit flag because reaching it by leaving both
+        # locators out would turn every forgotten argument into a
+        # thousands-of-pages walk.
+        if from_root:
+            if page_id is not None or slug is not None:
+                raise ValueError(
+                    "from_root traverses the whole Wiki and cannot be combined "
+                    "with page_id or slug."
+                )
+            resolved_slug = ""
+            # Dropped rather than forwarded: the parameter's description
+            # promises it is ignored here, and the root is no page to
+            # include — so the promise holds on this side of the wire
+            # instead of relying on the API to keep ignoring it.
+            include_self = False
+        else:
+            if page_id is None and slug is None:
+                raise ValueError(
+                    "Provide exactly one of page_id or slug, or pass "
+                    "from_root=true to traverse the whole Wiki."
+                )
+            # '/' and '' are how a caller reaches for the root before
+            # finding from_root, and normalize_slug turns both into ''.
+            # resolve_page_locator would answer "Slug must not be empty",
+            # which is a dead end for the one caller who most needs the
+            # flag. Skipped when page_id is also set: there the exclusivity
+            # violation is the real error, and that caller has a page.
+            if page_id is None and slug is not None and not normalize_slug(slug):
+                raise ValueError(
+                    "Slug must not be empty. Pass from_root=true to traverse "
+                    "the whole Wiki."
+                )
+            resolved_slug = await resolve_page_slug(ctx, page_id=page_id, slug=slug)
         auth = get_yandex_auth(ctx)
 
         async def fetch(next_cursor: str | None) -> DescendantsResponse:

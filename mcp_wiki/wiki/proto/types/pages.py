@@ -125,7 +125,20 @@ class SearchResultItem(BaseWikiModel):
     url: str | None = None
     slug: str | None = None
     title: str | None = None
-    content: str | None = None
+    content: str | None = Field(
+        default=None,
+        description=(
+            "Rendered text excerpt from the page, capped at ~510 characters. "
+            "It is NOT the page's content and NOT a summary of it: the excerpt "
+            "is a window taken from wherever the match is, which on a long page "
+            "can start thousands of characters in. The query terms are not "
+            "highlighted and need not appear in the excerpt at all, so never "
+            "answer from this field — call page_get with the result's slug to "
+            "read the page. Line breaks and tabs inside it are the source page's "
+            "own layout (table cells arrive tab-separated), not separators "
+            "between excerpts. Empty for type='file' results."
+        ),
+    )
     type: str | None = None
     modified_at: str | None = None
 

@@ -49,6 +49,26 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   datetime string**. Two result types: **`page`** (relative `url`, normalized by the tool
   to an absolute link based on `WIKI_WEB_BASE_URL`) and **`file`** (absolute
   `...?download=1` download link).
+- **What `content` actually is** (measured 2026-08-10 over 196 page results across four
+  queries, each cross-checked against the page fetched by slug). It reads like a digest
+  and is not one:
+  - **A window of the page's rendered text, hard-capped at ~510 characters.** Observed
+    lengths run 12–530, clustering at 505–511; medians per query 312–427. Pages of 10k
+    characters get the same ~500-character budget.
+  - **Positioned at the match, not at the head.** Only 9 of 50 sampled excerpts started
+    at offset 0; others began 604, 2215, 2298, 2915, 3078 characters in. So it is neither
+    a lede nor a summary.
+  - **One contiguous window in the normal case** — 9 of 11 locatable samples; the rest
+    genuinely spanned the page (one covered offsets 2298→4252 of 5504). The
+    `\n`/`\t` inside are **the source page's own layout**, not fragment separators:
+    table cells arrive tab-separated, which is why 109/196 excerpts contain tabs.
+  - **No highlighting of any kind** — 0/196 carried `<b>`/`<em>`/`<mark>`, `**` or `==` —
+    and the query term is not guaranteed to be present at all (29/50).
+  - Headings often arrive **doubled** at the start (`Таблица ПлощадокТаблица Площадок`).
+  - Empty for `type: "file"` results.
+  - Comparing `content` against `page_get`'s `content` needs care: the excerpt is
+    rendered text while the page field is YFM markup, so a literal diff understates the
+    overlap.
 - Size, measured with `scripts/token_probe.py` on 2026-08-04 at `limit=50`: a 48-hit
   response is ~28k chars, of which ~14k are snippets — 33 of 48 snippets exceed 200
   chars. Worth knowing before raising `limit`: the endpoint honoring `limit`
@@ -104,6 +124,29 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   list — not just direct children (verified 2026-08-03: a 3-level tree arrives in a single
   call). There is no depth parameter; slugs encode the hierarchy, so depth is
   `slug.count("/")` relative to the root.
+- **An empty `?slug=` means the whole organization** (verified 2026-08-10). It answers
+  `200` and drains to every page in the wiki, top-level pages included — 2039 items over
+  21 requests at `page_size=100`, 16 top-level segments, depth 0–9, in the organization
+  probed. Three checks that this is a deliberate contract and not a quirk:
+  - it is **not** a fallback for bad input — `?slug=zzz-no-such-page-000` answers `404`;
+  - the numbers reconcile — `?slug=tech-doc` yields 1064 items while the root walk holds
+    1065 with that prefix, the extra one being `tech-doc` itself (`include_self=false`);
+  - nothing is hidden from it — of ~200 search hits across four queries, **0** were
+    missing from the root walk.
+
+  `include_self=true` changes nothing there, the root being no page. Omitting `slug`
+  altogether is a `400`, so the empty value is load-bearing: anything that strips an
+  empty query parameter turns a wiki-wide walk into a validation error. Exposed as
+  `page_get_descendants(from_root=true)`, deliberately behind an explicit flag so a
+  forgotten argument cannot become a thousands-of-pages walk.
+- There is **no root page**. `homepage` exists and is an ordinary page — its subtree held
+  a single child — while the real top level is a set of sibling slugs (`tech-doc`,
+  `users`, `common`, …). The organization root is reachable only as the empty slug above.
+- `GET /pages/{id}/descendants` is an **undocumented by-id variant** of the same
+  endpoint and works (`404` for an unknown id). The client uses the `?slug=` form only.
+- **No other enumeration endpoint exists.** `GET /pages` without a slug is a `400`;
+  `/pages/tree`, `/pages/root`, `/pages/list`, `/navigation` and `/clusters` are all
+  `404` (probed 2026-08-10).
 - Delete → recover (`DELETE /pages/{id}` → `POST /recovery_tokens/{token}/recover`)
   restores the page with the **same id**; the recover response also carries `slug` and
   `pages_count` (subtree size).
