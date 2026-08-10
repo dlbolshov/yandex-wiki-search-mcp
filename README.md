@@ -280,10 +280,10 @@ See [`.env.example`](.env.example) for the full annotated list and [`compose.yam
 
 ```mermaid
 flowchart LR
-    C["MCP client<br/>Claude / Cursor / Windsurf / VS Code"]
+    C["MCP client&lt;br/&gt;Claude / Cursor / Windsurf / VS Code"]
     S["yandex-wiki-search-mcp"]
     W["Yandex Wiki API"]
-    R[("Redis<br/>optional OAuth token store")]
+    R[("Redis&lt;br/&gt;optional OAuth token store")]
     C -- "stdio (local, single user)" --> S
     C -- "streamable-http (+ OAuth, multi-user)" --> S
     S --> W
