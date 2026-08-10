@@ -88,17 +88,17 @@ claude mcp add yandex-wiki-search \
 3. Ask your agent something — see below.
 
 <details>
-<summary><b>Need the 1.x line?</b></summary>
+<summary><b>Need the old MCP SDK (1.x)?</b></summary>
 
 The server runs on MCP Python SDK v2. That is invisible to clients — one v2 server
 answers every protocol revision back to `2024-11-05` as well as the current one, so
 there is nothing to change on your side and nothing to reinstall.
 
-The only reason to stay on 1.x is a shared environment that pins `mcp<2` for something
-else. Every 1.x release stays on PyPI:
+The only reason to hold back is a shared environment that pins `mcp<2` for something
+else. `1.0.1` is the last release built on the 1.x SDK and stays on PyPI:
 
 ```bash
-pip install "yandex-wiki-search-mcp<2"
+pip install "yandex-wiki-search-mcp<1.1"
 ```
 
 </details>
