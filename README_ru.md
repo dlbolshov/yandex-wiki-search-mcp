@@ -1,5 +1,9 @@
 [English](README.md) | **Русский**
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/logo/logo-primary.svg" alt="Логотип yandex-wiki-search-mcp" width="104">
+</p>
+
 # Yandex Wiki Search MCP
 
 [![yandex-wiki-search-mcp MCP server](https://glama.ai/mcp/servers/dlbolshov/yandex-wiki-search-mcp/badges/score.svg)](https://glama.ai/mcp/servers/dlbolshov/yandex-wiki-search-mcp)
@@ -10,11 +14,13 @@
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
 
-![Демо: поиск страницы в вики и саммари через MCP](docs/assets/demo.gif)
+![Демо: поиск страницы в вики и саммари через MCP](https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/demo.gif)
 
 Подключите Claude, Cursor, Windsurf или любой MCP-клиент к **Яндекс Вики**: полнотекстовый
 поиск, страницы, комментарии, вложения и динамические таблицы («гриды») — **27 тулзов**
 с типизированными схемами.
+
+*Неофициальный проект — не аффилирован с Яндексом и не одобрен им.*
 
 - 🔍 **Полнотекстовый поиск** по всей вики — тот же бэкенд, что у строки поиска в веб-интерфейсе, до 50 результатов за запрос
 - 📄 **Полный цикл работы со страницами** — создание, обновление, дозапись (верх / низ / якорь), клонирование, удаление с токеном восстановления, комментарии, загрузка файлов
@@ -380,6 +386,14 @@ sweep по API. Оригинальные копирайт и лицензия с
 он первым обнаружил недокументированный эндпоинт `POST /v1/search` и сообщил, что
 OAuth-скоупы не проверяются. Код оттуда не заимствовался — только находки и идеи,
 независимо перепроверенные на живой организации и расширенные здесь.
+
+## Товарные знаки
+
+«Яндекс» и «Яндекс Вики» — товарные знаки ООО «Яндекс». Это неофициальный
+проект: не аффилирован с Яндексом, не спонсируется и не одобряется им — названия
+используются номинативно, чтобы сказать, с каким сервисом работает сервер.
+Логотип — самостоятельный знак, не воспроизводящий ни фирменный стиль Яндекс Вики,
+ни логотип MCP ([заметки по дизайну](docs/assets/logo/README.md)).
 
 ---
 

@@ -1,5 +1,9 @@
 **English** | [Русский](README_ru.md)
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/logo/logo-primary.svg" alt="yandex-wiki-search-mcp logo" width="104">
+</p>
+
 # Yandex Wiki Search MCP
 
 [![yandex-wiki-search-mcp MCP server](https://glama.ai/mcp/servers/dlbolshov/yandex-wiki-search-mcp/badges/score.svg)](https://glama.ai/mcp/servers/dlbolshov/yandex-wiki-search-mcp)
@@ -10,10 +14,12 @@
 [![License](https://img.shields.io/github/license/dlbolshov/yandex-wiki-search-mcp)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-yandex--wiki--search--mcp-2496ED?logo=docker&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/pkgs/container/yandex-wiki-search-mcp)
 
-![Demo: search a wiki page and summarize it via MCP](docs/assets/demo.gif)
+![Demo: search a wiki page and summarize it via MCP](https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/demo.gif)
 
 Connect Claude, Cursor, Windsurf, or any MCP client to **Yandex Wiki**: full-text search,
 pages, comments, attachments, and dynamic tables ("grids") — **27 tools** with typed schemas.
+
+*An unofficial project — not affiliated with or endorsed by Yandex.*
 
 - 🔍 **Full-text search** across the entire wiki — the same backend that powers the Wiki web search bar, up to 50 results per query
 - 📄 **Full page lifecycle** — create, update, append (top / bottom / anchor), clone, delete with a recovery token, comments, file uploads
@@ -376,6 +382,14 @@ The idea and key API findings behind full-text search come from
 it was the first to discover the undocumented `POST /v1/search` endpoint and to report
 that OAuth scopes are not enforced. No code was taken from it — only findings and ideas,
 independently re-verified against a live organization and extended here.
+
+## Trademarks
+
+"Yandex" and "Yandex Wiki" are trademarks of YANDEX LLC. This is an unofficial,
+community-built project: not affiliated with, sponsored, or endorsed by Yandex — the
+names are used nominatively, to state which service the server talks to. The logo is
+an original mark that reproduces neither Yandex Wiki nor MCP branding
+([design notes](docs/assets/logo/README.md)).
 
 ---
 
