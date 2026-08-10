@@ -345,6 +345,8 @@ uv run pytest                   # tests
 ```
 
 Before committing, run the full verification set from [CONTRIBUTING.md](CONTRIBUTING.md).
+How the server is put together — the layers, the code map, testing seams, CI and the
+release process — is described in [docs/architecture.md](docs/architecture.md).
 Verified API behavior and probe scripts are documented in [docs/api-notes.md](docs/api-notes.md).
 
 The Wiki API drifts (its undocumented search endpoint silently changed contract once

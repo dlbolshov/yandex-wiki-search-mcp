@@ -348,6 +348,8 @@ uv run pytest                   # тесты
 ```
 
 Перед коммитом прогоните полный набор проверок из [CONTRIBUTING.md](CONTRIBUTING.md).
+Как сервер устроен — слои, карта кода, швы тестирования, CI и процесс релиза —
+описано в [docs/architecture_ru.md](docs/architecture_ru.md).
 Проверенное поведение API и probe-скрипты описаны в [docs/api-notes_ru.md](docs/api-notes_ru.md).
 
 Вики-API дрейфует (недокументированный эндпоинт поиска уже однажды молча сменил

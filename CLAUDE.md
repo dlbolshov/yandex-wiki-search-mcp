@@ -40,6 +40,8 @@ task test
 
 ## Architecture
 
+The full developer guide — layers, code map, design decisions, testing seams, CI and the release process — lives in `docs/architecture.md` (EN) and `docs/architecture_ru.md` (RU). **When a change alters anything described there (structure, tool surface, contracts, CI, release flow), update both files in the same change.**
+
 - `mcp_wiki/settings.py`
   Pydantic settings sourced from environment variables.
   Main runtime env vars are `WIKI_TOKEN` or `WIKI_IAM_TOKEN`, plus exactly one of `WIKI_ORG_ID` or `WIKI_CLOUD_ORG_ID`.
@@ -187,6 +189,7 @@ When adding a new MCP tool:
    - `README_ru.md`
    - `manifest.json`
    - `CHANGELOG.md`
+   - `docs/architecture.md` + `docs/architecture_ru.md` (if the change touches anything they describe)
 6. Add tests in the matching `tests/mcp/...` or `tests/wiki/...` location.
 
 ## Configuration Notes
