@@ -73,6 +73,12 @@ dev = [
 [tool.mypy]
 plugins = ["pydantic.mypy"]
 python_version = "3.11"
+# The logo generator is a vendored design artifact with its own compact
+# style, not package code — every checker skips it (see also [tool.ruff]
+# and [tool.ty.src]). `local/` is a gitignored scratch dir that only
+# exists on dev machines; mypy is the one checker that doesn't respect
+# .gitignore and trips over duplicate module names in there.
+exclude = ["^docs/assets/logo/build\\.py$", "^local/"]
 check_untyped_defs = true
 disallow_untyped_defs = true
 warn_redundant_casts = true
@@ -84,6 +90,10 @@ module = ["aiocache.*", "aioresponses.*"]
 ignore_missing_imports = true
 
 [tool.ruff]
+extend-exclude = ["docs/assets/logo/build.py"]
+
+[tool.ty.src]
+exclude = ["docs/assets/logo/build.py"]
 
 [tool.ruff.format]
 quote-style = "double"
