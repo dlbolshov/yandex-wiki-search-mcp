@@ -413,6 +413,14 @@ class WikiClient(WikiProtocol):
         cursor: str | None = None,
         auth: YandexAuth | None = None,
     ) -> DescendantsResponse:
+        """Descendants of a page, or of the whole organization.
+
+        An empty slug is not a mistake to guard against: the API reads
+        ``?slug=`` as the root and answers with every page in the
+        organization, all nesting levels, top-level pages included. It is a
+        deliberate contract rather than a fallback for bad input — an
+        unresolvable slug 404s instead (verified live 2026-08-10).
+        """
         normalized_slug = normalize_slug(slug)
         params: dict[str, Any] = {
             "slug": normalized_slug,

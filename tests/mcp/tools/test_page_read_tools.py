@@ -302,6 +302,73 @@ class TestPageReadTools:
         )
         mock_wiki_protocol.page_get_descendants.assert_awaited_once()
 
+    async def test_page_get_descendants_from_root(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        """from_root reaches the API's whole-organization traversal.
+
+        The empty slug is the payload under test: the Wiki API reads ?slug=
+        as the root, so anything that "sanitizes" it away silently turns a
+        wiki-wide walk into a 400.
+        """
+        mock_wiki_protocol.page_get_descendants.return_value = {
+            "results": [{"id": 10, "slug": "tech-doc"}, {"id": 11, "slug": "users"}],
+            "next_cursor": None,
+            "prev_cursor": None,
+        }
+
+        result = await client.call_tool(
+            "page_get_descendants",
+            {"from_root": True},
+        )
+
+        assert [i["slug"] for i in get_tool_result_content(result)["results"]] == [
+            "tech-doc",
+            "users",
+        ]
+        call = mock_wiki_protocol.page_get_descendants.await_args
+        assert call.args[0] == ""
+        # no page lookup: the root is not a page and must not be resolved
+        mock_wiki_protocol.page_get.assert_not_awaited()
+        mock_wiki_protocol.page_get_by_slug.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "locator",
+        [{"slug": "users/test/page"}, {"page_id": 42}],
+        ids=["slug", "page_id"],
+    )
+    async def test_page_get_descendants_from_root_rejects_locator(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+        locator: dict[str, Any],
+    ) -> None:
+        result = await client.call_tool(
+            "page_get_descendants",
+            {"from_root": True, **locator},
+        )
+
+        assert result.is_error is True
+        assert "cannot be combined" in get_tool_result_text(result)
+        mock_wiki_protocol.page_get_descendants.assert_not_awaited()
+
+    async def test_page_get_descendants_requires_a_locator(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        """Omitting everything stays an error rather than meaning the root.
+
+        A forgotten argument must not silently become a thousands-of-pages
+        walk; reaching the root is opt-in through from_root.
+        """
+        result = await client.call_tool("page_get_descendants", {})
+
+        assert result.is_error
+        mock_wiki_protocol.page_get_descendants.assert_not_awaited()
+
     async def test_page_get_descendants_fetch_all(
         self,
         client: Client,

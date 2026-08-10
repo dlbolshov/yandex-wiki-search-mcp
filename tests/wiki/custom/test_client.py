@@ -1021,3 +1021,33 @@ class TestWikiClient:
                 await wiki_client.page_get_descendants("/users/test/page/")
 
         assert exc_info.value.page_identifier == "users/test/page"
+
+    @pytest.mark.parametrize("slug", ["", "/"], ids=["empty", "slash"])
+    async def test_page_get_descendants_root_sends_empty_slug(
+        self,
+        wiki_client: WikiClient,
+        slug: str,
+    ) -> None:
+        """The root walk depends on ?slug= reaching the API empty.
+
+        Normalization turns '/' into '' and the parameter must survive that
+        rather than being dropped or replaced: the Wiki API reads an empty
+        slug as the whole organization, and a missing one is a 400.
+
+        Asserted on what the client hands aiohttp, not on the captured URL —
+        aioresponses drops empty parameters when it rebuilds the query
+        string, while aiohttp puts `slug=` on the wire (live 2026-08-10:
+        empty answers 200 with the whole org, absent answers 400).
+        """
+        capture = RequestCapture(
+            payload={"results": [{"id": 1, "slug": "tech-doc"}], "next_cursor": None}
+        )
+        with aioresponses() as mocked:
+            mocked.get(
+                re.compile(r"https://api\.wiki\.yandex\.net/v1/pages/descendants.*"),
+                callback=capture.callback,
+            )
+            response = await wiki_client.page_get_descendants(slug)
+
+        assert [item.slug for item in response.results] == ["tech-doc"]
+        capture.last_request.assert_param("slug", "")

@@ -211,6 +211,8 @@ Constraints:
 - `page_update` replaces full content when `content` is provided
 - file upload uses Yandex Wiki multipart upload sessions
 - `HOST` must reach `run()` / `streamable_http_app()`, or HTTP transports answer `421` behind any non-loopback hostname
+- `GET /pages/descendants?slug=` **empty means the whole organization** — a real contract, not bad input (an unresolvable slug 404s). `page_get_descendants(from_root=true)` is the only caller that sends it; do not add an "empty slug" guard to `WikiClient.page_get_descendants` or to the params model, and note that omitting the parameter entirely is a `400`. `resolve_page_locator` still rejects the empty slug for every other tool, where the API genuinely needs a page
+- `page_search` results carry a ~510-character excerpt in `content`, cut from wherever the match sits and unhighlighted — not the page and not a summary. Its `\n`/`\t` are the source page's layout, not fragment separators. This is documented in three places that must stay in sync: the field description in `wiki/proto/types/pages.py`, the tool description, and `build_instructions()`
 
 Per-request organization override:
 - a client may append `?orgId=` or `?cloudOrgId=` to the server endpoint, and those replace the configured organization for that request
