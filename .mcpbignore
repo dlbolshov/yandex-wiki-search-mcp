@@ -29,3 +29,4 @@ server.json
 .dockerignore
 tests
 Taskfile.yml
+docs/assets/*.gif
