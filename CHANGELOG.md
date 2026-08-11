@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+Documentation and probes only — the tool surface is unchanged. In August 2026 Yandex
+published a full Wiki API reference (the search endpoint included, undocumented until
+then) and its own hosted MCP server; every claim was checked against the live API
+before being absorbed.
+
+### Internal
+- `scripts/docs_probe.py` — a new live probe that walks the 2026-08 documentation drop claim by claim on both a full-scope and a `wiki:read`-only token, and captures the hosted MCP server's `tools/list`. Verdicts, in short: search filters (`type`/`cluster`/date intervals) and `highlight` are live, search `cursor` and `order_by` are documented but dead, OAuth scopes are documented but still not enforced (the read-only token wrote, HTTP 200), attachment download/deletion, comment deletion and redirect-via-update all work, the comment thread endpoint answers 200 but returned an empty list for a root comment with a live reply
+- `docs/api-notes.md` (EN/RU) reframed for the era of an official reference: the notes no longer restate what the reference covers — they track where the wire and the docs disagree and what the docs leave out. Stale claims removed ("no server-side filtering", "the only server-side text filter", "undocumented `is_downloadable`"), findings above recorded with dates
+- README comparison table (EN/RU) now includes Yandex's official hosted MCP server (`wiki-mcp-server` 1.28.1, tool list captured live 2026-08-11): no search tool, no attachment upload, no read-only mode, no typed output schemas, per-user token pasted into static headers; best-doctor moved to the "Also worth knowing" list to keep the table at five columns
+- ROADMAP gains M7 (v1.3.0) — adopt the newly documented API surface: server-side search filters + `highlight`, comment deletion, attachment download/deletion, redirect via `page_update`; per-page access management, the thread endpoint and `actuality` are explicitly left out
+- "Undocumented search endpoint" wording adjusted across READMEs, architecture docs and credits — it is "undocumented until August 2026" now
+
 ## [1.2.1] - 2026-08-11
 
 Branding and packaging metadata only — no change to the tool surface or server

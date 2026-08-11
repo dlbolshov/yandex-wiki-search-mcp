@@ -185,41 +185,46 @@ Grid specifics:
 
 ## How it compares
 
-Facts verified against the alternatives' docs and published code, July–August 2026.
+Facts verified against the alternatives' docs and published code, July–August 2026;
+the official hosted server's tool list captured live from `mcp.wiki.yandex.net`
+(`wiki-mcp-server` 1.28.1, 2026-08-11).
 
-| | **yandex-wiki-search-mcp** | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) | [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) |
+| | **yandex-wiki-search-mcp** | [Yandex's official MCP](https://yandex.ru/support/wiki/en/mcp) (hosted) | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) |
 |---|---|---|---|---|---|
-| Full-text search | ✅ up to 50 results, client-side filters | ❌ | ✅ up to 10 results | ❌ | ❌ |
-| Pages: create / update / append / delete + recover | ✅ all | ✅ all | partial — no append / recover | partial — no delete / recover | partial — no recover |
+| Full-text search | ✅ up to 50 results, client-side filters | ❌ no search tool | ❌ | ✅ up to 10 results | ❌ |
+| Pages: create / update / append / delete + recover | ✅ all | partial — no append / recover; adds partial edits via text replacement | ✅ all | partial — no append / recover | partial — no recover |
 | Pages: clone to a new slug | ✅ `page_clone` | ❌ | ❌ | ❌ | ✅ |
-| Grids: write tools | ✅ 11 | ✅ 11 | ❌ read-only | ❌ no grid tools | ✅ 11, incl. clone |
-| Comments, attachment upload | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Server-side read-only mode | ✅ | ✅ | ❌ | ✅ separate `-ro` entry point | ❌ |
+| Grids: write tools | ✅ 11 | ✅ 12, incl. column update + row pin/color | ✅ 11 | ❌ read-only | ✅ 11, incl. clone |
+| Comments, attachment upload | ✅ | comments ✅ / upload ❌ (download + preview instead) | ✅ | ❌ | ❌ |
+| Server-side read-only mode | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Typed output schemas + tool annotations | ✅ | ❌ | ❌ | ❌ | ❌ tools return plain strings |
 | YFM helpers | ✅ syntax cheat sheet resource + `yfm_warnings` in write tools | ❌ | ❌ | ❌ | ✅ Markdown→YFM converter + page-tree cache, prompt templates |
-| Docker / PyPI / MCP Registry | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ | ❌ manual install | PyPI only | PyPI only; no source repo linked |
-| Multi-user OAuth for HTTP deployments | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Docker / PyPI / MCP Registry | ✅ / ✅ / ✅ | — hosted service, closed source, nothing to install | ✅ / ✅ / ✅ | ❌ manual install | PyPI only; no source repo linked |
+| Multi-user OAuth for HTTP deployments | ✅ | ❌ per-user token pasted into static headers, no OAuth flow | ✅ | ❌ | ❌ |
 
 Also worth knowing:
 
+- [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) (Python) — page create / update plus reads, with a separate `-ro` read-only entry point; no delete / recover, no grids, no search; PyPI only
 - [brekhov-ilya/yandex-wiki-mcp](https://github.com/brekhov-ilya/yandex-wiki-mcp) (npm) — pages read / write / move, grids read-only; interactive PKCE token flow with auto-refresh, no full-text search
 - [n-r-w/yandex-mcp](https://github.com/n-r-w/yandex-mcp) (Go) — Yandex Tracker + Wiki in one server, read-only by design (5 wiki read tools), no search; auth via IAM tokens from the `yc` CLI only — Yandex OAuth tokens are not supported
 
-As of July 2026, full-text search exists only here (up to 50 results) and in slartus
-(up to 10); the combination of search, grid writes, server-side read-only mode, and
-typed schemas is unique to this project.
+As of August 2026, full-text search exists only here (up to 50 results) and in slartus
+(up to 10) — Yandex's own hosted server ships without a search tool — and the
+combination of search, grid writes, server-side read-only mode, and typed schemas is
+unique to this project.
 
 This project is a fork of `ya-yandex-wiki-mcp` and builds on findings from
 `slartus/mcp-yandex-wiki` — see [Credits](#credits).
 
 ## Full-text search
 
-`page_search` wraps the undocumented-but-public `POST /v1/search` endpoint — the same
-backend that powers the Wiki web search bar. Search first, then open a result with
-`page_get` by its `slug`.
+`page_search` wraps the `POST /v1/search` endpoint — the same backend that powers the
+Wiki web search bar, undocumented until Yandex published its
+[API reference](https://yandex.ru/support/wiki/ru/api-ref/search/search__search) in
+August 2026. Search first, then open a result with `page_get` by its `slug`.
 
 - Up to **50** results per call (`limit` is clamped to 1–50; the API rejects anything else).
-- Search is **global only** — `slug_prefix` and `result_type` filters are applied client-side after fetching, so combine them with `limit=50` to avoid missing matches.
+- Search is **global only for now** — `slug_prefix` and `result_type` filters are applied client-side after fetching, so combine them with `limit=50` to avoid missing matches (the API's new server-side filters are on the [roadmap](ROADMAP.md)).
 - Quoted `"exact phrase"` queries work; `page` results get absolute `https://wiki.yandex.ru/...` links, `file` results get direct download links.
 - `content` is a **~510-character excerpt, not the page and not a summary**: it is cut from wherever the match sits, nothing is highlighted, the query terms need not be inside it, and its line breaks and tabs are the page's own layout (table cells arrive tab-separated) rather than separators between fragments. Read the page with `page_get` before answering from it. Empty for `file` results.
 
@@ -339,7 +344,7 @@ For Redis-backed OAuth storage, use the existing [`compose.yaml`](compose.yaml) 
 ## Security
 
 - **Read-only is server-side**: with `WIKI_READ_ONLY=true` write tools are never registered — there is nothing for a confused agent to call.
-- **Wiki API does not enforce OAuth scopes** (verified live — see [docs/api-notes.md](docs/api-notes.md)): a `wiki:read` token can write, so use the read-only mode rather than relying on token scopes.
+- **Wiki API does not enforce OAuth scopes** (re-verified 2026-08-11, after Yandex documented the scopes — see [docs/api-notes.md](docs/api-notes.md)): a `wiki:read` token can still write, so use the read-only mode rather than relying on token scopes.
 - Secrets are `SecretStr` throughout — masked in logs and `repr`; `DEBUG` HTTP logging never includes headers or bodies.
 - Deletion is recoverable: `page_delete` returns a recovery token for `page_recover`.
 - Unrelated keys in a shared `.env` are ignored, but a misspelled setting (`WIKI_READ_ONL`) stops the server instead of silently falling back to a default you did not choose.
@@ -357,9 +362,9 @@ How the server is put together — the layers, the code map, testing seams, CI a
 release process — is described in [docs/architecture.md](docs/architecture.md).
 Verified API behavior and probe scripts are documented in [docs/api-notes.md](docs/api-notes.md).
 
-The Wiki API drifts (its undocumented search endpoint silently changed contract once
-already) — `scripts/contract_sweep.py` re-verifies every client method against a live
-organization and reports validation mismatches and undeclared keys:
+The Wiki API drifts (the search endpoint silently changed contract once already, back
+when it was undocumented) — `scripts/contract_sweep.py` re-verifies every client method
+against a live organization and reports validation mismatches and undeclared keys:
 
 ```bash
 uv run python scripts/contract_sweep.py users/YOU/contract-sweep            # ~30 live checks
@@ -381,9 +386,10 @@ original copyright and license are preserved (see [LICENSE](LICENSE) and [NOTICE
 
 The idea and key API findings behind full-text search come from
 [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) (JavaScript, MIT):
-it was the first to discover the undocumented `POST /v1/search` endpoint and to report
-that OAuth scopes are not enforced. No code was taken from it — only findings and ideas,
-independently re-verified against a live organization and extended here.
+it was the first to discover the then-undocumented `POST /v1/search` endpoint (Yandex
+published a reference for it only in August 2026) and to report that OAuth scopes are
+not enforced. No code was taken from it — only findings and ideas, independently
+re-verified against a live organization and extended here.
 
 ## Trademarks
 

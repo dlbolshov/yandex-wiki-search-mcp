@@ -245,8 +245,8 @@ rather than performative:
 
 Beyond the unit suite there is a **live layer**: `scripts/contract_sweep.py`
 calls every `WikiClient` method against a real organization and reports
-validation mismatches and undeclared keys. It exists because the undocumented
-search endpoint silently changed contract once, and it caught `page_move`
+validation mismatches and undeclared keys. It exists because the search
+endpoint silently changed contract once (back when it was undocumented), and it caught `page_move`
 being a silent no-op before that tool could ship. It **writes** to the wiki
 under the given base slug — use a scratch spot in your personal section. The
 `api-drift.yml` workflow runs it weekly when `DRIFT_*` secrets are configured;
@@ -312,6 +312,7 @@ by hand:
 | `contract_sweep.py` | Live sweep of every client method (writes!); weekly in CI |
 | `token_probe.py` | Response-size measurements behind the token-diet decisions |
 | `yfm_smoke.py` | Live YFM renderer probes behind the lint rules |
+| `docs_probe.py` | The 2026-08 docs drop vs the wire, claim by claim (writes!); includes the hosted MCP tools/list |
 | `probe_api*.sh`, `smoke.sh` | Ad-hoc curl probes from past investigations |
 
 ## Toolchain
