@@ -16,7 +16,7 @@
 
 </div>
 
-![Демо: поиск страницы в вики и саммари через MCP](https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/demo.gif)
+![Демо: поиск страницы в вики и саммари через MCP](https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/demo_ru_small.gif)
 
 Подключите Claude, Cursor, Windsurf или любой MCP-клиент к **Яндекс Вики**: полнотекстовый
 поиск, страницы, комментарии, вложения и динамические таблицы («гриды») — **27 тулзов**

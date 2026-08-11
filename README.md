@@ -16,7 +16,7 @@
 
 </div>
 
-![Demo: search a wiki page and summarize it via MCP](https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/demo.gif)
+![Demo: search a wiki page and summarize it via MCP](https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/demo_eng_small.gif)
 
 Connect Claude, Cursor, Windsurf, or any MCP client to **Yandex Wiki**: full-text search,
 pages, comments, attachments, and dynamic tables ("grids") — **27 tools** with typed schemas.
