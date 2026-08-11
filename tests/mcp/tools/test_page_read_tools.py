@@ -196,28 +196,68 @@ class TestPageReadTools:
         content = get_tool_result_content(result)
         assert content["results"][0]["slug"] == "a/b"
         mock_wiki_protocol.page_search.assert_awaited_once()
+        # no filters requested → none forwarded, highlight stays off
+        kwargs = mock_wiki_protocol.page_search.await_args.kwargs
+        assert kwargs["cluster"] is None
+        assert kwargs["result_type"] is None
+        assert kwargs["created_at"] is None
+        assert kwargs["modified_at"] is None
+        assert kwargs["highlight"] is False
 
-    async def test_page_search_result_type_filter(
+    async def test_page_search_forwards_filters_server_side(
         self,
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
+        # The backend does the filtering (verified live 2026-08-11); the tool
+        # must forward the arguments instead of sieving results itself.
         mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
-            results=[
-                SearchResultItem.model_construct(slug="a/b", type="page"),
-                SearchResultItem.model_construct(slug="c/d", type="file"),
-            ],
+            results=[SearchResultItem.model_construct(slug="tech-doc/ml/a")],
         )
 
         result = await client.call_tool(
-            "page_search", {"query": "x", "result_type": "page"}
+            "page_search",
+            {
+                "query": "x",
+                "slug_prefix": "/Tech-Doc/ML/",
+                "result_type": "page",
+                "created_between": {
+                    "from": "2026-01-01T00:00:00Z",
+                    "to": "2026-06-01T00:00:00Z",
+                },
+                "modified_between": {
+                    "from": "2026-06-01T00:00:00Z",
+                    "to": "2026-08-01T00:00:00Z",
+                },
+                "highlight": True,
+            },
         )
 
-        content = get_tool_result_content(result)
-        assert len(content["results"]) == 1
-        assert content["results"][0]["type"] == "page"
+        assert result.is_error is False
+        kwargs = mock_wiki_protocol.page_search.await_args.kwargs
+        # slug_prefix arrives as the API's cluster filter, normalized
+        assert kwargs["cluster"] == "tech-doc/ml"
+        assert kwargs["result_type"] == "page"
+        assert kwargs["created_at"].from_ == "2026-01-01T00:00:00Z"
+        assert kwargs["created_at"].to == "2026-06-01T00:00:00Z"
+        assert kwargs["modified_at"].from_ == "2026-06-01T00:00:00Z"
+        assert kwargs["highlight"] is True
 
-    async def test_page_search_slug_prefix_filter_and_url_normalization(
+    async def test_page_search_rejects_an_open_date_interval(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # Both bounds are required — the schema says so, the wire is never hit.
+        result = await client.call_tool(
+            "page_search",
+            {"query": "x", "created_between": {"from": "2026-01-01T00:00:00Z"}},
+        )
+
+        assert result.is_error is True
+        mock_wiki_protocol.page_search.assert_not_awaited()
+
+    async def test_page_search_url_normalization(
         self,
         client: Client,
         mock_wiki_protocol: AsyncMock,
@@ -227,19 +267,12 @@ class TestPageReadTools:
                 SearchResultItem.model_construct(
                     slug="tech-doc/ml/page", url="/tech-doc/ml/page", type="page"
                 ),
-                SearchResultItem.model_construct(
-                    slug="tech-doc/mlops/page", url="/tech-doc/mlops/page", type="page"
-                ),
             ],
         )
 
-        result = await client.call_tool(
-            "page_search", {"query": "x", "slug_prefix": "/Tech-Doc/ML/"}
-        )
+        result = await client.call_tool("page_search", {"query": "x"})
 
         content = get_tool_result_content(result)
-        # segment-boundary match: 'tech-doc/mlops' must NOT pass; prefix got normalized
-        assert [r["slug"] for r in content["results"]] == ["tech-doc/ml/page"]
         assert content["results"][0]["url"] == "https://wiki.yandex.ru/tech-doc/ml/page"
 
     @pytest.mark.parametrize("slug_prefix", ["/", "   ", "///"])
@@ -250,17 +283,15 @@ class TestPageReadTools:
         slug_prefix: str,
     ) -> None:
         # These match no slug at all, and an empty result set gives no hint
-        # that the filter, rather than the wiki, is the reason.
-        mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
-            results=[SearchResultItem.model_construct(slug="tech-doc/ml", type="page")],
-        )
-
+        # that the filter, rather than the wiki, is the reason. Rejected
+        # before any HTTP happens.
         result = await client.call_tool(
             "page_search", {"query": "x", "slug_prefix": slug_prefix}
         )
 
         assert result.is_error is True
         assert "slug_prefix must not be empty" in get_tool_result_text(result)
+        mock_wiki_protocol.page_search.assert_not_awaited()
 
     async def test_page_get_by_slug(
         self,

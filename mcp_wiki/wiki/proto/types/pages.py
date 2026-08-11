@@ -121,6 +121,24 @@ class WikiPage(BaseWikiModel):
     modified_at: str | None = None
 
 
+class SearchDateInterval(BaseWikiModel):
+    """Closed date-time interval for search filters.
+
+    The API requires both bounds: `from` alone is a 400 SEARCH_BAD_REQUEST
+    (verified live 2026-08-11), so both fields are required here and the
+    schema says so instead of the wire error.
+    """
+
+    from_: str = Field(
+        alias="from",
+        description="Interval start, ISO 8601 date-time, e.g. '2026-01-01T00:00:00Z'.",
+    )
+    to: str = Field(
+        description="Interval end, ISO 8601 date-time. The API rejects an "
+        "open-ended interval, so both bounds are required."
+    )
+
+
 class SearchResultItem(BaseWikiModel):
     url: str | None = None
     slug: str | None = None
@@ -131,12 +149,13 @@ class SearchResultItem(BaseWikiModel):
             "Rendered text excerpt from the page, capped at ~510 characters. "
             "It is NOT the page's content and NOT a summary of it: the excerpt "
             "is a window taken from wherever the match is, which on a long page "
-            "can start thousands of characters in. The query terms are not "
-            "highlighted and need not appear in the excerpt at all, so never "
-            "answer from this field — call page_get with the result's slug to "
-            "read the page. Line breaks and tabs inside it are the source page's "
-            "own layout (table cells arrive tab-separated), not separators "
-            "between excerpts. Empty for type='file' results."
+            "can start thousands of characters in. The query terms need not "
+            "appear in the excerpt at all, and matches are marked with "
+            "<em>…</em> only when the search was called with highlight=true — "
+            "so never answer from this field: call page_get with the result's "
+            "slug to read the page. Line breaks and tabs inside it are the "
+            "source page's own layout (table cells arrive tab-separated), not "
+            "separators between excerpts. Empty for type='file' results."
         ),
     )
     type: str | None = None

@@ -16,6 +16,7 @@ from mcp_wiki.wiki.custom.errors import (
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
     GridUpdateRequest,
+    SearchDateInterval,
     WikiGridPageRef,
 )
 from tests.aioresponses_utils import RequestCapture
@@ -72,8 +73,56 @@ class TestWikiClient:
         assert result.results[0].modified_at == "2026-05-12T22:14:54"
         assert result.results[2].type == "file"
         capture.assert_called_once()
-        # the live endpoint honors "limit" only; "page_size" is silently ignored
+        # the live endpoint honors "limit" only; "page_size" is silently ignored.
+        # No filters requested → no "filters"/"highlight" keys in the body.
         capture.last_request.assert_json_body({"query": "query text", "limit": 50})
+
+    async def test_page_search_filters_and_highlight(
+        self, wiki_client: WikiClient
+    ) -> None:
+        capture = RequestCapture(
+            payload={"results": [], "next_cursor": None, "prev_cursor": None}
+        )
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            await wiki_client.page_search(
+                "q",
+                limit=10,
+                cluster="tech-doc/ml",
+                result_type="page",
+                created_at=SearchDateInterval.model_validate(
+                    {"from": "2026-01-01T00:00:00Z", "to": "2026-06-01T00:00:00Z"}
+                ),
+                modified_at=SearchDateInterval.model_validate(
+                    {"from": "2026-06-01T00:00:00Z", "to": "2026-08-01T00:00:00Z"}
+                ),
+                highlight=True,
+            )
+
+        # filters go on the wire as the API spells them: the date intervals
+        # under their "from" alias, the type filter as "type".
+        capture.last_request.assert_json_body(
+            {
+                "query": "q",
+                "limit": 10,
+                "filters": {
+                    "type": "page",
+                    "cluster": "tech-doc/ml",
+                    "created_at": {
+                        "from": "2026-01-01T00:00:00Z",
+                        "to": "2026-06-01T00:00:00Z",
+                    },
+                    "modified_at": {
+                        "from": "2026-06-01T00:00:00Z",
+                        "to": "2026-08-01T00:00:00Z",
+                    },
+                },
+                "highlight": True,
+            }
+        )
 
     async def test_page_search_empty(self, wiki_client: WikiClient) -> None:
         capture = RequestCapture(payload=load_fixture("search_empty.json"))

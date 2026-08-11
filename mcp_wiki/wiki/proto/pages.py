@@ -19,6 +19,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     PageComment,
     RecoverPageResponse,
     ResourcesResponse,
+    SearchDateInterval,
     SearchResponse,
     UploadAttachmentResult,
     UploadLocation,
@@ -53,6 +54,11 @@ class WikiProtocol(Protocol):
         query: str,
         *,
         limit: int = 10,
+        cluster: str | None = None,
+        result_type: str | None = None,
+        created_at: SearchDateInterval | None = None,
+        modified_at: SearchDateInterval | None = None,
+        highlight: bool = False,
         auth: YandexAuth | None = None,
     ) -> SearchResponse: ...
 

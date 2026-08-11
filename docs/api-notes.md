@@ -97,11 +97,12 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   and **require both bounds** — `from` alone is a 400 `SEARCH_BAD_REQUEST`.
   `filters.authors` and `show_obsolete` are documented but not probed yet. `order_by`
   (`relevancy`/`creation_date`/`modified_date`) is documented but **ignored** — neither
-  value changes the order. As of 1.2.x the tool still applies `slug_prefix`/`result_type`
-  client-side; moving onto the server filters is planned (ROADMAP M7).
+  value changes the order. Since 1.3.0 the tool forwards `slug_prefix` as
+  `filters.cluster` and `result_type` as `filters.type`, and exposes the date intervals
+  as `created_between`/`modified_between` — nothing is filtered client-side anymore.
 - **`highlight: true` works**: matches inside `content` arrive wrapped in `<em>`
-  (9/10 snippets changed against the same query without it). Off by default and not
-  exposed by the tool yet.
+  (9/10 snippets changed against the same query without it). Off by default; exposed
+  as the tool's `highlight` argument since 1.3.0.
 - Quoted `"exact phrase"` queries work and produce phrase-matched results;
   `-minus` and boolean operators are ignored.
 

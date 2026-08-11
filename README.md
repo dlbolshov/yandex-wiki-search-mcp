@@ -224,9 +224,9 @@ Wiki web search bar, undocumented until Yandex published its
 August 2026. Search first, then open a result with `page_get` by its `slug`.
 
 - Up to **50** results per call (`limit` is clamped to 1–50; the API rejects anything else).
-- Search is **global only for now** — `slug_prefix` and `result_type` filters are applied client-side after fetching, so combine them with `limit=50` to avoid missing matches (the API's new server-side filters are on the [roadmap](ROADMAP.md)).
+- **Filters run server-side, before the limit** — a filtered search does not lose matches to it: `slug_prefix` (section filter, deep prefixes like `tech-doc/ml` are fine), `result_type` (`page`/`file`), and `created_between`/`modified_between` date intervals (both bounds required — the API rejects open ones).
 - Quoted `"exact phrase"` queries work; `page` results get absolute `https://wiki.yandex.ru/...` links, `file` results get direct download links.
-- `content` is a **~510-character excerpt, not the page and not a summary**: it is cut from wherever the match sits, nothing is highlighted, the query terms need not be inside it, and its line breaks and tabs are the page's own layout (table cells arrive tab-separated) rather than separators between fragments. Read the page with `page_get` before answering from it. Empty for `file` results.
+- `content` is a **~510-character excerpt, not the page and not a summary**: it is cut from wherever the match sits, the query terms need not be inside it, and its line breaks and tabs are the page's own layout (table cells arrive tab-separated) rather than separators between fragments. Pass `highlight=true` to get matches wrapped in `<em>` tags. Read the page with `page_get` before answering from it. Empty for `file` results.
 
 ## Traversing the tree
 

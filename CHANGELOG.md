@@ -4,10 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-Documentation and probes only — the tool surface is unchanged. In August 2026 Yandex
-published a full Wiki API reference (the search endpoint included, undocumented until
-then) and its own hosted MCP server; every claim was checked against the live API
-before being absorbed.
+In August 2026 Yandex published a full Wiki API reference (the search endpoint
+included, undocumented until then) and its own hosted MCP server; every claim was
+checked against the live API before being absorbed — first into the docs, then into
+the tools.
+
+### Added
+- `page_search` filters moved into the search backend and grew: `slug_prefix` is forwarded as the API's `cluster` filter (deep prefixes like `tech-doc/ml` work — verified live 2026-08-11; an unknown prefix yields an empty result, and one that normalizes to empty is still rejected before any HTTP), `result_type` as `filters.type`, and the new `created_between`/`modified_between` date intervals filter by creation/modification time. Filtering happens before the result limit, so a filtered search no longer loses matches to it — the old "combine filters with limit=50" advice is gone along with the client-side sieve. Both interval bounds are required by the wire (`from` alone is a 400 `SEARCH_BAD_REQUEST`); the schema requires them upfront so the wire error never happens
+- `page_search` takes `highlight=true`, which wraps query matches inside `content` excerpts in `<em>…</em>` — the excerpt is otherwise unmarked, and the tool description, output schema and server instructions now say exactly that. The documented-but-dead search knobs stay unexposed: `cursor` is never satisfiable and `order_by` changes nothing (probed 2026-08-11)
 
 ### Internal
 - `scripts/docs_probe.py` — a new live probe that walks the 2026-08 documentation drop claim by claim on both a full-scope and a `wiki:read`-only token, and captures the hosted MCP server's `tools/list`. Verdicts, in short: search filters (`type`/`cluster`/date intervals) and `highlight` are live, search `cursor` and `order_by` are documented but dead, OAuth scopes are documented but still not enforced (the read-only token wrote, HTTP 200), attachment download/deletion, comment deletion and redirect-via-update all work, the comment thread endpoint answers 200 but returned an empty list for a root comment with a live reply

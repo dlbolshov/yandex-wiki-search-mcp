@@ -52,6 +52,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     PageComment,
     RecoverPageResponse,
     ResourcesResponse,
+    SearchDateInterval,
     SearchResponse,
     UploadAttachmentResult,
     UploadLocation,
@@ -384,17 +385,40 @@ class WikiClient(WikiProtocol):
         query: str,
         *,
         limit: int = 10,
+        cluster: str | None = None,
+        result_type: str | None = None,
+        created_at: SearchDateInterval | None = None,
+        modified_at: SearchDateInterval | None = None,
+        highlight: bool = False,
         auth: YandexAuth | None = None,
     ) -> SearchResponse:
         # The search endpoint reads "limit" from the POST body and silently
         # ignores "page_size" (always returning 10); limit > 50 is a 400.
         # Verified against the live API 2026-08-02. Named limit rather than
         # page_size on purpose: there is no pagination behind it — the
-        # endpoint's cursors are always null.
-        body = {
+        # endpoint's cursors are always null. The documented "cursor" and
+        # "order_by" are dead on the wire (2026-08-11) and stay unexposed.
+        # Filters run server-side, before the limit (verified 2026-08-11):
+        # "cluster" takes deep slug prefixes, an unknown one is 200 with no
+        # results, and the date intervals require both bounds — the model
+        # enforces that so the wire error never happens.
+        body: dict[str, Any] = {
             "query": query,
             "limit": max(1, min(limit, SEARCH_LIMIT_MAX)),
         }
+        filters: dict[str, Any] = {}
+        if result_type is not None:
+            filters["type"] = result_type
+        if cluster is not None:
+            filters["cluster"] = cluster
+        if created_at is not None:
+            filters["created_at"] = created_at.model_dump(by_alias=True)
+        if modified_at is not None:
+            filters["modified_at"] = modified_at.model_dump(by_alias=True)
+        if filters:
+            body["filters"] = filters
+        if highlight:
+            body["highlight"] = True
         payload = await self._request(
             "POST",
             "v1/search",

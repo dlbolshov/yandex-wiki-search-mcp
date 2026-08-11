@@ -40,6 +40,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     DescendantsResponse,
     GridsResponse,
     ResourcesResponse,
+    SearchDateInterval,
     SearchResponse,
     WikiGrid,
     WikiPage,
@@ -133,14 +134,14 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
             "to DISCOVER pages, then call page_get with a result's "
             "slug to read full content. `content` is an excerpt of at most ~510 "
             "characters cut from wherever the match sits in the page — not the page "
-            "and not a summary of it, with no highlighting and no guarantee the query "
-            "terms are even inside it — so treat it as a relevance signal and read the "
-            "page before answering from it. Wrap multi-word exact phrases in double "
-            "quotes. Search is global: there is no server-side section filter. "
-            "slug_prefix and result_type are applied client-side AFTER fetching, so "
-            "combine them with limit=50 to avoid missing matches. To enumerate a "
-            "section (or the whole Wiki) rather than search it, use "
-            "page_get_descendants."
+            "and not a summary of it, with no guarantee the query terms are even "
+            "inside it — so treat it as a relevance signal and read the page before "
+            "answering from it; highlight=true marks the matches it does contain "
+            "with <em> tags. Wrap multi-word exact phrases in double quotes. All "
+            "filters (slug_prefix, result_type, dates) run in the search backend "
+            "itself, before the result limit, so a filtered search does not lose "
+            "matches to it. To enumerate a section (or the whole Wiki) rather than "
+            "search it, use page_get_descendants."
         ),
         annotations=READ_ONLY,
     )
@@ -151,39 +152,58 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         slug_prefix: Annotated[
             str | None,
             Field(
-                description="Optional client-side filter: keep only results whose slug "
-                "equals this prefix or lies under it as a path segment, "
-                "e.g. 'tech-doc/ml'."
+                description="Optional server-side section filter: only results whose "
+                "slug equals this prefix or lies under it, e.g. 'tech-doc/ml'. Deep "
+                "prefixes are fine. An unknown prefix simply yields no results."
             ),
         ] = None,
         result_type: Annotated[
             Literal["page", "file"] | None,
-            Field(description="Optional client-side filter by result type."),
+            Field(description="Optional server-side filter by result type."),
         ] = None,
+        created_between: Annotated[
+            SearchDateInterval | None,
+            Field(
+                description="Optional server-side filter by creation time. "
+                "Both bounds are required — the API rejects open intervals."
+            ),
+        ] = None,
+        modified_between: Annotated[
+            SearchDateInterval | None,
+            Field(
+                description="Optional server-side filter by last-modification time. "
+                "Both bounds are required — the API rejects open intervals."
+            ),
+        ] = None,
+        highlight: Annotated[
+            bool,
+            Field(
+                description="Wrap query matches inside `content` excerpts in "
+                "<em>…</em> tags."
+            ),
+        ] = False,
     ) -> SearchResponse:
         app_context = ctx.request_context.lifespan_context
-        response = await app_context.wiki.page_search(
-            query,
-            limit=limit,
-            auth=get_yandex_auth(ctx),
-        )
+        cluster: str | None = None
         if slug_prefix is not None:
-            prefix = normalize_slug(slug_prefix).lower()
-            if not prefix:
+            cluster = normalize_slug(slug_prefix).lower()
+            if not cluster:
                 # '/' and whitespace normalize to '', which matches no slug
                 # at all — an empty result reads as an empty wiki rather
                 # than as a filter that threw everything away.
                 raise ValueError(
                     "slug_prefix must not be empty. Omit it to search the whole Wiki."
                 )
-            response.results = [
-                r
-                for r in response.results
-                if (slug := (r.slug or "").lower()) == prefix
-                or slug.startswith(prefix + "/")
-            ]
-        if result_type:
-            response.results = [r for r in response.results if r.type == result_type]
+        response = await app_context.wiki.page_search(
+            query,
+            limit=limit,
+            cluster=cluster,
+            result_type=result_type,
+            created_at=created_between,
+            modified_at=modified_between,
+            highlight=highlight,
+            auth=get_yandex_auth(ctx),
+        )
         web_base_url = app_context.web_base_url.rstrip("/")
         for r in response.results:
             if r.url and r.url.startswith("/"):

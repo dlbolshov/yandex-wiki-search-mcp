@@ -107,8 +107,9 @@ SearchQuery = Annotated[
 SearchResultLimit = Annotated[
     int,
     Field(
-        description="Number of search results to return (1-50). "
-        "Use 50 when combining with the client-side filters (slug_prefix/result_type).",
+        description="Number of search results to return (1-50). Filters are "
+        "applied by the search backend before this limit, so filtered "
+        "searches do not need a larger limit to compensate.",
         ge=1,
         le=50,
     ),
@@ -264,7 +265,7 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
     notes = [
         'In russian Yandex Wiki is called "Яндекс Вики" or "Вики".',
         "If a tool accepts `page_id` and `slug`, provide exactly one of them.",
-        "The `content` on a `page_search` result is an excerpt of at most ~510 characters taken from wherever the match sits in the page — not the page and not a summary, unhighlighted, and sometimes without the query terms in it. Use it to pick a result, then read the page with `page_get` before answering from it.",
+        "The `content` on a `page_search` result is an excerpt of at most ~510 characters taken from wherever the match sits in the page — not the page and not a summary, sometimes without the query terms in it, highlighted with <em> tags only when highlight=true was passed. Use it to pick a result, then read the page with `page_get` before answering from it.",
         "When you need a full list from a cursor-paginated tool, pass `fetch_all=true` — the server follows the cursors for you and returns everything in one call. Only if the reply carries `truncated: true` is the list incomplete: continue from `next_cursor`, or narrow the request. Walk cursors by hand only when a tool has no `fetch_all`.",
     ]
     if read_only:

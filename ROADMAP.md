@@ -236,7 +236,9 @@ MCP-сервер `mcp.wiki.yandex.net` (`wiki-mcp-server` 1.28.1 — 31 тулз
 итоги в `docs/api-notes.md`. Docs-часть (api-notes, README-сравнение с официальным
 сервером) сделана 2026-08-11 без релиза; ниже — кодовая часть.
 
-- [ ] `page_search`: серверные фильтры + подсветка (M)
+- [x] `page_search`: серверные фильтры + подсветка (M) — сделано 2026-08-11:
+      `slug_prefix`→`filters.cluster`, `result_type`→`filters.type`, новые
+      `created_between`/`modified_between`, `highlight`; клиентского сита больше нет
   - живы на проводе (2026-08-11): `filters.type` (`page`/`file`), `filters.cluster`
     (раздел), `filters.created_at`/`modified_at` (интервал `{from, to}`, обе границы
     обязательны — только `from` → 400 `SEARCH_BAD_REQUEST`), `highlight=true`
