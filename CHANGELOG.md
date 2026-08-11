@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.2.1] - 2026-08-11
+
+Branding and packaging metadata only — no change to the tool surface or server
+behavior, hence the patch bump.
+
+### Added
+- The project has a logo: an original mark (one continuous stroke folded four times — the fold from MCP's visual language, the horizontal runs a wiki page's text lines), drawn from scratch so it reproduces neither Yandex Wiki nor MCP branding. Committed assets and a design guide live in `docs/assets/logo/`; the full variant set is regenerable from `build.py` there
+- The MCPB bundle declares an `icon` and `server.json` declares registry `icons` (PNG 512 plus scalable SVG, per the 2025-12-11 schema), so MCP catalogs and clients that render icons stop showing a blank tile for this server
+- READMEs open with a centered header — logo, title, badges — and carry an explicit "unofficial project" line up top plus a Trademarks section at the bottom: "Yandex" and "Yandex Wiki" are used nominatively, and the logo is an independent mark
+- Per-language demo gifs: the English README shows an English session, the Russian one a Russian session, replacing the single shared recording
+
+### Fixed
+- README images now use absolute URLs, so PyPI renders them — the demo gif had been invisible there since 0.x, because PyPI does not resolve repository-relative paths
+
+### Internal
+- ruff, ty and mypy skip `docs/assets/logo/build.py` — the logo generator is a vendored design artifact with its own compact style, and it broke all four lint steps on `main`. mypy additionally skips the gitignored `local/` scratch directory, the one checker that walks it
+- Demo gifs are excluded from the MCPB bundle (`.mcpbignore`): `docs/` ships in the bundle for the icon's sake, and the recordings were adding ~6 MB that no MCP client ever displays
+
 ## [1.2.0] - 2026-08-10
 
 ### Added
