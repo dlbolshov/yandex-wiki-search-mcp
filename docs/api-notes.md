@@ -90,7 +90,10 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   replies it used to return.
 - **Server-side filters arrived with the 2026-08 drop and work** (probed 2026-08-11):
   `filters.type` (`page`/`file`) returns only that type; `filters.cluster` restricts
-  results to a section; `filters.created_at`/`modified_at` take a `{from, to}` interval
+  results to a section and **takes deep prefixes** (`a/b` returns only slugs under
+  `a/b`; an unknown cluster is 200 with 0 results, not an error) — filtering happens
+  before `limit`, so hits are not lost to it; `filters.created_at`/`modified_at` take
+  a `{from, to}` interval
   and **require both bounds** — `from` alone is a 400 `SEARCH_BAD_REQUEST`.
   `filters.authors` and `show_obsolete` are documented but not probed yet. `order_by`
   (`relevancy`/`creation_date`/`modified_date`) is documented but **ignored** — neither
@@ -115,6 +118,11 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   owned by `yandex360-wiki` (per slartus, see above).
 - Two organization header sources exist: `X-Org-Id` (Yandex 360) and `X-Cloud-Org-Id`
   (Yandex Cloud); the server sets one based on `WIKI_ORG_ID`/`WIKI_CLOUD_ORG_ID`.
+- **`GET /users/me` is documented and live** (probed 2026-08-11): `username`,
+  `home_cluster` (the caller's personal-section slug, e.g. `users/<login>`),
+  `identity` (`uid`, `cloud_uid`) and `org`. Before the 2026-08 reference this project
+  did not know the endpoint existed; scheduled as `user_get_current` (ROADMAP M7) —
+  it turns "create it in my section" from a guess into a lookup.
 
 ## Pages
 
@@ -179,8 +187,9 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
 - There is **no root page**. `homepage` exists and is an ordinary page — its subtree held
   a single child — while the real top level is a set of sibling slugs (`tech-doc`,
   `users`, `common`, …). The organization root is reachable only as the empty slug above.
-- `GET /pages/{id}/descendants` is an **undocumented by-id variant** of the same
-  endpoint and works (`404` for an unknown id). The client uses the `?slug=` form only.
+- `GET /pages/{id}/descendants` is a by-id variant of the same endpoint and works
+  (`404` for an unknown id); undocumented when first probed, it appears in the 2026-08
+  reference. The client uses the `?slug=` form only.
 - **No other enumeration endpoint exists.** `GET /pages` without a slug is a `400`;
   `/pages/tree`, `/pages/root`, `/pages/list`, `/navigation` and `/clusters` are all
   `404` (probed 2026-08-10).
