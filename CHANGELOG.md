@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.3.0] - 2026-08-18
 
 In August 2026 Yandex published a full Wiki API reference (the search endpoint
 included, undocumented until then) and its own hosted MCP server; every claim was
