@@ -125,6 +125,31 @@ class AttachmentNotFound(WikiError):
         self.file_id = file_id
 
 
+class ResponseTooLarge(WikiError):
+    """A response body exceeded the caller's ``max_bytes`` ceiling.
+
+    Raised before the body is materialized, so the size in the message is what
+    the server declared (or the ceiling itself when the response was chunked and
+    declared nothing). A transport-level refusal rather than an API error: the
+    request succeeded, this process simply declined to hold the answer.
+    """
+
+    def __init__(
+        self, method: str, path: str, declared: int | None, max_bytes: int
+    ) -> None:
+        size = (
+            f"{declared} bytes" if declared is not None else f"over {max_bytes} bytes"
+        )
+        super().__init__(
+            f"{method} {path} answered with {size}, past the {max_bytes}-byte "
+            "ceiling for this request; the body was not read."
+        )
+        self.method = method
+        self.path = path
+        self.declared = declared
+        self.max_bytes = max_bytes
+
+
 def build_api_error(status: int, payload: bytes) -> WikiApiError:
     """Build a WikiApiError from an HTTP status and a raw response body.
 

@@ -135,6 +135,29 @@ class TestWikiClient:
             }
         )
 
+    async def test_page_search_normalizes_the_cluster_filter(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # filters.cluster matches the stored slug literally: mixed case or a
+        # stray slash answers 200 with zero results, indistinguishable from an
+        # empty section, while GET /pages?slug= resolves all three spellings
+        # (probed live 2026-08-18). So the client normalizes it here, like
+        # every other slug-shaped argument — a direct caller must not have to.
+        capture = RequestCapture(
+            payload={"results": [], "next_cursor": None, "prev_cursor": None}
+        )
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            await wiki_client.page_search(
+                "q", cluster="https://wiki.yandex.ru/Tech-Doc/ML/"
+            )
+
+        body = capture.last_request.get_json_body()
+        assert body["filters"]["cluster"] == "tech-doc/ml"
+
     async def test_page_search_empty_authors_list_sends_no_filter(
         self, wiki_client: WikiClient
     ) -> None:

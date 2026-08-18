@@ -139,7 +139,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 | `page_get_comments` | List page comments (`fetch_all` supported) |
 | `page_get_resources` | List page resources (attachments + grids) with server-side title search (`fetch_all` supported) |
 | `page_get_attachments` | List page attachments (`fetch_all` supported) |
-| `page_download_attachment` | Read an attachment's content inline — UTF-8 as text, otherwise base64; up to 1 MiB, larger files are refused with a pointer to `download_url` |
+| `page_download_attachment` | Read an attachment's content inline as an embedded resource — text as text, otherwise a base64 blob; up to 128 KiB, larger files are refused before transfer with a pointer to `download_url` |
 | `page_get_grids` | List grids attached to a page (`fetch_all` supported) |
 | `grid_get` | Get a grid by `grid_id` with row/column/revision filters |
 | `user_get_current` | Who am I — `username` and `home_cluster` (the caller's personal-section slug) |
@@ -150,7 +150,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 |---|---|
 | `page_create` | Create a page |
 | `page_update` | Update page title and/or full content; set or clear a redirect to another page |
-| `page_edit` | Edit content by exact-text replacements without resending the whole page; a missing or ambiguous match fails the call before anything is written |
+| `page_edit` | Edit content by exact-text replacements without resending the whole page; a missing or ambiguous match fails the call before anything is written; writes back with `allow_merge` so a concurrent edit is merged, not overwritten |
 | `page_append_content` | Append content to top, bottom, or a named anchor |
 | `page_clone` | Copy a page to a new slug — the copy gets a new id; children, comments, and history stay with the original; occupied slugs are refused. The API has no true move/rename ([details](docs/api-notes.md#pages)) |
 | `page_add_comment` | Add a comment or reply in a thread |

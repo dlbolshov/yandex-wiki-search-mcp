@@ -108,6 +108,17 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   value changes the order. Since 1.3.0 the tool forwards `slug_prefix` as
   `filters.cluster` and `result_type` as `filters.type`, and exposes the date intervals
   as `created_between`/`modified_between` — nothing is filtered client-side anymore.
+- **`filters.cluster` matches path segments, includes the cluster page itself, and is
+  the strictest slug on the API** (probed 2026-08-18 against a family of real pages:
+  `users/igor/mlflow` with three descendants and four siblings sharing its string
+  prefix). Both halves of the guarantee the tool advertises hold: `cluster=a/b`
+  returns `a/b` itself **and** its segment descendants, and does **not** leak
+  `a/bc` — verified at two depths. But the value is matched **literally**, unlike
+  every other slug on the API: `Users/Igor/MLflow`, `users/igor/mlflow/` and
+  `/users/igor/mlflow` each answer **200 with 0 results**, while
+  `GET /pages?slug=` resolves all three to the same page. A wrong spelling is
+  therefore indistinguishable from an empty section, so `WikiClient.page_search`
+  normalizes and lowercases `cluster` itself rather than leaving it to callers.
 - **`highlight: true` works**: matches inside `content` arrive wrapped in `<em>`
   (9/10 snippets changed against the same query without it). Off by default; exposed
   as the tool's `highlight` argument since 1.3.0.
@@ -210,8 +221,9 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   documented and live** (probed 2026-08-11): `GET /pages/{id}/attachments/{fid}/download`
   streams the bytes, `GET /pages/attachments/download_by_url?url=<slug>/.files/<name>`
   works too, `DELETE /pages/{id}/attachments/{fid}` answers 204. Exposed as
-  `page_download_attachment` (UTF-8 text inline, otherwise base64, 1 MiB cap) and
-  `page_delete_attachment`.
+  `page_download_attachment` (an embedded resource: text inline, otherwise a
+  base64 blob, 128 KiB cap enforced from `Content-Length` before the body is
+  read) and `page_delete_attachment`.
 - **A missing attachment on the download endpoint is a 404 with a placeholder GIF
   body**, not the JSON error envelope (found 2026-08-17, during implementation) —
   the client maps it to `AttachmentNotFound` itself. The delete endpoints answer misses with the normal

@@ -8,12 +8,20 @@ forks.
 """
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 from aioresponses import aioresponses
+from pydantic import BaseModel
 
 from mcp_wiki.wiki.custom.client import WikiClient
-from mcp_wiki.wiki.custom.errors import AttachmentNotFound, PageNotFound, WikiApiError
+from mcp_wiki.wiki.custom.errors import (
+    AttachmentNotFound,
+    PageNotFound,
+    ResponseTooLarge,
+    WikiApiError,
+)
 from mcp_wiki.wiki.proto.common import YandexAuth
 from mcp_wiki.wiki.proto.types.pages import AttachmentDeleteResponse
 from tests.aioresponses_utils import RequestCapture
@@ -197,6 +205,31 @@ class TestPageAddComment:
         )
 
 
+@contextmanager
+def _extras_allowed(model: type[BaseModel]) -> Iterator[None]:
+    """Run a block with `model` accepting unknown keys, then restore it.
+
+    Mirrors scripts/contract_sweep.enable_extras_detection: production models
+    ignore extras for token economy, so a test that wants to see one has to ask
+    for the sweep's configuration explicitly.
+    """
+    original = model.model_config.get("extra", "ignore")
+    model.model_config["extra"] = "allow"
+    for cached in (
+        "__pydantic_core_schema__",
+        "__pydantic_validator__",
+        "__pydantic_serializer__",
+    ):
+        if cached in model.__dict__:
+            delattr(model, cached)
+    model.model_rebuild(force=True)
+    try:
+        yield
+    finally:
+        model.model_config["extra"] = original
+        model.model_rebuild(force=True)
+
+
 class TestPageDeleteComment:
     async def test_deletes_and_returns_the_updated_count(
         self, wiki_client: WikiClient
@@ -210,8 +243,47 @@ class TestPageDeleteComment:
             response = await wiki_client.page_delete_comment(42, comment_id=11)
 
         assert response.comments_count == 3
+        assert (response.page_id, response.comment_id, response.deleted) == (
+            42,
+            11,
+            True,
+        )
         capture.assert_called_once()
         capture.last_request.assert_headers(AUTH_HEADERS)
+
+    async def test_empty_body_still_carries_an_acknowledgment(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # comments_count is the only thing the API sends, and _drop_none would
+        # reduce a model holding just that to `{}` — a successful call with no
+        # evidence in it. The id pair and `deleted` are the floor.
+        with aioresponses() as mocked:
+            mocked.delete(
+                "https://api.wiki.yandex.net/v1/pages/42/comments/11",
+                status=204,
+                body=b"",
+            )
+            response = await wiki_client.page_delete_comment(42, comment_id=11)
+
+        assert response.model_dump() == {
+            "page_id": 42,
+            "comment_id": 11,
+            "deleted": True,
+        }
+
+    async def test_a_non_object_body_does_not_escape_wikierror(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # grid_delete guards this the same way: a bare ValidationError would
+        # bypass the WikiError hierarchy every caller above the client uses.
+        with aioresponses() as mocked:
+            mocked.delete(
+                "https://api.wiki.yandex.net/v1/pages/42/comments/11",
+                payload=["unexpected"],
+            )
+            response = await wiki_client.page_delete_comment(42, comment_id=11)
+
+        assert response.deleted is True
 
     async def test_404_carries_the_api_envelope_not_page_not_found(
         self, wiki_client: WikiClient
@@ -258,6 +330,57 @@ class TestPageDownloadAttachment:
                 await wiki_client.page_download_attachment(42, file_id=5)
 
 
+class TestDownloadCeiling:
+    async def test_content_length_over_the_cap_refuses_before_reading(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # aioresponses sets Content-Length from the body, so a body larger than
+        # the cap exercises the declared-length branch.
+        with aioresponses() as mocked:
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
+                body=b"x" * 100,
+            )
+            with pytest.raises(ResponseTooLarge, match="past the 10-byte ceiling"):
+                await wiki_client.page_download_attachment(42, file_id=5, max_bytes=10)
+
+    async def test_a_body_at_the_cap_still_arrives(
+        self, wiki_client: WikiClient
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
+                body=b"x" * 10,
+            )
+            assert (
+                await wiki_client.page_download_attachment(42, file_id=5, max_bytes=10)
+                == b"x" * 10
+            )
+
+    async def test_no_max_bytes_reads_everything(self, wiki_client: WikiClient) -> None:
+        with aioresponses() as mocked:
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
+                body=b"x" * 100,
+            )
+            assert len(await wiki_client.page_download_attachment(42, file_id=5)) == 100
+
+    async def test_a_download_is_not_retried(self, wiki_client: WikiClient) -> None:
+        # GETs are retryable by default, but repeating this one re-transfers
+        # the whole file for no gain.
+        capture = RequestCapture(status=503)
+        with aioresponses() as mocked:
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
+                callback=capture.callback,
+                repeat=True,
+            )
+            with pytest.raises(WikiApiError):
+                await wiki_client.page_download_attachment(42, file_id=5)
+
+        capture.assert_request_count(1)
+
+
 class TestPageDeleteAttachment:
     async def test_builds_the_acknowledgment_from_a_204(
         self, wiki_client: WikiClient
@@ -273,6 +396,25 @@ class TestPageDeleteAttachment:
         assert response == AttachmentDeleteResponse(page_id=42, file_id=5, deleted=True)
         capture.assert_called_once()
         capture.last_request.assert_headers(AUTH_HEADERS)
+
+    async def test_a_future_json_body_reaches_the_model(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # Same contract as grid_delete: the acknowledgment fields are ours, but
+        # a body the API starts sending must still pass through validation,
+        # where the contract sweep can see undeclared keys. Constructing the
+        # model directly instead of merging would make that drift invisible.
+        # extra="allow" is what scripts/contract_sweep.py flips these models to,
+        # so this asserts under exactly the configuration the drift job runs in.
+        with _extras_allowed(AttachmentDeleteResponse), aioresponses() as mocked:
+            mocked.delete(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/5",
+                payload={"files_count": 7},
+            )
+            response = await wiki_client.page_delete_attachment(42, file_id=5)
+
+        assert (response.page_id, response.file_id, response.deleted) == (42, 5, True)
+        assert (response.model_extra or {}).get("files_count") == 7
 
     async def test_404_carries_the_api_envelope(self, wiki_client: WikiClient) -> None:
         with aioresponses() as mocked:

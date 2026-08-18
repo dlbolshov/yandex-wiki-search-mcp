@@ -116,7 +116,7 @@ class TestReadOnlyModeToolRegistration:
         assert server.instructions is not None
         assert "read-only mode" in server.instructions
         assert "Create, update" not in server.instructions
-        assert "Add comments" not in server.instructions
+        assert "Add and delete comments" not in server.instructions
         assert "Grid mutations" not in server.instructions
         assert "yfm_warnings" not in server.instructions
         # read guidance stays

@@ -33,6 +33,37 @@ from mcp_wiki.wiki.proto.types.pages import (
 )
 
 
+def validate_page_update_args(
+    *,
+    title: str | None,
+    content: str | None,
+    redirect_to_page_id: int | None,
+    clear_redirect: bool,
+) -> None:
+    """Reject a page_update that asks for nothing, or for two opposite things.
+
+    Lives beside the protocol rather than in either implementation: the client
+    enforces it for every consumer (page_edit and the scripts call page_update
+    directly), and the page_update tool calls it before resolving a slug so a
+    malformed request costs no HTTP. One definition, so the two layers cannot
+    drift apart as update-able fields are added.
+    """
+    if redirect_to_page_id is not None and clear_redirect:
+        raise ValueError(
+            "redirect_to_page_id and clear_redirect are mutually exclusive."
+        )
+    if (
+        title is None
+        and content is None
+        and redirect_to_page_id is None
+        and not clear_redirect
+    ):
+        raise ValueError(
+            "Provide at least one of title, content, redirect_to_page_id, "
+            "or clear_redirect."
+        )
+
+
 class WikiProtocol(Protocol):
     async def prepare(self) -> None: ...
     async def close(self) -> None: ...
@@ -295,6 +326,7 @@ class WikiProtocol(Protocol):
         page_id: int,
         *,
         file_id: int,
+        max_bytes: int | None = None,
         auth: YandexAuth | None = None,
     ) -> bytes: ...
 

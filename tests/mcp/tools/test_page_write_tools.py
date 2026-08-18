@@ -4,6 +4,7 @@ from mcp import Client
 
 from mcp_wiki.wiki.proto.types.pages import (
     ClonedPageRef,
+    DeleteCommentResponse,
     GridDeleteResponse,
     WikiPage,
 )
@@ -815,14 +816,24 @@ class TestPageWriteTools:
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_delete_comment.return_value = {"comments_count": 2}
+        mock_wiki_protocol.page_delete_comment.return_value = (
+            DeleteCommentResponse.model_construct(
+                page_id=10, comment_id=11, deleted=True, comments_count=2
+            )
+        )
 
         result = await client.call_tool(
             "page_delete_comment",
             {"page_id": 10, "comment_id": 11},
         )
 
-        assert get_tool_result_content(result)["comments_count"] == 2
+        content = get_tool_result_content(result)
+        assert content["comments_count"] == 2
+        # The id pair and `deleted` are the floor: an empty body must not
+        # dump to `{}` and read as a successful call with no evidence in it.
+        assert content["page_id"] == 10
+        assert content["comment_id"] == 11
+        assert content["deleted"] is True
         args = mock_wiki_protocol.page_delete_comment.await_args
         assert args.args[0] == 10
         assert args.kwargs["comment_id"] == 11
@@ -893,7 +904,6 @@ class TestPageWriteTools:
 
         content = get_tool_result_content(result)
         assert content["page_id"] == 10
-        assert content["edits_applied"] == 1
         assert content["occurrences_replaced"] == 1
         # the read asks only for content — the tool must not pull extra fields
         get_kwargs = mock_wiki_protocol.page_get.await_args.kwargs
@@ -978,8 +988,9 @@ class TestPageWriteTools:
             },
         )
 
-        content = get_tool_result_content(result)
-        assert content["edits_applied"] == 2
+        # Sequential: the second old_text matches what the first produced, so
+        # both entries counted even though the page held one occurrence.
+        assert get_tool_result_content(result)["occurrences_replaced"] == 2
         assert mock_wiki_protocol.page_update.await_args.kwargs["content"] == "gamma"
 
     async def test_page_edit_missing_text_writes_nothing(
@@ -1025,6 +1036,92 @@ class TestPageWriteTools:
         assert "occurs 2 times" in text
         assert "lines 2, 4" in text
         mock_wiki_protocol.page_update.assert_not_awaited()
+
+    async def test_page_edit_writes_with_allow_merge_by_default(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # The read-modify-write has no revision to lock against, so without
+        # allow_merge a concurrent edit landing between the read and the write
+        # is overwritten. page_append_content's anchor fallback — the only
+        # other read-modify-write here — passes it for the same reason.
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, content="alpha"
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_construct(id=10)
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "alpha", "new_text": "beta"}],
+            },
+        )
+
+        assert result.is_error is False
+        assert mock_wiki_protocol.page_update.await_args.kwargs["allow_merge"] is True
+        assert mock_wiki_protocol.page_update.await_args.kwargs["is_silent"] is False
+
+    async def test_page_edit_forwards_the_write_flags(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, content="alpha"
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_construct(id=10)
+
+        await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "alpha", "new_text": "beta"}],
+                "allow_merge": False,
+                "is_silent": True,
+            },
+        )
+
+        kwargs = mock_wiki_protocol.page_update.await_args.kwargs
+        assert kwargs["allow_merge"] is False
+        assert kwargs["is_silent"] is True
+
+    async def test_page_edit_ambiguity_lines_match_the_reported_count(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # "--" inside a "----" rule: str.count is non-overlapping, so the line
+        # list must be too, or the error names more positions than occurrences.
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, content="----\ntail"
+        )
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "--", "new_text": "=="}],
+            },
+        )
+
+        assert result.is_error is True
+        text = get_tool_result_text(result)
+        assert "occurs 2 times" in text
+        assert "lines 1, 1)" in text
+        mock_wiki_protocol.page_update.assert_not_awaited()
+
+    async def test_page_edit_is_not_advertised_as_idempotent(
+        self,
+        client: Client,
+    ) -> None:
+        # A replacement whose new_text contains its own old_text applies again
+        # on a repeat, so a client must not retry it on the strength of a hint.
+        listing = await client.list_tools()
+        tool = next(t for t in listing.tools if t.name == "page_edit")
+        assert tool.annotations is not None
+        assert tool.annotations.idempotent_hint is not True
 
     async def test_page_edit_rejects_identical_old_and_new(
         self,
