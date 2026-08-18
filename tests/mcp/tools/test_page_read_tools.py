@@ -5,13 +5,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 from mcp import Client
+from mcp.types import (
+    BlobResourceContents,
+    EmbeddedResource,
+    TextResourceContents,
+)
 
 from mcp_wiki.mcp.tools.page_read import (
     _FETCH_ALL_MAX_REQUESTS,
     MAX_INLINE_ATTACHMENT_BYTES,
     _drain_cursor,
 )
-from mcp_wiki.wiki.custom.errors import WikiTransportError
+from mcp_wiki.wiki.custom.errors import ResponseTooLarge, WikiTransportError
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
     CommentsResponse,
@@ -242,8 +247,10 @@ class TestPageReadTools:
 
         assert result.is_error is False
         kwargs = mock_wiki_protocol.page_search.await_args.kwargs
-        # slug_prefix arrives as the API's cluster filter, normalized
-        assert kwargs["cluster"] == "tech-doc/ml"
+        # slug_prefix arrives as the API's cluster filter, verbatim: the client
+        # normalizes it, like every other slug-shaped client argument, so a
+        # direct client caller gets the same treatment as a tool caller.
+        assert kwargs["cluster"] == "/Tech-Doc/ML/"
         assert kwargs["result_type"] == "page"
         assert [a.uid for a in kwargs["authors"]] == ["1130000067296925"]
         assert kwargs["created_at"].from_ == "2026-01-01T00:00:00Z"
@@ -260,6 +267,38 @@ class TestPageReadTools:
         result = await client.call_tool(
             "page_search",
             {"query": "x", "created_between": {"from": "2026-01-01T00:00:00Z"}},
+        )
+
+        assert result.is_error is True
+        mock_wiki_protocol.page_search.assert_not_awaited()
+
+    async def test_page_search_rejects_an_empty_authors_list(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # An empty list would be dropped on the wire and silently search the
+        # whole Wiki — the opposite of what a caller asking for an author
+        # filter wants, and worse than the empty slug_prefix this tool already
+        # refuses, because it returns everything rather than nothing.
+        result = await client.call_tool(
+            "page_search",
+            {"query": "x", "authors": []},
+        )
+
+        assert result.is_error is True
+        mock_wiki_protocol.page_search.assert_not_awaited()
+
+    async def test_page_search_rejects_a_blank_author_id(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # "" is accepted by the API and answers 200 with zero results, which
+        # reads as "this user wrote nothing" rather than "you sent junk".
+        result = await client.call_tool(
+            "page_search",
+            {"query": "x", "authors": [{"uid": ""}]},
         )
 
         assert result.is_error is True
@@ -741,7 +780,7 @@ class TestPageReadTools:
 
 
 class TestPageDownloadAttachment:
-    async def test_utf8_content_arrives_as_text(
+    async def test_utf8_content_arrives_as_an_embedded_text_resource(
         self,
         client: Client,
         mock_wiki_protocol: AsyncMock,
@@ -753,17 +792,22 @@ class TestPageDownloadAttachment:
             {"page_id": 10, "file_id": 5},
         )
 
-        content = get_tool_result_content(result)
-        assert content["encoding"] == "utf-8"
-        assert content["content"] == "col1;col2\na;b\n"
-        assert content["size_bytes"] == len(b"col1;col2\na;b\n")
-        assert content["page_id"] == 10
-        assert content["file_id"] == 5
+        # A real content block, not a model: the payload ships once instead of
+        # being mirrored into a text duplicate of structured_content.
+        assert result.structured_content is None
+        assert len(result.content) == 1
+        block = result.content[0]
+        assert isinstance(block, EmbeddedResource)
+        assert isinstance(block.resource, TextResourceContents)
+        assert block.resource.text == "col1;col2\na;b\n"
+        assert str(block.resource.uri) == "wiki-mcp://pages/10/attachments/5"
         args = mock_wiki_protocol.page_download_attachment.await_args
         assert args.args[0] == 10
         assert args.kwargs["file_id"] == 5
+        # The ceiling reaches the client, which enforces it before reading.
+        assert args.kwargs["max_bytes"] == MAX_INLINE_ATTACHMENT_BYTES
 
-    async def test_binary_content_arrives_base64(
+    async def test_binary_content_arrives_as_a_base64_blob(
         self,
         client: Client,
         mock_wiki_protocol: AsyncMock,
@@ -779,18 +823,45 @@ class TestPageDownloadAttachment:
             {"slug": "users/test/page", "file_id": 5},
         )
 
-        content = get_tool_result_content(result)
-        assert content["encoding"] == "base64"
-        assert base64.b64decode(content["content"]) == blob
-        assert content["size_bytes"] == len(blob)
+        block = result.content[0]
+        assert isinstance(block, EmbeddedResource)
+        assert isinstance(block.resource, BlobResourceContents)
+        assert base64.b64decode(block.resource.blob) == blob
 
-    async def test_oversized_content_is_refused_with_the_download_url_hint(
+    async def test_utf8_decodable_binary_still_travels_as_a_blob(
         self,
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_download_attachment.return_value = b"x" * (
-            MAX_INLINE_ATTACHMENT_BYTES + 1
+        # UTF-16LE without a BOM: every byte is a valid UTF-8 code point, so a
+        # bare decode() succeeds and would hand the model NUL-riddled mojibake
+        # labelled "text".
+        blob = "hello".encode("utf-16-le")
+        mock_wiki_protocol.page_download_attachment.return_value = blob
+
+        result = await client.call_tool(
+            "page_download_attachment",
+            {"page_id": 10, "file_id": 5},
+        )
+
+        block = result.content[0]
+        assert isinstance(block, EmbeddedResource)
+        assert isinstance(block.resource, BlobResourceContents)
+        assert base64.b64decode(block.resource.blob) == blob
+
+    async def test_oversized_attachment_is_refused_by_the_client(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # The refusal now happens in the client, before the body is read, so
+        # the tool surfaces the client's error rather than measuring bytes it
+        # already holds.
+        mock_wiki_protocol.page_download_attachment.side_effect = ResponseTooLarge(
+            "GET",
+            "v1/pages/10/attachments/5/download",
+            9_000_000,
+            MAX_INLINE_ATTACHMENT_BYTES,
         )
 
         result = await client.call_tool(
@@ -799,7 +870,7 @@ class TestPageDownloadAttachment:
         )
 
         assert result.is_error is True
-        assert "download_url" in get_tool_result_text(result)
+        assert "ceiling" in get_tool_result_text(result)
 
 
 class TestUserGetCurrent:

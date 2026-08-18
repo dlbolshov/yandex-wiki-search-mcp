@@ -5,7 +5,12 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, TypeVar
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
+from mcp.types import (
+    BlobResourceContents,
+    EmbeddedResource,
+    TextResourceContents,
+    ToolAnnotations,
+)
 from pydantic import Field
 
 from mcp_wiki.mcp.params import (
@@ -36,7 +41,6 @@ from mcp_wiki.mcp.utils import (
 )
 from mcp_wiki.wiki.custom.errors import WikiError
 from mcp_wiki.wiki.proto.types.pages import (
-    AttachmentDownloadResult,
     AttachmentListResponse,
     CommentsResponse,
     CursorEnvelope,
@@ -57,13 +61,36 @@ FETCH_ALL_MAX_ITEMS = 500
 FETCH_ALL_BUDGET_SECONDS = 25.0
 _FETCH_ALL_MAX_REQUESTS = 50
 
-# Inline ceiling for page_download_attachment. Guards the conversation, not
-# the transfer: the bytes are already fetched when it is checked, but a
-# multi-megabyte blob pasted into a tool result would drown the model's
-# context. Larger files stay reachable via the attachment's download_url.
-MAX_INLINE_ATTACHMENT_BYTES = 1_048_576
+# Inline ceiling for page_download_attachment, enforced by the client BEFORE
+# the body is read (Content-Length, else a capped stream read), so an oversized
+# attachment never lands in this process at all.
+#
+# 128 KiB, not the megabyte it started as: this guards the conversation, and a
+# megabyte of base64 is ~1.4M characters — several hundred thousand tokens,
+# past any context window, i.e. a ceiling that admits exactly what it exists to
+# refuse. At 128 KiB the base64 worst case is ~175k characters, which is large
+# but survivable. Bigger files stay reachable via the attachment's download_url.
+MAX_INLINE_ATTACHMENT_BYTES = 131_072
 
 EnvelopeT = TypeVar("EnvelopeT", bound=CursorEnvelope)
+
+
+def _as_text(raw: bytes) -> str | None:
+    """Decode an attachment as text, or None when it should travel as a blob.
+
+    Decodability alone is not the test. UTF-16LE without a BOM — the ordinary
+    shape of a Windows-exported .txt or .csv — decodes cleanly as UTF-8 because
+    every byte is a valid code point (NUL is U+0000), and so does any binary
+    whose bytes all fall below 0x80. Both would arrive as NUL-riddled mojibake
+    labelled "text". A NUL is the cheap, reliable discriminator: no real
+    plain-text file contains one.
+    """
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return None if "\x00" in text else text
+
 
 # open_world_hint=False: every tool talks to exactly one configured Wiki
 # organization — a closed domain, unlike e.g. web search. Left unset it
@@ -175,10 +202,18 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         authors: Annotated[
             list[SearchAuthor] | None,
             Field(
+                # min_length=1: an empty list would be dropped on the wire and
+                # silently search the whole Wiki — the opposite of what a caller
+                # who asked for an author filter wants, and the same trap
+                # slug_prefix refuses below. Omit the argument to search
+                # everything; never pass an empty list to mean that.
+                min_length=1,
                 description="Optional server-side filter by page owner: a list "
                 "of user identities (each with uid or cloud_uid), ORed together. "
-                "Take your own from user_get_current's identity. An unknown "
-                "identity simply yields no results."
+                "Take your own from user_get_current's identity. Omit it to "
+                "search every author — an empty list is rejected, because it "
+                "would silently mean the same thing. An unknown identity "
+                "simply yields no results.",
             ),
         ] = None,
         created_between: Annotated[
@@ -204,20 +239,18 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         ] = False,
     ) -> SearchResponse:
         app_context = ctx.request_context.lifespan_context
-        cluster: str | None = None
-        if slug_prefix is not None:
-            cluster = normalize_slug(slug_prefix).lower()
-            if not cluster:
-                # '/' and whitespace normalize to '', which matches no slug
-                # at all — an empty result reads as an empty wiki rather
-                # than as a filter that threw everything away.
-                raise ValueError(
-                    "slug_prefix must not be empty. Omit it to search the whole Wiki."
-                )
+        if slug_prefix is not None and not normalize_slug(slug_prefix):
+            # '/' and whitespace normalize to '', which matches no slug at all
+            # — an empty result reads as an empty wiki rather than as a filter
+            # that threw everything away. Only the emptiness check lives here;
+            # the client normalizes the value it sends, like every other slug.
+            raise ValueError(
+                "slug_prefix must not be empty. Omit it to search the whole Wiki."
+            )
         response = await app_context.wiki.page_search(
             query,
             limit=limit,
-            cluster=cluster,
+            cluster=slug_prefix,
             result_type=result_type,
             authors=authors,
             created_at=created_between,
@@ -543,43 +576,49 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         title="Download Page Attachment",
         description=(
             "Download a Yandex Wiki page attachment and return its content "
-            "inline: UTF-8 text arrives as text, anything else base64-encoded. "
-            "Refuses files over 1 MiB — fetch those yourself via the "
-            "attachment's download_url from page_get_attachments. That "
-            "listing is also where file ids come from."
+            "inline as an embedded resource: text files arrive as text, "
+            "anything else base64-encoded with its mime type. Refuses files "
+            "over 128 KiB without transferring them — fetch those yourself "
+            "via the attachment's download_url from page_get_attachments. "
+            "That listing is also where file ids come from."
         ),
         annotations=READ_ONLY,
+        # An embedded resource is a real content block, so the SDK ships it
+        # once. Returning a pydantic model instead would put the payload in
+        # structured_content AND in the spec-recommended text mirror of it —
+        # the same bytes twice on every call (see WikiMCPServer.call_tool,
+        # which deliberately leaves non-text blocks alone).
+        structured_output=False,
     )
     async def page_download_attachment(
         ctx: ToolContext,
         file_id: AttachmentID,
         page_id: OptionalPageID = None,
         slug: OptionalPageSlug = None,
-    ) -> AttachmentDownloadResult:
+    ) -> EmbeddedResource:
         resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
         raw = await get_wiki(ctx).page_download_attachment(
             resolved_page_id,
             file_id=file_id,
+            max_bytes=MAX_INLINE_ATTACHMENT_BYTES,
             auth=get_yandex_auth(ctx),
         )
-        if len(raw) > MAX_INLINE_ATTACHMENT_BYTES:
-            raise ValueError(
-                f"Attachment is {len(raw)} bytes — over the "
-                f"{MAX_INLINE_ATTACHMENT_BYTES}-byte inline limit. Fetch it "
-                "via the attachment's download_url from page_get_attachments."
+        uri = f"wiki-mcp://pages/{resolved_page_id}/attachments/{file_id}"
+        text = _as_text(raw)
+        if text is not None:
+            return EmbeddedResource(
+                type="resource",
+                resource=TextResourceContents(
+                    uri=uri, mime_type="text/plain; charset=utf-8", text=text
+                ),
             )
-        try:
-            content = raw.decode("utf-8")
-            encoding: Literal["utf-8", "base64"] = "utf-8"
-        except UnicodeDecodeError:
-            content = base64.b64encode(raw).decode("ascii")
-            encoding = "base64"
-        return AttachmentDownloadResult(
-            page_id=resolved_page_id,
-            file_id=file_id,
-            size_bytes=len(raw),
-            encoding=encoding,
-            content=content,
+        return EmbeddedResource(
+            type="resource",
+            resource=BlobResourceContents(
+                uri=uri,
+                mime_type="application/octet-stream",
+                blob=base64.b64encode(raw).decode("ascii"),
+            ),
         )
 
     @mcp.tool(

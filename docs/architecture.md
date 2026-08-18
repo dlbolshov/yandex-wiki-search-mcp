@@ -129,7 +129,7 @@ precedent).
   it can never report a combination no request carries) and
   `wiki-mcp://yfm-cheatsheet`.
 - **`mcp_wiki/mcp/tools/`** — `page_read.py` (10 read tools), `page_write.py`
-  (21 write tools; registered only when `WIKI_READ_ONLY=false`, and
+  (22 write tools; registered only when `WIKI_READ_ONLY=false`, and
   `page_upload_attachment` only when OAuth is off), `common.py` (locator
   resolution against the live API when a slug must become an id or vice
   versa). Write tools attach non-blocking `yfm_warnings` from `mcp_wiki/yfm.py`.

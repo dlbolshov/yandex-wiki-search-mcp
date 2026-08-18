@@ -69,7 +69,7 @@
     },
     {
       "name": "page_download_attachment",
-      "description": "Download a page attachment inline: UTF-8 text as text, other files base64-encoded (up to 1 MiB)"
+      "description": "Download a page attachment inline as an embedded resource: text as text, other files base64-encoded (up to 128 KiB)"
     },
     {
       "name": "user_get_current",
