@@ -227,7 +227,7 @@ OAuth-скоупы, которые не проверяются. Эти заме�
   `GET /pages/{id}/attachments/{fid}/download` отдаёт байты,
   `GET /pages/attachments/download_by_url?url=<slug>/.files/<name>` тоже работает,
   `DELETE /pages/{id}/attachments/{fid}` отвечает 204. Выведено как
-  `page_download_attachment` (embedded resource: текст прямо в ответе, иначе
+  `page_read_attachment` (embedded resource: текст прямо в ответе, иначе
   base64-блоб; кап 128 KiB, проверяется по `Content-Length` до чтения тела)
   и `page_delete_attachment`.
 - **Промах на download-эндпоинте — это 404 с GIF-заглушкой в теле**, а не

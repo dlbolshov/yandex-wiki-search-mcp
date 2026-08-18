@@ -68,8 +68,8 @@
       "description": "Get attachments for a Yandex Wiki page"
     },
     {
-      "name": "page_download_attachment",
-      "description": "Download a page attachment inline as an embedded resource: text as text, other files base64-encoded (up to 128 KiB)"
+      "name": "page_read_attachment",
+      "description": "Read a page attachment's content into the conversation as an embedded resource: text as text, other files base64-encoded (up to 128 KiB)"
     },
     {
       "name": "user_get_current",

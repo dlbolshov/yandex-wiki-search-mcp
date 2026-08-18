@@ -36,7 +36,7 @@ READ_ONLY_TOOL_NAMES = [
     "page_get_grids",
     "grid_get",
     "page_get_attachments",
-    "page_download_attachment",
+    "page_read_attachment",
     "user_get_current",
 ]
 

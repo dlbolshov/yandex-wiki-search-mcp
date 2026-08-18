@@ -259,7 +259,7 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
         "- Discover pages across the whole Wiki with page_search, then open a result by its slug with page_get.",
         "- Read Wiki pages by slug or ID",
         "- Traverse a page subtree, or the whole Wiki with page_get_descendants(from_root=true)",
-        "- Read comments, resources, and attachments — and download an attachment's content with page_download_attachment",
+        "- Read comments, resources, and attachments — and read an attachment's content into the conversation with page_read_attachment",
         "- Read page grids and get dynamic tables",
         "- Look up the calling user's username and personal-section slug with user_get_current",
     ]

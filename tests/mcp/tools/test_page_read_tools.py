@@ -779,7 +779,7 @@ class TestPageReadTools:
         assert "grid_id must not be empty" in get_tool_result_text(result)
 
 
-class TestPageDownloadAttachment:
+class TestPageReadAttachment:
     async def test_utf8_content_arrives_as_an_embedded_text_resource(
         self,
         client: Client,
@@ -788,7 +788,7 @@ class TestPageDownloadAttachment:
         mock_wiki_protocol.page_download_attachment.return_value = b"col1;col2\na;b\n"
 
         result = await client.call_tool(
-            "page_download_attachment",
+            "page_read_attachment",
             {"page_id": 10, "file_id": 5},
         )
 
@@ -819,7 +819,7 @@ class TestPageDownloadAttachment:
         mock_wiki_protocol.page_download_attachment.return_value = blob
 
         result = await client.call_tool(
-            "page_download_attachment",
+            "page_read_attachment",
             {"slug": "users/test/page", "file_id": 5},
         )
 
@@ -840,7 +840,7 @@ class TestPageDownloadAttachment:
         mock_wiki_protocol.page_download_attachment.return_value = blob
 
         result = await client.call_tool(
-            "page_download_attachment",
+            "page_read_attachment",
             {"page_id": 10, "file_id": 5},
         )
 
@@ -865,7 +865,7 @@ class TestPageDownloadAttachment:
         )
 
         result = await client.call_tool(
-            "page_download_attachment",
+            "page_read_attachment",
             {"page_id": 10, "file_id": 5},
         )
 

@@ -93,7 +93,7 @@ Read-only tools:
 - `page_get_resources`
 - `page_get_attachments`
 - `page_get_grids`
-- `page_download_attachment`
+- `page_read_attachment`
 - `user_get_current`
 - `grid_get`
 

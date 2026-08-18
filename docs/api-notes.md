@@ -221,7 +221,7 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   documented and live** (probed 2026-08-11): `GET /pages/{id}/attachments/{fid}/download`
   streams the bytes, `GET /pages/attachments/download_by_url?url=<slug>/.files/<name>`
   works too, `DELETE /pages/{id}/attachments/{fid}` answers 204. Exposed as
-  `page_download_attachment` (an embedded resource: text inline, otherwise a
+  `page_read_attachment` (an embedded resource: text inline, otherwise a
   base64 blob, 128 KiB cap enforced from `Content-Length` before the body is
   read) and `page_delete_attachment`.
 - **A missing attachment on the download endpoint is a 404 with a placeholder GIF

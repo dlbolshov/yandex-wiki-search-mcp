@@ -139,7 +139,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 | `page_get_comments` | List page comments (`fetch_all` supported) |
 | `page_get_resources` | List page resources (attachments + grids) with server-side title search (`fetch_all` supported) |
 | `page_get_attachments` | List page attachments (`fetch_all` supported) |
-| `page_download_attachment` | Read an attachment's content straight into the conversation (nothing is saved anywhere) — text as text, small binaries as a base64 blob. Meant for text attachments: configs, CSVs, logs. Capped at 128 KiB to protect the model's context window; anything larger is refused before transfer with a pointer to `download_url` from `page_get_attachments` — the right path for images and PDFs anyway |
+| `page_read_attachment` | Read an attachment's content straight into the conversation (nothing is saved anywhere) — text as text, small binaries as a base64 blob. Meant for text attachments: configs, CSVs, logs. Capped at 128 KiB to protect the model's context window; anything larger is refused before transfer with a pointer to `download_url` from `page_get_attachments` — the right path for images and PDFs anyway |
 | `page_get_grids` | List grids attached to a page (`fetch_all` supported) |
 | `grid_get` | Get a grid by `grid_id` with row/column/revision filters |
 | `user_get_current` | Who am I — `username` and `home_cluster` (the caller's personal-section slug) |

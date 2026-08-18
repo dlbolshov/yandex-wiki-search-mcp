@@ -61,7 +61,7 @@ FETCH_ALL_MAX_ITEMS = 500
 FETCH_ALL_BUDGET_SECONDS = 25.0
 _FETCH_ALL_MAX_REQUESTS = 50
 
-# Inline ceiling for page_download_attachment, enforced by the client BEFORE
+# Inline ceiling for page_read_attachment, enforced by the client BEFORE
 # the body is read (Content-Length, else a capped stream read), so an oversized
 # attachment never lands in this process at all.
 #
@@ -573,14 +573,16 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         return await _paginate(fetch, cursor, fetch_all, page_size)
 
     @mcp.tool(
-        title="Download Page Attachment",
+        title="Read Page Attachment",
         description=(
-            "Download a Yandex Wiki page attachment and return its content "
-            "inline as an embedded resource: text files arrive as text, "
-            "anything else base64-encoded with its mime type. Refuses files "
-            "over 128 KiB without transferring them — fetch those yourself "
-            "via the attachment's download_url from page_get_attachments. "
-            "That listing is also where file ids come from."
+            "Read a Yandex Wiki page attachment's content into the "
+            "conversation as an embedded resource (nothing is saved "
+            "anywhere): text files arrive as text, anything else "
+            "base64-encoded. Meant for text attachments — configs, CSVs, "
+            "logs. Refuses files over 128 KiB without transferring them — "
+            "fetch those yourself via the attachment's download_url from "
+            "page_get_attachments. That listing is also where file ids "
+            "come from."
         ),
         annotations=READ_ONLY,
         # An embedded resource is a real content block, so the SDK ships it
@@ -590,7 +592,7 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         # which deliberately leaves non-text blocks alone).
         structured_output=False,
     )
-    async def page_download_attachment(
+    async def page_read_attachment(
         ctx: ToolContext,
         file_id: AttachmentID,
         page_id: OptionalPageID = None,
