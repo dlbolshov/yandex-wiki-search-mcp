@@ -1037,6 +1037,31 @@ class TestPageWriteTools:
         assert "lines 2, 4" in text
         mock_wiki_protocol.page_update.assert_not_awaited()
 
+    async def test_page_edit_ambiguity_line_list_is_capped(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # Six occurrences, cap five: the line scan must stop at the cap (not
+        # walk the whole page) and the error must say the list is incomplete.
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, content="foo\n" * 6
+        )
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "foo", "new_text": "bar"}],
+            },
+        )
+
+        assert result.is_error is True
+        text = get_tool_result_text(result)
+        assert "occurs 6 times" in text
+        assert "lines 1, 2, 3, 4, 5 and more" in text
+        mock_wiki_protocol.page_update.assert_not_awaited()
+
     async def test_page_edit_writes_with_allow_merge_by_default(
         self,
         client: Client,
