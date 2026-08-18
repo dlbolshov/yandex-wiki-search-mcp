@@ -5,6 +5,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from mcp_wiki.mcp.params import (
+    AttachmentID,
     CloneTargetSlug,
     CommentID,
     GridCellPatch,
@@ -25,9 +26,11 @@ from mcp_wiki.mcp.tools.common import (
     resolve_page_id_and_type,
     resolve_page_slug,
 )
-from mcp_wiki.mcp.utils import get_yandex_auth
+from mcp_wiki.mcp.utils import get_yandex_auth, resolve_page_locator
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentDeleteResponse,
     ClonedPageRef,
+    DeleteCommentResponse,
     DeletePageResponse,
     GridCellsResponse,
     GridCreateRequest,
@@ -37,6 +40,8 @@ from mcp_wiki.wiki.proto.types.pages import (
     GridUpdateRequest,
     GridUpdateResponse,
     PageComment,
+    PageEditReplacement,
+    PageEditResponse,
     RecoverPageResponse,
     UploadAttachmentResult,
     UploadLocation,
@@ -101,6 +106,61 @@ def _content_warnings(page_type: str | None, content: str) -> list[str]:
     """Combine page-type and markup warnings within the shared MAX_WARNINGS cap."""
     warnings = _page_type_warnings(page_type)
     return warnings + validate_yfm(content, max_warnings=MAX_WARNINGS - len(warnings))
+
+
+_OCCURRENCE_LINES_CAP = 5
+
+
+def _occurrence_lines(content: str, needle: str) -> list[int]:
+    """1-based line numbers where needle occurs, capped.
+
+    Line numbers instead of surrounding text: they are enough to point the
+    agent at the right occurrence, and echoing page fragments into every
+    ambiguity error would spend the tokens page_edit exists to save (the
+    agent can always page_get for context).
+    """
+    lines: list[int] = []
+    start = 0
+    while len(lines) < _OCCURRENCE_LINES_CAP:
+        index = content.find(needle, start)
+        if index == -1:
+            break
+        lines.append(content.count("\n", 0, index) + 1)
+        start = index + 1
+    return lines
+
+
+def _apply_replacements(
+    content: str, replacements: list[PageEditReplacement]
+) -> tuple[str, int]:
+    """Apply replacements in order; refuse loudly instead of guessing.
+
+    Each old_text is matched against the content as already edited by the
+    preceding entries — same sequential semantics as a multi-edit in an
+    IDE agent.
+    """
+    occurrences_replaced = 0
+    for index, replacement in enumerate(replacements, start=1):
+        count = content.count(replacement.old_text)
+        if count == 0:
+            raise ValueError(
+                f"Replacement {index}/{len(replacements)}: old_text not found "
+                "in the page content. Nothing was written. Read the page with "
+                "page_get and copy the text exactly, including whitespace."
+            )
+        if count > 1 and not replacement.replace_all:
+            lines = ", ".join(
+                str(n) for n in _occurrence_lines(content, replacement.old_text)
+            )
+            suffix = " and more" if count > _OCCURRENCE_LINES_CAP else ""
+            raise ValueError(
+                f"Replacement {index}/{len(replacements)}: old_text occurs "
+                f"{count} times (lines {lines}{suffix}). Nothing was written. "
+                "Extend old_text to make it unique, or set replace_all=true."
+            )
+        content = content.replace(replacement.old_text, replacement.new_text)
+        occurrences_replaced += count
+    return content, occurrences_replaced
 
 
 def _require_non_empty_text(value: str, *, field_name: str) -> str:
@@ -559,7 +619,8 @@ def register_page_write_tools(
     @mcp.tool(
         title="Update Wiki Page",
         description=(
-            "Update an existing Yandex Wiki page. Content replacement is full-page "
+            "Update an existing Yandex Wiki page: title, content, or a "
+            "redirect to another page. Content replacement is full-page "
             f"when content is provided. {YFM_CONTENT_NOTE}"
         ),
         annotations=IDEMPOTENT,
@@ -573,6 +634,21 @@ def register_page_write_tools(
             str | None,
             Field(description="New full page content. Replaces the existing body."),
         ] = None,
+        redirect_to_page_id: Annotated[
+            int | None,
+            Field(
+                description=(
+                    "Make this page redirect to the page with this id. The "
+                    "page keeps its own content; the redirect state reads "
+                    "back via page_get with fields=['redirect']."
+                ),
+                gt=0,
+            ),
+        ] = None,
+        clear_redirect: Annotated[
+            bool,
+            Field(description="Remove this page's existing redirect."),
+        ] = False,
         allow_merge: Annotated[
             bool,
             Field(
@@ -586,8 +662,20 @@ def register_page_write_tools(
             ),
         ] = False,
     ) -> PageWriteResponse:
-        if title is None and content is None:
-            raise ValueError("Provide at least one of title or content.")
+        if redirect_to_page_id is not None and clear_redirect:
+            raise ValueError(
+                "redirect_to_page_id and clear_redirect are mutually exclusive."
+            )
+        if (
+            title is None
+            and content is None
+            and redirect_to_page_id is None
+            and not clear_redirect
+        ):
+            raise ValueError(
+                "Provide at least one of title, content, redirect_to_page_id, "
+                "or clear_redirect."
+            )
         resolved_page_id, resolved_page_type = await resolve_page_id_and_type(
             ctx, page_id=page_id, slug=slug
         )
@@ -595,6 +683,8 @@ def register_page_write_tools(
             resolved_page_id,
             title=title,
             content=content,
+            redirect_to_page_id=redirect_to_page_id,
+            clear_redirect=clear_redirect,
             allow_merge=allow_merge,
             is_silent=is_silent,
             auth=get_yandex_auth(ctx),
@@ -603,6 +693,72 @@ def register_page_write_tools(
         if content is not None:
             warnings = _content_warnings(resolved_page_type, content)
         return _with_yfm_warnings(page, warnings)
+
+    @mcp.tool(
+        title="Edit Wiki Page Content",
+        description=(
+            "Edit a Yandex Wiki page by exact-text replacements, without "
+            "resending the whole page: reads the current content, applies "
+            "the replacements in order, and writes the result back with a "
+            "single update. Each old_text must match the stored YFM markup "
+            "exactly (copy it from page_get, whitespace included) and occur "
+            "exactly once unless replace_all is set — a missing or ambiguous "
+            "match fails the whole call before anything is written. NOTE: "
+            "the Wiki API has no page revisions, so the read-modify-write "
+            "is not atomic — a concurrent edit between the read and the "
+            f"write is silently overwritten. {YFM_CONTENT_NOTE}"
+        ),
+        annotations=IDEMPOTENT,
+    )
+    async def page_edit(
+        ctx: ToolContext,
+        replacements: Annotated[
+            list[PageEditReplacement],
+            Field(
+                min_length=1,
+                description="Replacements to apply sequentially: each "
+                "old_text is matched against the content as already edited "
+                "by the preceding entries.",
+            ),
+        ],
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+    ) -> PageEditResponse:
+        resolved_page_id, resolved_slug = resolve_page_locator(
+            page_id=page_id, slug=slug
+        )
+        auth = get_yandex_auth(ctx)
+        wiki = get_wiki(ctx)
+        if resolved_page_id is not None:
+            page = await wiki.page_get(resolved_page_id, fields=["content"], auth=auth)
+        elif resolved_slug is not None:
+            page = await wiki.page_get_by_slug(
+                resolved_slug, fields=["content"], auth=auth
+            )
+        else:  # pragma: no cover - narrowing; resolve_page_locator raised
+            # already unless exactly one of the two is set.
+            raise ValueError("Either page_id or slug must be provided.")
+        content = page.content if isinstance(page.content, str) else None
+        if content is None:
+            raise ValueError(
+                f"Page {page.slug or page.id} has no editable text content "
+                f"(page_type={page.page_type!r})."
+            )
+
+        new_content, occurrences_replaced = _apply_replacements(content, replacements)
+        updated = await wiki.page_update(
+            page.id,
+            content=new_content,
+            auth=auth,
+        )
+        return PageEditResponse(
+            page_id=updated.id,
+            slug=updated.slug or page.slug,
+            title=updated.title or page.title,
+            edits_applied=len(replacements),
+            occurrences_replaced=occurrences_replaced,
+            yfm_warnings=_content_warnings(page.page_type, new_content) or None,
+        )
 
     @mcp.tool(
         title="Append Wiki Content",
@@ -706,6 +862,49 @@ def register_page_write_tools(
             body=body,
             parent_id=parent_id,
             thread_id=thread_id,
+            auth=get_yandex_auth(ctx),
+        )
+
+    @mcp.tool(
+        title="Delete Page Comment",
+        description=(
+            "Delete a comment from a Yandex Wiki page and return the page's "
+            "updated comment count. Comment ids come from page_get_comments."
+        ),
+        annotations=DESTRUCTIVE,
+    )
+    async def page_delete_comment(
+        ctx: ToolContext,
+        comment_id: CommentID,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+    ) -> DeleteCommentResponse:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_delete_comment(
+            resolved_page_id,
+            comment_id=comment_id,
+            auth=get_yandex_auth(ctx),
+        )
+
+    @mcp.tool(
+        title="Delete Page Attachment",
+        description=(
+            "Delete an attachment from a Yandex Wiki page. File ids come "
+            "from page_get_attachments. Does not touch page content — any "
+            "file macro referencing the attachment stays behind, broken."
+        ),
+        annotations=DESTRUCTIVE,
+    )
+    async def page_delete_attachment(
+        ctx: ToolContext,
+        file_id: AttachmentID,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+    ) -> AttachmentDeleteResponse:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_delete_attachment(
+            resolved_page_id,
+            file_id=file_id,
             auth=get_yandex_auth(ctx),
         )
 

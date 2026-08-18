@@ -2,10 +2,12 @@ from typing import Any, Protocol
 
 from mcp_wiki.wiki.proto.common import YandexAuth
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentDeleteResponse,
     AttachmentListResponse,
     AttachmentResultsResponse,
     ClonedPageRef,
     CommentsResponse,
+    DeleteCommentResponse,
     DeletePageResponse,
     DescendantsResponse,
     GridCellsResponse,
@@ -19,11 +21,13 @@ from mcp_wiki.wiki.proto.types.pages import (
     PageComment,
     RecoverPageResponse,
     ResourcesResponse,
+    SearchAuthor,
     SearchDateInterval,
     SearchResponse,
     UploadAttachmentResult,
     UploadLocation,
     UploadSessionResponse,
+    WikiCurrentUser,
     WikiGrid,
     WikiPage,
 )
@@ -56,6 +60,7 @@ class WikiProtocol(Protocol):
         limit: int = 10,
         cluster: str | None = None,
         result_type: str | None = None,
+        authors: list[SearchAuthor] | None = None,
         created_at: SearchDateInterval | None = None,
         modified_at: SearchDateInterval | None = None,
         highlight: bool = False,
@@ -250,6 +255,8 @@ class WikiProtocol(Protocol):
         *,
         title: str | None = None,
         content: str | None = None,
+        redirect_to_page_id: int | None = None,
+        clear_redirect: bool = False,
         allow_merge: bool = False,
         is_silent: bool = False,
         auth: YandexAuth | None = None,
@@ -274,6 +281,36 @@ class WikiProtocol(Protocol):
         thread_id: int | None = None,
         auth: YandexAuth | None = None,
     ) -> PageComment: ...
+
+    async def page_delete_comment(
+        self,
+        page_id: int,
+        *,
+        comment_id: int,
+        auth: YandexAuth | None = None,
+    ) -> DeleteCommentResponse: ...
+
+    async def page_download_attachment(
+        self,
+        page_id: int,
+        *,
+        file_id: int,
+        auth: YandexAuth | None = None,
+    ) -> bytes: ...
+
+    async def page_delete_attachment(
+        self,
+        page_id: int,
+        *,
+        file_id: int,
+        auth: YandexAuth | None = None,
+    ) -> AttachmentDeleteResponse: ...
+
+    async def user_get_current(
+        self,
+        *,
+        auth: YandexAuth | None = None,
+    ) -> WikiCurrentUser: ...
 
     async def page_delete(
         self,

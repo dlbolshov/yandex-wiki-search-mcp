@@ -95,7 +95,15 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   before `limit`, so hits are not lost to it; `filters.created_at`/`modified_at` take
   a `{from, to}` interval
   and **require both bounds** — `from` alone is a 400 `SEARCH_BAD_REQUEST`.
-  `filters.authors` and `show_obsolete` are documented but not probed yet. `order_by`
+  `filters.authors` **works** (probed 2026-08-18): entries are `{uid, cloud_uid}`
+  identities matched against the page **owner**, either field alone filters, several
+  entries OR together, an unknown identity is 200 with 0 results, and an empty list
+  is the same as no filter — exposed as the tool's `authors` argument, fed by
+  `user_get_current` for "my pages". `filters.show_obsolete` is documented but
+  **dead** (probed 2026-08-18): pages that `descendants?actuality=obsolete` itself
+  reports as obsolete come back identically with `false`, `true`, and the flag
+  omitted — unexposed, third dead search parameter after `cursor` and `order_by`.
+  `order_by`
   (`relevancy`/`creation_date`/`modified_date`) is documented but **ignored** — neither
   value changes the order. Since 1.3.0 the tool forwards `slug_prefix` as
   `filters.cluster` and `result_type` as `filters.type`, and exposes the date intervals
@@ -121,9 +129,9 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   (Yandex Cloud); the server sets one based on `WIKI_ORG_ID`/`WIKI_CLOUD_ORG_ID`.
 - **`GET /users/me` is documented and live** (probed 2026-08-11): `username`,
   `home_cluster` (the caller's personal-section slug, e.g. `users/<login>`),
-  `identity` (`uid`, `cloud_uid`) and `org`. Before the 2026-08 reference this project
-  did not know the endpoint existed; scheduled as `user_get_current` (ROADMAP M7) —
-  it turns "create it in my section" from a guess into a lookup.
+  `identity` (`uid`, `cloud_uid`) and `org` (`dir_id`, `collab_id`). Before the 2026-08
+  reference this project did not know the endpoint existed. Exposed as
+  `user_get_current` — it turns "create it in my section" from a guess into a lookup.
 
 ## Pages
 
@@ -153,8 +161,9 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   the copy's id and slug.
 - **Redirects work through the regular update** (probed 2026-08-11): `POST /pages/{id}`
   with `redirect: {"page": {"id": N}}` sets one, `redirect: {"page": null}` clears it,
-  and the state reads back via `page_get` with `fields=["redirect"]`. Not exposed as a
-  tool yet (ROADMAP M7).
+  and the state reads back via `page_get` with `fields=["redirect"]` as
+  `{"page_id": N, "redirect_target": {id, slug, title, page_type}}` (`null` when there
+  is none). Exposed via `page_update` (`redirect_to_page_id` / `clear_redirect`).
 - **Per-page access management is documented and live** (`POST`/`DELETE
   /pages/{idx}/access`): granting yourself a role you already hold is refused with
   `PAGE_ACCESS_ALREADY_GRANTED`, so the endpoint validates for real; a full grant/revoke
@@ -200,8 +209,15 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
 - Attachment objects include an `is_downloadable` flag. **Download and deletion are
   documented and live** (probed 2026-08-11): `GET /pages/{id}/attachments/{fid}/download`
   streams the bytes, `GET /pages/attachments/download_by_url?url=<slug>/.files/<name>`
-  works too, `DELETE /pages/{id}/attachments/{fid}` answers 204. Not exposed as tools
-  yet (ROADMAP M7).
+  works too, `DELETE /pages/{id}/attachments/{fid}` answers 204. Exposed as
+  `page_download_attachment` (UTF-8 text inline, otherwise base64, 1 MiB cap) and
+  `page_delete_attachment`.
+- **A missing attachment on the download endpoint is a 404 with a placeholder GIF
+  body**, not the JSON error envelope (found 2026-08-17, during implementation) —
+  the client maps it to `AttachmentNotFound` itself. The delete endpoints answer misses with the normal
+  envelope (`NOT_FOUND`, "No File matches the given query." / "No Comment matches the
+  given query."), which also distinguishes a missing sub-resource from a missing page
+  — so those pass through unmapped.
 - Deleting a page **frees its slug immediately**: the page stops resolving and the
   same slug can be created again, even though the delete is recoverable by token
   (verified 2026-08-05).
@@ -213,8 +229,7 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   early versions of this project modeled one).
 - Cursor pagination on `GET /pages/{id}/comments` works (verified with `page_size=2` walks).
 - **Comment deletion is live**: `DELETE /pages/{id}/comments/{cid}` answers 200 with the
-  page's updated `comments_count` (probed 2026-08-11). Not exposed as a tool yet
-  (ROADMAP M7).
+  page's updated `comments_count` (probed 2026-08-11). Exposed as `page_delete_comment`.
 - The documented thread endpoint (`GET /pages/{id}/comments/{cid}/thread`) answers 200
   but returned an **empty list for a root comment with a live reply** (the reply carried
   `parent_id`, `thread_id` was null on both) — semantics unclear, left alone.

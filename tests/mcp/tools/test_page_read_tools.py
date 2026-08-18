@@ -1,3 +1,4 @@
+import base64
 import itertools
 from typing import Any
 from unittest.mock import AsyncMock
@@ -5,7 +6,11 @@ from unittest.mock import AsyncMock
 import pytest
 from mcp import Client
 
-from mcp_wiki.mcp.tools.page_read import _FETCH_ALL_MAX_REQUESTS, _drain_cursor
+from mcp_wiki.mcp.tools.page_read import (
+    _FETCH_ALL_MAX_REQUESTS,
+    MAX_INLINE_ATTACHMENT_BYTES,
+    _drain_cursor,
+)
 from mcp_wiki.wiki.custom.errors import WikiTransportError
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
@@ -200,6 +205,7 @@ class TestPageReadTools:
         kwargs = mock_wiki_protocol.page_search.await_args.kwargs
         assert kwargs["cluster"] is None
         assert kwargs["result_type"] is None
+        assert kwargs["authors"] is None
         assert kwargs["created_at"] is None
         assert kwargs["modified_at"] is None
         assert kwargs["highlight"] is False
@@ -221,6 +227,7 @@ class TestPageReadTools:
                 "query": "x",
                 "slug_prefix": "/Tech-Doc/ML/",
                 "result_type": "page",
+                "authors": [{"uid": "1130000067296925"}],
                 "created_between": {
                     "from": "2026-01-01T00:00:00Z",
                     "to": "2026-06-01T00:00:00Z",
@@ -238,6 +245,7 @@ class TestPageReadTools:
         # slug_prefix arrives as the API's cluster filter, normalized
         assert kwargs["cluster"] == "tech-doc/ml"
         assert kwargs["result_type"] == "page"
+        assert [a.uid for a in kwargs["authors"]] == ["1130000067296925"]
         assert kwargs["created_at"].from_ == "2026-01-01T00:00:00Z"
         assert kwargs["created_at"].to == "2026-06-01T00:00:00Z"
         assert kwargs["modified_at"].from_ == "2026-06-01T00:00:00Z"
@@ -252,6 +260,20 @@ class TestPageReadTools:
         result = await client.call_tool(
             "page_search",
             {"query": "x", "created_between": {"from": "2026-01-01T00:00:00Z"}},
+        )
+
+        assert result.is_error is True
+        mock_wiki_protocol.page_search.assert_not_awaited()
+
+    async def test_page_search_rejects_an_empty_author(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # {} would be silently ignored by the backend — the schema refuses it.
+        result = await client.call_tool(
+            "page_search",
+            {"query": "x", "authors": [{}]},
         )
 
         assert result.is_error is True
@@ -716,3 +738,86 @@ class TestPageReadTools:
 
         assert result.is_error is True
         assert "grid_id must not be empty" in get_tool_result_text(result)
+
+
+class TestPageDownloadAttachment:
+    async def test_utf8_content_arrives_as_text(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_download_attachment.return_value = b"col1;col2\na;b\n"
+
+        result = await client.call_tool(
+            "page_download_attachment",
+            {"page_id": 10, "file_id": 5},
+        )
+
+        content = get_tool_result_content(result)
+        assert content["encoding"] == "utf-8"
+        assert content["content"] == "col1;col2\na;b\n"
+        assert content["size_bytes"] == len(b"col1;col2\na;b\n")
+        assert content["page_id"] == 10
+        assert content["file_id"] == 5
+        args = mock_wiki_protocol.page_download_attachment.await_args
+        assert args.args[0] == 10
+        assert args.kwargs["file_id"] == 5
+
+    async def test_binary_content_arrives_base64(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        blob = b"\x89PNG\r\n\x1a\n\x00\xff"
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
+            id=10
+        )
+        mock_wiki_protocol.page_download_attachment.return_value = blob
+
+        result = await client.call_tool(
+            "page_download_attachment",
+            {"slug": "users/test/page", "file_id": 5},
+        )
+
+        content = get_tool_result_content(result)
+        assert content["encoding"] == "base64"
+        assert base64.b64decode(content["content"]) == blob
+        assert content["size_bytes"] == len(blob)
+
+    async def test_oversized_content_is_refused_with_the_download_url_hint(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_download_attachment.return_value = b"x" * (
+            MAX_INLINE_ATTACHMENT_BYTES + 1
+        )
+
+        result = await client.call_tool(
+            "page_download_attachment",
+            {"page_id": 10, "file_id": 5},
+        )
+
+        assert result.is_error is True
+        assert "download_url" in get_tool_result_text(result)
+
+
+class TestUserGetCurrent:
+    async def test_returns_the_identity(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.user_get_current.return_value = {
+            "username": "david",
+            "home_cluster": "users/david",
+            "identity": {"uid": "113000"},
+            "org": {"dir_id": "752289"},
+        }
+
+        result = await client.call_tool("user_get_current", {})
+
+        content = get_tool_result_content(result)
+        assert content["username"] == "david"
+        assert content["home_cluster"] == "users/david"
+        mock_wiki_protocol.user_get_current.assert_awaited_once()

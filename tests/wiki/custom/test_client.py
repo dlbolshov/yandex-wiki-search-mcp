@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 from aioresponses import aioresponses
+from pydantic import ValidationError
 
 from mcp_wiki.wiki.custom.client import WikiClient
 from mcp_wiki.wiki.custom.errors import (
@@ -16,6 +17,7 @@ from mcp_wiki.wiki.custom.errors import (
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
     GridUpdateRequest,
+    SearchAuthor,
     SearchDateInterval,
     WikiGridPageRef,
 )
@@ -93,6 +95,10 @@ class TestWikiClient:
                 limit=10,
                 cluster="tech-doc/ml",
                 result_type="page",
+                authors=[
+                    SearchAuthor(uid="1130000067296925"),
+                    SearchAuthor(cloud_uid="aje8rk0gjh0qq7q7mmt4"),
+                ],
                 created_at=SearchDateInterval.model_validate(
                     {"from": "2026-01-01T00:00:00Z", "to": "2026-06-01T00:00:00Z"}
                 ),
@@ -103,7 +109,8 @@ class TestWikiClient:
             )
 
         # filters go on the wire as the API spells them: the date intervals
-        # under their "from" alias, the type filter as "type".
+        # under their "from" alias, the type filter as "type", the author
+        # identities without their unset halves.
         capture.last_request.assert_json_body(
             {
                 "query": "q",
@@ -111,6 +118,10 @@ class TestWikiClient:
                 "filters": {
                     "type": "page",
                     "cluster": "tech-doc/ml",
+                    "authors": [
+                        {"uid": "1130000067296925"},
+                        {"cloud_uid": "aje8rk0gjh0qq7q7mmt4"},
+                    ],
                     "created_at": {
                         "from": "2026-01-01T00:00:00Z",
                         "to": "2026-06-01T00:00:00Z",
@@ -123,6 +134,28 @@ class TestWikiClient:
                 "highlight": True,
             }
         )
+
+    async def test_page_search_empty_authors_list_sends_no_filter(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # An empty authors list means "no filter" on the wire (verified live
+        # 2026-08-18), so the client drops it instead of sending filters at all.
+        capture = RequestCapture(
+            payload={"results": [], "next_cursor": None, "prev_cursor": None}
+        )
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            await wiki_client.page_search("q", authors=[])
+
+        capture.last_request.assert_json_body({"query": "q", "limit": 10})
+
+    def test_search_author_requires_an_identifier(self) -> None:
+        # {} is silently ignored by the backend — the model refuses it upfront.
+        with pytest.raises(ValidationError, match="uid or cloud_uid"):
+            SearchAuthor()
 
     async def test_page_search_empty(self, wiki_client: WikiClient) -> None:
         capture = RequestCapture(payload=load_fixture("search_empty.json"))
@@ -829,12 +862,49 @@ class TestWikiClient:
         )
         update_capture.last_request.assert_param("allow_merge", "true")
 
-    async def test_page_update_requires_title_or_content(
+    async def test_page_update_requires_something_to_change(
         self,
         wiki_client: WikiClient,
     ) -> None:
-        with pytest.raises(ValueError, match="at least one of title or content"):
+        with pytest.raises(ValueError, match="at least one of title, content"):
             await wiki_client.page_update(10)
+
+    async def test_page_update_rejects_set_and_clear_redirect_together(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await wiki_client.page_update(
+                10, redirect_to_page_id=77, clear_redirect=True
+            )
+
+    async def test_page_update_sets_a_redirect(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(payload={"id": 10, "slug": "users/test/page"})
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10",
+                callback=capture.callback,
+            )
+            await wiki_client.page_update(10, redirect_to_page_id=77)
+
+        capture.last_request.assert_json_body({"redirect": {"page": {"id": 77}}})
+
+    async def test_page_update_clears_a_redirect(
+        self,
+        wiki_client: WikiClient,
+    ) -> None:
+        capture = RequestCapture(payload={"id": 10, "slug": "users/test/page"})
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10",
+                callback=capture.callback,
+            )
+            await wiki_client.page_update(10, clear_redirect=True)
+
+        capture.last_request.assert_json_body({"redirect": {"page": None}})
 
     async def test_page_clone_polls_the_operation_and_returns_the_copy(
         self,

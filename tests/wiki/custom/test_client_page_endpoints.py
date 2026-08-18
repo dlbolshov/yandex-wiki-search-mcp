@@ -13,8 +13,9 @@ import pytest
 from aioresponses import aioresponses
 
 from mcp_wiki.wiki.custom.client import WikiClient
-from mcp_wiki.wiki.custom.errors import PageNotFound
+from mcp_wiki.wiki.custom.errors import AttachmentNotFound, PageNotFound, WikiApiError
 from mcp_wiki.wiki.proto.common import YandexAuth
+from mcp_wiki.wiki.proto.types.pages import AttachmentDeleteResponse
 from tests.aioresponses_utils import RequestCapture
 
 COMMENTS_URL = re.compile(r"https://api\.wiki\.yandex\.net/v1/pages/42/comments.*")
@@ -194,6 +195,124 @@ class TestPageAddComment:
         capture.last_request.assert_json_body(
             {"body": "re", "parent_id": 11, "thread_id": 3}
         )
+
+
+class TestPageDeleteComment:
+    async def test_deletes_and_returns_the_updated_count(
+        self, wiki_client: WikiClient
+    ) -> None:
+        capture = RequestCapture(payload={"comments_count": 3})
+        with aioresponses() as mocked:
+            mocked.delete(
+                "https://api.wiki.yandex.net/v1/pages/42/comments/11",
+                callback=capture.callback,
+            )
+            response = await wiki_client.page_delete_comment(42, comment_id=11)
+
+        assert response.comments_count == 3
+        capture.assert_called_once()
+        capture.last_request.assert_headers(AUTH_HEADERS)
+
+    async def test_404_carries_the_api_envelope_not_page_not_found(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # A 404 here is ambiguous (page or comment), and the API's own
+        # envelope already names the culprit — so no PageNotFound mapping.
+        with aioresponses() as mocked:
+            mocked.delete(
+                "https://api.wiki.yandex.net/v1/pages/42/comments/999",
+                status=404,
+                payload={
+                    "error_code": "NOT_FOUND",
+                    "debug_message": "No Comment matches the given query.",
+                },
+            )
+            with pytest.raises(WikiApiError, match="No Comment matches"):
+                await wiki_client.page_delete_comment(42, comment_id=999)
+
+
+class TestPageDownloadAttachment:
+    async def test_returns_the_raw_bytes(self, wiki_client: WikiClient) -> None:
+        blob = b"\x89PNG\r\n\x1a\n binary"
+        with aioresponses() as mocked:
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
+                body=blob,
+            )
+            data = await wiki_client.page_download_attachment(42, file_id=5)
+
+        assert data == blob
+
+    async def test_404_maps_to_attachment_not_found(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # A miss answers with a placeholder GIF body, not the JSON error
+        # envelope — the client names the miss itself.
+        with aioresponses() as mocked:
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
+                status=404,
+                body=b"GIF89a...",
+            )
+            with pytest.raises(AttachmentNotFound, match="file 5 on page 42"):
+                await wiki_client.page_download_attachment(42, file_id=5)
+
+
+class TestPageDeleteAttachment:
+    async def test_builds_the_acknowledgment_from_a_204(
+        self, wiki_client: WikiClient
+    ) -> None:
+        capture = RequestCapture(status=204)
+        with aioresponses() as mocked:
+            mocked.delete(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/5",
+                callback=capture.callback,
+            )
+            response = await wiki_client.page_delete_attachment(42, file_id=5)
+
+        assert response == AttachmentDeleteResponse(page_id=42, file_id=5, deleted=True)
+        capture.assert_called_once()
+        capture.last_request.assert_headers(AUTH_HEADERS)
+
+    async def test_404_carries_the_api_envelope(self, wiki_client: WikiClient) -> None:
+        with aioresponses() as mocked:
+            mocked.delete(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/999",
+                status=404,
+                payload={
+                    "error_code": "NOT_FOUND",
+                    "debug_message": "No File matches the given query.",
+                },
+            )
+            with pytest.raises(WikiApiError, match="No File matches"):
+                await wiki_client.page_delete_attachment(42, file_id=999)
+
+
+class TestUserGetCurrent:
+    async def test_parses_the_identity(self, wiki_client: WikiClient) -> None:
+        capture = RequestCapture(
+            payload={
+                "username": "david",
+                "home_cluster": "users/david",
+                "identity": {"uid": "113000", "cloud_uid": "aje8rk"},
+                "org": {"dir_id": "752289", "collab_id": "9166c4"},
+            }
+        )
+        with aioresponses() as mocked:
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/users/me",
+                callback=capture.callback,
+            )
+            user = await wiki_client.user_get_current()
+
+        assert user.username == "david"
+        assert user.home_cluster == "users/david"
+        assert user.identity is not None
+        assert user.identity.uid == "113000"
+        assert user.org is not None
+        assert user.org.dir_id == "752289"
+        capture.assert_called_once()
+        capture.last_request.assert_headers(AUTH_HEADERS)
 
 
 class TestPageDeleteAndRecover:

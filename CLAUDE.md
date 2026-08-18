@@ -91,17 +91,22 @@ Read-only tools:
 - `page_get_resources`
 - `page_get_attachments`
 - `page_get_grids`
+- `page_download_attachment`
+- `user_get_current`
 - `grid_get`
 
 Write tools:
 - `page_create`
 - `page_update`
+- `page_edit`
 - `page_append_content`
 - `page_clone`
 - `page_add_comment`
+- `page_delete_comment`
 - `page_delete`
 - `page_recover`
 - `page_upload_attachment`
+- `page_delete_attachment`
 - `grid_create`
 - `grid_update`
 - `grid_delete`

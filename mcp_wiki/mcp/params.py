@@ -10,6 +10,15 @@ from mcp_wiki.wiki.proto.types.pages import (
 
 PageID = Annotated[int, Field(description="Wiki page numeric ID.", gt=0)]
 CommentID = Annotated[int, Field(description="Wiki comment numeric ID.", gt=0)]
+AttachmentID = Annotated[
+    int,
+    Field(
+        description=(
+            "Attachment (file) numeric ID, as listed by page_get_attachments."
+        ),
+        gt=0,
+    ),
+]
 OptionalPageID = Annotated[
     int | None,
     Field(description="Wiki page numeric ID. Provide either page_id or slug.", gt=0),
@@ -250,16 +259,17 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
         "- Discover pages across the whole Wiki with page_search, then open a result by its slug with page_get.",
         "- Read Wiki pages by slug or ID",
         "- Traverse a page subtree, or the whole Wiki with page_get_descendants(from_root=true)",
-        "- Read comments, resources, and attachments",
+        "- Read comments, resources, and attachments — and download an attachment's content with page_download_attachment",
         "- Read page grids and get dynamic tables",
+        "- Look up the calling user's username and personal-section slug with user_get_current",
     ]
     if not read_only:
         capabilities += [
             "- Create, update, copy, and delete dynamic tables; add, move, and delete grid rows and columns; update cells",
-            "- Create, update, append to, clone, delete, and recover pages",
-            "- Add comments and upload attachments from the local filesystem"
+            "- Create, update, append to, clone, delete, and recover pages; point a page at another with a redirect; edit page content by exact-text replacements with page_edit instead of resending the whole page",
+            "- Add and delete comments, delete attachments, and upload attachments from the local filesystem"
             if include_local_uploads
-            else "- Add comments",
+            else "- Add and delete comments, and delete attachments",
         ]
 
     notes = [

@@ -36,6 +36,7 @@ from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
     GridUpdateRequest,
     PageFieldEnum,
+    SearchAuthor,
     WikiGridPageRef,
 )
 
@@ -257,6 +258,7 @@ class CursorWalk:
 
 
 ROOT_TITLE = "Contract sweep"
+ATTACHMENT_PAYLOAD = "attachment payload for the contract sweep\n"
 
 
 async def _clear_own_leftovers(wiki: WikiClient, base: str) -> bool:
@@ -326,7 +328,7 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         lambda: wiki.page_add_comment(root.id, body="sweep comment 1"),
     )
     await wiki.page_add_comment(root.id, body="sweep comment 2")
-    await wiki.page_add_comment(root.id, body="sweep comment 3")
+    doomed = await wiki.page_add_comment(root.id, body="sweep comment 3")
     if comment is not None:
         await check(
             "page_add_comment (reply)",
@@ -334,19 +336,82 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
                 root.id, body="sweep reply", parent_id=comment.id
             ),
         )
+    await check(
+        "page_delete_comment",
+        lambda: wiki.page_delete_comment(root.id, comment_id=doomed.id),
+        note_from_result=lambda r: f"comments_count={r.comments_count}",
+    )
 
     with tempfile.NamedTemporaryFile(
         "w", suffix=".txt", prefix="sweep-", delete=False
     ) as handle:
-        handle.write("attachment payload for the contract sweep\n")
+        handle.write(ATTACHMENT_PAYLOAD)
         tmp_path = Path(handle.name)
     try:
-        await check(
+        uploaded = await check(
             "page_upload_attachment",
             lambda: wiki.page_upload_attachment(root.id, file_path=str(tmp_path)),
         )
     finally:
         await asyncio.to_thread(tmp_path.unlink, True)
+    attachment_id = None
+    if uploaded is not None and uploaded.attachments:
+        attachment_id = uploaded.attachments[0].id
+        await check(
+            "page_download_attachment",
+            lambda: wiki.page_download_attachment(root.id, file_id=attachment_id),
+            note_from_result=lambda b: (
+                f"{len(b)} bytes, round-trips: {b.decode() == ATTACHMENT_PAYLOAD}"
+            ),
+        )
+
+    print(f"\n=== redirect cycle (on {base}/p-00) ===")
+    if children:
+        target = children[0]
+        await check(
+            "page_update (set redirect)",
+            lambda: wiki.page_update(target.id, redirect_to_page_id=root.id),
+        )
+        await check(
+            "page_get (redirect reads back)",
+            lambda: wiki.page_get(target.id, fields=["redirect"]),
+            note_from_result=lambda r: f"redirect={r.redirect}",
+        )
+        await check(
+            "page_update (clear redirect)",
+            lambda: wiki.page_update(target.id, clear_redirect=True),
+        )
+
+    print(f"\n=== page_edit cycle (on {base}/p-01) ===")
+    # The page_edit tool is a client-side read-modify-write; the live
+    # contract it leans on is that GET content, string-replaced and PUT
+    # back, reads back verbatim (no server-side markup normalization).
+    if len(children) > 1:
+        editee = children[1]
+        fetched = await check(
+            "page_get (content for edit)",
+            lambda: wiki.page_get(editee.id, fields=["content"]),
+            note_from_result=lambda r: f"content={r.content!r}",
+        )
+        if fetched is not None and isinstance(fetched.content, str):
+            edited = fetched.content.replace("page 1", "page 1 (edited)")
+            await check(
+                "page_update (edited content)",
+                lambda: wiki.page_update(editee.id, content=edited),
+            )
+            reread = await check(
+                "page_get (edit round-trips)",
+                lambda: wiki.page_get(editee.id, fields=["content"]),
+                note_from_result=lambda r: f"round-trips: {r.content == edited}",
+            )
+            if reread is not None and reread.content != edited:
+                REPORT.append(
+                    (
+                        "page_edit round-trip",
+                        "BROKEN",
+                        f"wrote {edited!r}, read back {reread.content!r}",
+                    )
+                )
 
     print(f"\n=== grids (host page {base}/grid-host) ===")
     grid_host = await check(
@@ -455,6 +520,7 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         await check("grid_delete", lambda: wiki.grid_delete(grid_id))
 
     print("\n=== reads ===")
+    me = await check("user_get_current", lambda: wiki.user_get_current())
     all_fields = [field.value for field in PageFieldEnum]
     await check(
         "page_get (all fields)",
@@ -490,6 +556,29 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         "page_search (existing corpus)",
         lambda: wiki.page_search("документация", limit=50),
     )
+    if me is not None and me.identity is not None and me.identity.uid:
+        # The sweep's own fixtures are owned by the token's user, so a search
+        # filtered to that author with highlighting exercises the whole
+        # filters+highlight wire shape against pages that must match.
+        await check(
+            "page_search (filters + highlight)",
+            lambda: wiki.page_search(
+                "sweep",
+                limit=50,
+                cluster=base,
+                result_type="page",
+                authors=[SearchAuthor(uid=me.identity.uid)],
+                highlight=True,
+            ),
+            note_from_result=lambda r: f"{len(r.results)} hits under {base!r}",
+        )
+
+    print("\n=== attachment deletion ===")
+    if attachment_id is not None:
+        await check(
+            "page_delete_attachment",
+            lambda: wiki.page_delete_attachment(root.id, file_id=attachment_id),
+        )
 
     print("\n=== page_clone ===")
     # One fixture, four contracts, matching the page_clone tool description:

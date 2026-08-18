@@ -642,7 +642,7 @@ class TestPageWriteTools:
         assert "exactly one of page_id or slug" in get_tool_result_text(result)
         mock_wiki_protocol.page_clone.assert_not_awaited()
 
-    async def test_page_update_rejects_missing_title_and_content(
+    async def test_page_update_rejects_missing_changes(
         self,
         client: Client,
         mock_wiki_protocol: AsyncMock,
@@ -653,8 +653,41 @@ class TestPageWriteTools:
         )
 
         assert result.is_error is True
-        assert "at least one of title or content" in get_tool_result_text(result)
+        assert "at least one of title, content" in get_tool_result_text(result)
         mock_wiki_protocol.page_get_by_slug.assert_not_awaited()
+        mock_wiki_protocol.page_update.assert_not_awaited()
+
+    async def test_page_update_sets_a_redirect_without_content(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_validate(
+            {"id": 10, "redirect": {"page_id": 77}}
+        )
+
+        result = await client.call_tool(
+            "page_update",
+            {"page_id": 10, "redirect_to_page_id": 77},
+        )
+
+        assert not get_tool_result_content(result).get("yfm_warnings")
+        args = mock_wiki_protocol.page_update.await_args
+        assert args.kwargs["redirect_to_page_id"] == 77
+        assert args.kwargs["clear_redirect"] is False
+
+    async def test_page_update_rejects_set_and_clear_redirect_together(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        result = await client.call_tool(
+            "page_update",
+            {"page_id": 10, "redirect_to_page_id": 77, "clear_redirect": True},
+        )
+
+        assert result.is_error is True
+        assert "mutually exclusive" in get_tool_result_text(result)
         mock_wiki_protocol.page_update.assert_not_awaited()
 
     async def test_page_update_warnings_capped_including_page_type(
@@ -777,6 +810,47 @@ class TestPageWriteTools:
         assert content["id"] == 10
         assert "yfm_warnings" not in content
 
+    async def test_page_delete_comment(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_delete_comment.return_value = {"comments_count": 2}
+
+        result = await client.call_tool(
+            "page_delete_comment",
+            {"page_id": 10, "comment_id": 11},
+        )
+
+        assert get_tool_result_content(result)["comments_count"] == 2
+        args = mock_wiki_protocol.page_delete_comment.await_args
+        assert args.args[0] == 10
+        assert args.kwargs["comment_id"] == 11
+
+    async def test_page_delete_attachment_by_slug(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
+            id=10
+        )
+        mock_wiki_protocol.page_delete_attachment.return_value = {
+            "page_id": 10,
+            "file_id": 5,
+            "deleted": True,
+        }
+
+        result = await client.call_tool(
+            "page_delete_attachment",
+            {"slug": "users/test/page", "file_id": 5},
+        )
+
+        assert get_tool_result_content(result)["deleted"] is True
+        args = mock_wiki_protocol.page_delete_attachment.await_args
+        assert args.args[0] == 10
+        assert args.kwargs["file_id"] == 5
+
     async def test_page_upload_attachment(
         self,
         client: Client,
@@ -796,3 +870,233 @@ class TestPageWriteTools:
 
         assert get_tool_result_content(result)["attachments"][0]["name"] == "file.zip"
         mock_wiki_protocol.page_upload_attachment.assert_awaited_once()
+
+    async def test_page_edit_by_id(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, slug="users/test/page", content="intro\nold line\noutro"
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_construct(
+            id=10, slug="users/test/page", title="T"
+        )
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "old line", "new_text": "new line"}],
+            },
+        )
+
+        content = get_tool_result_content(result)
+        assert content["page_id"] == 10
+        assert content["edits_applied"] == 1
+        assert content["occurrences_replaced"] == 1
+        # the read asks only for content — the tool must not pull extra fields
+        get_kwargs = mock_wiki_protocol.page_get.await_args.kwargs
+        assert get_kwargs["fields"] == ["content"]
+        update_args = mock_wiki_protocol.page_update.await_args
+        assert update_args.args[0] == 10
+        assert update_args.kwargs["content"] == "intro\nnew line\noutro"
+
+    async def test_page_edit_by_slug(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
+            id=10, slug="users/test/page", content="hello world"
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_construct(
+            id=10, slug="users/test/page"
+        )
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "slug": "users/test/page",
+                "replacements": [{"old_text": "world", "new_text": "wiki"}],
+            },
+        )
+
+        assert get_tool_result_content(result)["slug"] == "users/test/page"
+        get_kwargs = mock_wiki_protocol.page_get_by_slug.await_args.kwargs
+        assert get_kwargs["fields"] == ["content"]
+        assert mock_wiki_protocol.page_update.await_args.kwargs["content"] == (
+            "hello wiki"
+        )
+
+    async def test_page_edit_replace_all_counts_occurrences(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, content="x a x b x"
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_construct(id=10)
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [
+                    {"old_text": "x", "new_text": "y", "replace_all": True}
+                ],
+            },
+        )
+
+        content = get_tool_result_content(result)
+        assert content["occurrences_replaced"] == 3
+        assert mock_wiki_protocol.page_update.await_args.kwargs["content"] == (
+            "y a y b y"
+        )
+
+    async def test_page_edit_applies_replacements_sequentially(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # The second old_text exists only in the output of the first —
+        # multi-edit semantics, each entry sees the already-edited content.
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, content="alpha"
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_construct(id=10)
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [
+                    {"old_text": "alpha", "new_text": "beta"},
+                    {"old_text": "beta", "new_text": "gamma"},
+                ],
+            },
+        )
+
+        content = get_tool_result_content(result)
+        assert content["edits_applied"] == 2
+        assert mock_wiki_protocol.page_update.await_args.kwargs["content"] == "gamma"
+
+    async def test_page_edit_missing_text_writes_nothing(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, content="some page text"
+        )
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "absent", "new_text": "x"}],
+            },
+        )
+
+        assert result.is_error is True
+        assert "not found" in get_tool_result_text(result)
+        mock_wiki_protocol.page_update.assert_not_awaited()
+
+    async def test_page_edit_ambiguous_text_reports_lines_and_writes_nothing(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, content="intro\nfoo\nmiddle\nfoo\n"
+        )
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "foo", "new_text": "bar"}],
+            },
+        )
+
+        assert result.is_error is True
+        text = get_tool_result_text(result)
+        assert "occurs 2 times" in text
+        assert "lines 2, 4" in text
+        mock_wiki_protocol.page_update.assert_not_awaited()
+
+    async def test_page_edit_rejects_identical_old_and_new(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # A no-op replacement is an agent mistake — the schema refuses it
+        # before any HTTP.
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "same", "new_text": "same"}],
+            },
+        )
+
+        assert result.is_error is True
+        mock_wiki_protocol.page_get.assert_not_awaited()
+        mock_wiki_protocol.page_update.assert_not_awaited()
+
+    async def test_page_edit_rejects_empty_replacements(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        result = await client.call_tool(
+            "page_edit",
+            {"page_id": 10, "replacements": []},
+        )
+
+        assert result.is_error is True
+        mock_wiki_protocol.page_get.assert_not_awaited()
+
+    async def test_page_edit_refuses_a_page_without_text_content(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, page_type="grid", content=None
+        )
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "a", "new_text": "b"}],
+            },
+        )
+
+        assert result.is_error is True
+        assert "no editable text content" in get_tool_result_text(result)
+        mock_wiki_protocol.page_update.assert_not_awaited()
+
+    async def test_page_edit_warns_on_legacy_page_type(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_get.return_value = WikiPage.model_construct(
+            id=10, page_type="wiki", content="old text here"
+        )
+        mock_wiki_protocol.page_update.return_value = WikiPage.model_construct(id=10)
+
+        result = await client.call_tool(
+            "page_edit",
+            {
+                "page_id": 10,
+                "replacements": [{"old_text": "old text", "new_text": "new text"}],
+            },
+        )
+
+        warnings = get_tool_result_content(result)["yfm_warnings"]
+        assert len(warnings) == 1
+        assert "page_type='wiki'" in warnings[0]

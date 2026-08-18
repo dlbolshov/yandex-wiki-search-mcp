@@ -9,6 +9,7 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     field_validator,
     model_serializer,
+    model_validator,
 )
 
 
@@ -137,6 +138,33 @@ class SearchDateInterval(BaseWikiModel):
         description="Interval end, ISO 8601 date-time. The API rejects an "
         "open-ended interval, so both bounds are required."
     )
+
+
+class SearchAuthor(BaseWikiModel):
+    """Search author filter entry: a user identity, matched against page owner.
+
+    The wire shape is `{uid, cloud_uid}` and either field alone filters
+    (verified live 2026-08-18); when both are present the backend matches on
+    `uid`. Requiring at least one here turns a silently-ignored empty object
+    into a schema error.
+    """
+
+    uid: str | None = Field(
+        default=None,
+        description="User id, e.g. from user_get_current's identity.uid or a "
+        "page owner.",
+    )
+    cloud_uid: str | None = Field(
+        default=None,
+        description="Cloud user id — the alternative identifier for Yandex "
+        "Cloud organizations.",
+    )
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> "SearchAuthor":
+        if self.uid is None and self.cloud_uid is None:
+            raise ValueError("provide uid or cloud_uid")
+        return self
 
 
 class SearchResultItem(BaseWikiModel):
@@ -420,6 +448,123 @@ class PageCloneStatus(BaseWikiModel):
 
 class DeletePageResponse(BaseWikiModel):
     recovery_token: str | None = None
+
+
+class DeleteCommentResponse(BaseWikiModel):
+    """`DELETE /pages/{id}/comments/{cid}` answers 200 with the page's
+    updated comment tally (probed 2026-08-11)."""
+
+    comments_count: int | None = None
+
+
+class AttachmentDeleteResponse(BaseWikiModel):
+    """Acknowledgment for `DELETE /pages/{id}/attachments/{fid}`.
+
+    The endpoint answers 204 No Content (documented and verified live
+    2026-08-11), so the fields are filled in client-side — same pattern as
+    GridDeleteResponse: they confirm which attachment the deletion was
+    applied to.
+    """
+
+    page_id: int
+    file_id: int
+    deleted: bool
+
+
+class PageEditReplacement(BaseWikiModel):
+    """One exact-text replacement for page_edit.
+
+    Tool-level model: the API has no partial-edit endpoint (full update and
+    append only), so the tool reads the page, applies these in order, and
+    writes the result back.
+    """
+
+    old_text: str = Field(
+        min_length=1,
+        description="Exact text to find in the page content (YFM markup, "
+        "as page_get returns it).",
+    )
+    new_text: str = Field(
+        description="Text to replace it with. May be empty to delete old_text."
+    )
+    replace_all: bool = Field(
+        default=False,
+        description="Replace every occurrence. When false, old_text must "
+        "occur exactly once — several occurrences are an error listing "
+        "their line numbers.",
+    )
+
+    @model_validator(mode="after")
+    def _must_change_something(self) -> "PageEditReplacement":
+        if self.old_text == self.new_text:
+            raise ValueError("old_text and new_text are identical")
+        return self
+
+
+class PageEditResponse(BaseWikiModel):
+    """Compact acknowledgment for page_edit.
+
+    Deliberately not the page object: echoing content back would spend the
+    tokens the tool exists to save.
+    """
+
+    page_id: int
+    slug: str | None = None
+    title: str | None = None
+    edits_applied: int = Field(description="Number of replacement entries applied.")
+    occurrences_replaced: int = Field(
+        description="Total occurrences replaced across all entries."
+    )
+    yfm_warnings: list[str] | None = Field(
+        default=None,
+        description=(
+            "Markup warnings for the resulting content (the write itself "
+            "succeeded): parts that will not render as intended on Yandex "
+            "Wiki. See the wiki-mcp://yfm-cheatsheet resource for fixes."
+        ),
+    )
+
+
+class AttachmentDownloadResult(BaseWikiModel):
+    """Tool-level envelope for an attachment downloaded inline.
+
+    Never arrives from the wire — the API streams raw bytes; the tool layer
+    picks the representation.
+    """
+
+    page_id: int
+    file_id: int
+    size_bytes: int
+    encoding: Literal["utf-8", "base64"]
+    content: str = Field(
+        description=(
+            "The attachment's content: the text itself when encoding is "
+            "'utf-8', otherwise the raw bytes base64-encoded."
+        )
+    )
+
+
+class UserIdentity(BaseWikiModel):
+    uid: str | None = None
+    cloud_uid: str | None = None
+
+
+class UserOrg(BaseWikiModel):
+    dir_id: str | None = None
+    collab_id: str | None = None
+
+
+class WikiCurrentUser(BaseWikiModel):
+    username: str | None = None
+    home_cluster: str | None = Field(
+        default=None,
+        description=(
+            "Slug of the caller's personal section, e.g. 'users/<login>' — "
+            "the parent for pages that belong in 'my' space."
+        ),
+    )
+    identity: UserIdentity | None = None
+    org: UserOrg | None = None
 
 
 class RecoverPageResponse(BaseWikiModel):

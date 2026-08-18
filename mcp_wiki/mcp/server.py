@@ -57,7 +57,7 @@ def server_description() -> str | None:
 # are fixed when the server is constructed and never change while it runs, so
 # the only staleness this can cause is a redeploy that adds or removes a tool:
 # clients keep the old listing for up to this long. Five minutes trades a
-# little of that against re-sending 27 tool schemas on every connection.
+# little of that against re-sending 31 tool schemas on every connection.
 #
 # Deliberately not on `resources/read`: the client caches it per URI, and
 # `wiki-mcp://configuration` varies with the `?orgId=`/`?cloudOrgId=` on the

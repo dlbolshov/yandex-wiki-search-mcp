@@ -108,6 +108,23 @@ class GridNotFound(WikiError):
         self.grid_id = grid_id
 
 
+class AttachmentNotFound(WikiError):
+    """404 from the attachment download endpoint.
+
+    Mapped in the client because that endpoint answers a miss with a
+    placeholder GIF body, not the JSON error envelope (probed 2026-08-11) —
+    build_api_error would reduce it to a bare status code.
+    """
+
+    def __init__(self, page_id: int, file_id: int):
+        super().__init__(
+            f"Wiki attachment not found: file {file_id} on page {page_id} "
+            "(or the page itself is missing)."
+        )
+        self.page_id = page_id
+        self.file_id = file_id
+
+
 def build_api_error(status: int, payload: bytes) -> WikiApiError:
     """Build a WikiApiError from an HTTP status and a raw response body.
 

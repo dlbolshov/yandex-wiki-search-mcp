@@ -21,6 +21,7 @@ from aiohttp import (
 
 from mcp_wiki.wiki.custom.anchors import append_content_to_anchor_source
 from mcp_wiki.wiki.custom.errors import (
+    AttachmentNotFound,
     GridNotFound,
     PageNotFound,
     WikiApiError,
@@ -34,10 +35,12 @@ from mcp_wiki.wiki.custom.slugs import normalize_slug
 from mcp_wiki.wiki.proto.common import YandexAuth, select_org
 from mcp_wiki.wiki.proto.pages import WikiProtocol
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentDeleteResponse,
     AttachmentListResponse,
     AttachmentResultsResponse,
     ClonedPageRef,
     CommentsResponse,
+    DeleteCommentResponse,
     DeletePageResponse,
     DescendantsResponse,
     GridCellsResponse,
@@ -52,11 +55,13 @@ from mcp_wiki.wiki.proto.types.pages import (
     PageComment,
     RecoverPageResponse,
     ResourcesResponse,
+    SearchAuthor,
     SearchDateInterval,
     SearchResponse,
     UploadAttachmentResult,
     UploadLocation,
     UploadSessionResponse,
+    WikiCurrentUser,
     WikiGrid,
     WikiPage,
 )
@@ -387,6 +392,7 @@ class WikiClient(WikiProtocol):
         limit: int = 10,
         cluster: str | None = None,
         result_type: str | None = None,
+        authors: list[SearchAuthor] | None = None,
         created_at: SearchDateInterval | None = None,
         modified_at: SearchDateInterval | None = None,
         highlight: bool = False,
@@ -401,7 +407,13 @@ class WikiClient(WikiProtocol):
         # Filters run server-side, before the limit (verified 2026-08-11):
         # "cluster" takes deep slug prefixes, an unknown one is 200 with no
         # results, and the date intervals require both bounds — the model
-        # enforces that so the wire error never happens.
+        # enforces that so the wire error never happens. "authors" entries
+        # OR together and match the page owner; an unknown identity is 200
+        # with no results, and an empty list is the same as no filter, so
+        # it is dropped here rather than sent (verified 2026-08-18).
+        # The documented "show_obsolete" is dead on the wire — obsolete
+        # pages come back regardless (verified 2026-08-18) — and stays
+        # unexposed alongside "cursor" and "order_by".
         body: dict[str, Any] = {
             "query": query,
             "limit": max(1, min(limit, SEARCH_LIMIT_MAX)),
@@ -411,6 +423,10 @@ class WikiClient(WikiProtocol):
             filters["type"] = result_type
         if cluster is not None:
             filters["cluster"] = cluster
+        if authors:
+            filters["authors"] = [
+                author.model_dump(exclude_none=True) for author in authors
+            ]
         if created_at is not None:
             filters["created_at"] = created_at.model_dump(by_alias=True)
         if modified_at is not None:
@@ -918,18 +934,38 @@ class WikiClient(WikiProtocol):
         *,
         title: str | None = None,
         content: str | None = None,
+        redirect_to_page_id: int | None = None,
+        clear_redirect: bool = False,
         allow_merge: bool = False,
         is_silent: bool = False,
         auth: YandexAuth | None = None,
     ) -> WikiPage:
-        if title is None and content is None:
-            raise ValueError("Provide at least one of title or content.")
+        if redirect_to_page_id is not None and clear_redirect:
+            raise ValueError(
+                "redirect_to_page_id and clear_redirect are mutually exclusive."
+            )
+        if (
+            title is None
+            and content is None
+            and redirect_to_page_id is None
+            and not clear_redirect
+        ):
+            raise ValueError(
+                "Provide at least one of title, content, redirect_to_page_id, "
+                "or clear_redirect."
+            )
 
         body: dict[str, Any] = {}
         if title is not None:
             body["title"] = title
         if content is not None:
             body["content"] = content
+        # Wire shape verified live 2026-08-11 (docs/api-notes.md):
+        # {"page": {"id": N}} sets a redirect, {"page": null} clears it.
+        if redirect_to_page_id is not None:
+            body["redirect"] = {"page": {"id": redirect_to_page_id}}
+        elif clear_redirect:
+            body["redirect"] = {"page": None}
 
         params: dict[str, Any] = {}
         if allow_merge:
@@ -1018,6 +1054,69 @@ class WikiClient(WikiProtocol):
             not_found=lambda: PageNotFound(page_id),
         )
         return PageComment.model_validate_json(payload)
+
+    async def page_delete_comment(
+        self,
+        page_id: int,
+        *,
+        comment_id: int,
+        auth: YandexAuth | None = None,
+    ) -> DeleteCommentResponse:
+        # No not_found mapping: a 404 here is ambiguous (page or comment
+        # missing), and the API's own envelope already names the culprit —
+        # debug_message says "No Comment matches the given query." for a
+        # bogus comment id (probed 2026-08-11). PageNotFound would mislabel
+        # that case.
+        payload = await self._request(
+            "DELETE",
+            f"v1/pages/{page_id}/comments/{comment_id}",
+            auth=auth,
+        )
+        return DeleteCommentResponse.model_validate(self._json_or_empty(payload))
+
+    async def page_download_attachment(
+        self,
+        page_id: int,
+        *,
+        file_id: int,
+        auth: YandexAuth | None = None,
+    ) -> bytes:
+        # not_found IS mapped here, unlike the deletes: this endpoint
+        # answers a miss with a placeholder GIF body instead of the JSON
+        # error envelope (probed 2026-08-11), which build_api_error would
+        # reduce to a bare "status 404".
+        return await self._request(
+            "GET",
+            f"v1/pages/{page_id}/attachments/{file_id}/download",
+            auth=auth,
+            not_found=lambda: AttachmentNotFound(page_id, file_id),
+        )
+
+    async def page_delete_attachment(
+        self,
+        page_id: int,
+        *,
+        file_id: int,
+        auth: YandexAuth | None = None,
+    ) -> AttachmentDeleteResponse:
+        # No not_found mapping: the 404 envelope names the culprit itself —
+        # "No File matches the given query." (probed 2026-08-11).
+        await self._request(
+            "DELETE",
+            f"v1/pages/{page_id}/attachments/{file_id}",
+            auth=auth,
+        )
+        # 204 No Content (documented and verified live): the acknowledgment
+        # is built here, mirroring grid_delete.
+        return AttachmentDeleteResponse(page_id=page_id, file_id=file_id, deleted=True)
+
+    async def user_get_current(
+        self,
+        *,
+        auth: YandexAuth | None = None,
+    ) -> WikiCurrentUser:
+        payload = await self._request("GET", "v1/users/me", auth=auth)
+        return WikiCurrentUser.model_validate_json(payload)
 
     async def page_delete(
         self,

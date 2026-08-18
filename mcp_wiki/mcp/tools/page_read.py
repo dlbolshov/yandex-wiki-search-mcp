@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, TypeVar
@@ -8,6 +9,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from mcp_wiki.mcp.params import (
+    AttachmentID,
     Cursor,
     FetchAll,
     GridFields,
@@ -34,14 +36,17 @@ from mcp_wiki.mcp.utils import (
 )
 from mcp_wiki.wiki.custom.errors import WikiError
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentDownloadResult,
     AttachmentListResponse,
     CommentsResponse,
     CursorEnvelope,
     DescendantsResponse,
     GridsResponse,
     ResourcesResponse,
+    SearchAuthor,
     SearchDateInterval,
     SearchResponse,
+    WikiCurrentUser,
     WikiGrid,
     WikiPage,
 )
@@ -51,6 +56,12 @@ logger = logging.getLogger(__name__)
 FETCH_ALL_MAX_ITEMS = 500
 FETCH_ALL_BUDGET_SECONDS = 25.0
 _FETCH_ALL_MAX_REQUESTS = 50
+
+# Inline ceiling for page_download_attachment. Guards the conversation, not
+# the transfer: the bytes are already fetched when it is checked, but a
+# multi-megabyte blob pasted into a tool result would drown the model's
+# context. Larger files stay reachable via the attachment's download_url.
+MAX_INLINE_ATTACHMENT_BYTES = 1_048_576
 
 EnvelopeT = TypeVar("EnvelopeT", bound=CursorEnvelope)
 
@@ -138,10 +149,10 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
             "inside it — so treat it as a relevance signal and read the page before "
             "answering from it; highlight=true marks the matches it does contain "
             "with <em> tags. Wrap multi-word exact phrases in double quotes. All "
-            "filters (slug_prefix, result_type, dates) run in the search backend "
-            "itself, before the result limit, so a filtered search does not lose "
-            "matches to it. To enumerate a section (or the whole Wiki) rather than "
-            "search it, use page_get_descendants."
+            "filters (slug_prefix, result_type, authors, dates) run in the search "
+            "backend itself, before the result limit, so a filtered search does not "
+            "lose matches to it. To enumerate a section (or the whole Wiki) rather "
+            "than search it, use page_get_descendants."
         ),
         annotations=READ_ONLY,
     )
@@ -160,6 +171,15 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         result_type: Annotated[
             Literal["page", "file"] | None,
             Field(description="Optional server-side filter by result type."),
+        ] = None,
+        authors: Annotated[
+            list[SearchAuthor] | None,
+            Field(
+                description="Optional server-side filter by page owner: a list "
+                "of user identities (each with uid or cloud_uid), ORed together. "
+                "Take your own from user_get_current's identity. An unknown "
+                "identity simply yields no results."
+            ),
         ] = None,
         created_between: Annotated[
             SearchDateInterval | None,
@@ -199,6 +219,7 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
             limit=limit,
             cluster=cluster,
             result_type=result_type,
+            authors=authors,
             created_at=created_between,
             modified_at=modified_between,
             highlight=highlight,
@@ -517,3 +538,59 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
             )
 
         return await _paginate(fetch, cursor, fetch_all, page_size)
+
+    @mcp.tool(
+        title="Download Page Attachment",
+        description=(
+            "Download a Yandex Wiki page attachment and return its content "
+            "inline: UTF-8 text arrives as text, anything else base64-encoded. "
+            "Refuses files over 1 MiB — fetch those yourself via the "
+            "attachment's download_url from page_get_attachments. That "
+            "listing is also where file ids come from."
+        ),
+        annotations=READ_ONLY,
+    )
+    async def page_download_attachment(
+        ctx: ToolContext,
+        file_id: AttachmentID,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+    ) -> AttachmentDownloadResult:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        raw = await get_wiki(ctx).page_download_attachment(
+            resolved_page_id,
+            file_id=file_id,
+            auth=get_yandex_auth(ctx),
+        )
+        if len(raw) > MAX_INLINE_ATTACHMENT_BYTES:
+            raise ValueError(
+                f"Attachment is {len(raw)} bytes — over the "
+                f"{MAX_INLINE_ATTACHMENT_BYTES}-byte inline limit. Fetch it "
+                "via the attachment's download_url from page_get_attachments."
+            )
+        try:
+            content = raw.decode("utf-8")
+            encoding: Literal["utf-8", "base64"] = "utf-8"
+        except UnicodeDecodeError:
+            content = base64.b64encode(raw).decode("ascii")
+            encoding = "base64"
+        return AttachmentDownloadResult(
+            page_id=resolved_page_id,
+            file_id=file_id,
+            size_bytes=len(raw),
+            encoding=encoding,
+            content=content,
+        )
+
+    @mcp.tool(
+        title="Get Current User",
+        description=(
+            "Get the calling Yandex Wiki user: username, home_cluster (the "
+            "caller's personal-section slug, e.g. 'users/<login>' — where "
+            "'create it in my section' requests belong), and identity/org "
+            "ids."
+        ),
+        annotations=READ_ONLY,
+    )
+    async def user_get_current(ctx: ToolContext) -> WikiCurrentUser:
+        return await get_wiki(ctx).user_get_current(auth=get_yandex_auth(ctx))
