@@ -36,6 +36,8 @@ READ_ONLY_TOOL_NAMES = [
     "page_get_grids",
     "grid_get",
     "page_get_attachments",
+    "page_read_attachment",
+    "user_get_current",
 ]
 
 NON_READ_TOOL_NAMES = [
@@ -52,9 +54,12 @@ NON_READ_TOOL_NAMES = [
     "grid_move_column",
     "page_create",
     "page_update",
+    "page_edit",
     "page_clone",
     "page_append_content",
     "page_add_comment",
+    "page_delete_comment",
+    "page_delete_attachment",
     "page_delete",
     "page_recover",
     "page_upload_attachment",
@@ -111,7 +116,7 @@ class TestReadOnlyModeToolRegistration:
         assert server.instructions is not None
         assert "read-only mode" in server.instructions
         assert "Create, update" not in server.instructions
-        assert "Add comments" not in server.instructions
+        assert "Add and delete comments" not in server.instructions
         assert "Grid mutations" not in server.instructions
         assert "yfm_warnings" not in server.instructions
         # read guidance stays
@@ -153,7 +158,7 @@ class TestOAuthUploadGating:
         # the instructions must not advertise the tool that is not there
         assert server.instructions is not None
         assert "upload attachments" not in server.instructions
-        assert "- Add comments" in server.instructions
+        assert "- Add and delete comments" in server.instructions
 
     async def test_local_upload_tool_is_offered_without_oauth(self) -> None:
         server = create_mcp_server(

@@ -2,9 +2,10 @@ from typing import Annotated, Any
 
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from mcp_wiki.mcp.params import (
+    AttachmentID,
     CloneTargetSlug,
     CommentID,
     GridCellPatch,
@@ -25,9 +26,13 @@ from mcp_wiki.mcp.tools.common import (
     resolve_page_id_and_type,
     resolve_page_slug,
 )
-from mcp_wiki.mcp.utils import get_yandex_auth
+from mcp_wiki.mcp.utils import get_yandex_auth, resolve_page_locator
+from mcp_wiki.wiki.proto.pages import validate_page_update_args
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentDeleteResponse,
+    BaseWikiModel,
     ClonedPageRef,
+    DeleteCommentResponse,
     DeletePageResponse,
     GridCellsResponse,
     GridCreateRequest,
@@ -57,6 +62,10 @@ DESTRUCTIVE = ToolAnnotations(destructive_hint=True, open_world_hint=False)
 # destructive_hint deliberately unset (defaults to true): these overwrite
 # existing state, retrying them is safe but running them is not additive.
 IDEMPOTENT = ToolAnnotations(idempotent_hint=True, open_world_hint=False)
+# Overwrites existing state like IDEMPOTENT, but a repeat is NOT free: for
+# page_edit a replacement can match the text it just produced, so the hint
+# would invite a client to double-apply an insertion after a lost response.
+NON_IDEMPOTENT_WRITE = ToolAnnotations(open_world_hint=False)
 
 YFM_CONTENT_NOTE = (
     "Content is Markdown (YFM): plain Markdown renders as-is, but GitHub-specific "
@@ -65,15 +74,68 @@ YFM_CONTENT_NOTE = (
 )
 
 
-class PageWriteResponse(WikiPage):
-    yfm_warnings: list[str] | None = Field(
+def _yfm_warnings_field() -> Any:
+    """The `yfm_warnings` field, defined once for every response that carries it."""
+    return Field(
         default=None,
         description=(
-            "Markup warnings for the submitted content (the write itself "
+            "Markup warnings for the written content (the write itself "
             "succeeded): parts that will not render as intended on Yandex "
             "Wiki. See the wiki-mcp://yfm-cheatsheet resource for fixes."
         ),
     )
+
+
+class PageWriteResponse(WikiPage):
+    yfm_warnings: list[str] | None = _yfm_warnings_field()
+
+
+class PageEditReplacement(BaseWikiModel):
+    """One exact-text replacement for page_edit.
+
+    A tool-level shape, so it lives here rather than in the wire-model module:
+    the API has no partial-edit endpoint (full update and append only), so the
+    tool reads the page, applies these in order, and writes the result back.
+    """
+
+    old_text: str = Field(
+        min_length=1,
+        description="Exact text to find in the page content (YFM markup, "
+        "as page_get returns it).",
+    )
+    new_text: str = Field(
+        description="Text to replace it with. May be empty to delete old_text."
+    )
+    replace_all: bool = Field(
+        default=False,
+        description="Replace every occurrence. When false, old_text must "
+        "occur exactly once — several occurrences are an error listing "
+        "their line numbers.",
+    )
+
+    @model_validator(mode="after")
+    def _must_change_something(self) -> "PageEditReplacement":
+        if self.old_text == self.new_text:
+            raise ValueError("old_text and new_text are identical")
+        return self
+
+
+class PageEditResponse(BaseWikiModel):
+    """Compact acknowledgment for page_edit — also tool-level, never from the wire.
+
+    Deliberately not the page object: echoing content back would spend the
+    tokens the tool exists to save.
+    """
+
+    page_id: int
+    slug: str | None = None
+    title: str | None = None
+    occurrences_replaced: int = Field(
+        description="Total occurrences replaced across all entries. Every "
+        "entry applied — a replacement that did not match fails the whole "
+        "call before anything is written."
+    )
+    yfm_warnings: list[str] | None = _yfm_warnings_field()
 
 
 def _with_yfm_warnings(page: WikiPage, warnings: list[str]) -> PageWriteResponse:
@@ -101,6 +163,66 @@ def _content_warnings(page_type: str | None, content: str) -> list[str]:
     """Combine page-type and markup warnings within the shared MAX_WARNINGS cap."""
     warnings = _page_type_warnings(page_type)
     return warnings + validate_yfm(content, max_warnings=MAX_WARNINGS - len(warnings))
+
+
+_OCCURRENCE_LINES_CAP = 5
+
+
+def _occurrence_lines(content: str, needle: str) -> list[int]:
+    """1-based line numbers where needle occurs, capped.
+
+    Line numbers instead of surrounding text: they are enough to point the
+    agent at the right occurrence, and echoing page fragments into every
+    ambiguity error would spend the tokens page_edit exists to save (the
+    agent can always page_get for context).
+    """
+    lines: list[int] = []
+    start = 0
+    while len(lines) < _OCCURRENCE_LINES_CAP:
+        index = content.find(needle, start)
+        if index == -1:
+            break
+        lines.append(content.count("\n", 0, index) + 1)
+        # Step past the whole match, not one character: str.count — which
+        # produces the occurrence tally these lines are reported alongside —
+        # is non-overlapping, and a scan that stepped by 1 would list more
+        # positions than the count it annotates ("--" inside a "----" rule,
+        # "| |" in a table).
+        start = index + len(needle)
+    return lines
+
+
+def _apply_replacements(
+    content: str, replacements: list[PageEditReplacement]
+) -> tuple[str, int]:
+    """Apply replacements in order; refuse loudly instead of guessing.
+
+    Each old_text is matched against the content as already edited by the
+    preceding entries — same sequential semantics as a multi-edit in an
+    IDE agent.
+    """
+    occurrences_replaced = 0
+    for index, replacement in enumerate(replacements, start=1):
+        count = content.count(replacement.old_text)
+        if count == 0:
+            raise ValueError(
+                f"Replacement {index}/{len(replacements)}: old_text not found "
+                "in the page content. Nothing was written. Read the page with "
+                "page_get and copy the text exactly, including whitespace."
+            )
+        if count > 1 and not replacement.replace_all:
+            lines = ", ".join(
+                str(n) for n in _occurrence_lines(content, replacement.old_text)
+            )
+            suffix = " and more" if count > _OCCURRENCE_LINES_CAP else ""
+            raise ValueError(
+                f"Replacement {index}/{len(replacements)}: old_text occurs "
+                f"{count} times (lines {lines}{suffix}). Nothing was written. "
+                "Extend old_text to make it unique, or set replace_all=true."
+            )
+        content = content.replace(replacement.old_text, replacement.new_text)
+        occurrences_replaced += count
+    return content, occurrences_replaced
 
 
 def _require_non_empty_text(value: str, *, field_name: str) -> str:
@@ -559,7 +681,8 @@ def register_page_write_tools(
     @mcp.tool(
         title="Update Wiki Page",
         description=(
-            "Update an existing Yandex Wiki page. Content replacement is full-page "
+            "Update an existing Yandex Wiki page: title, content, or a "
+            "redirect to another page. Content replacement is full-page "
             f"when content is provided. {YFM_CONTENT_NOTE}"
         ),
         annotations=IDEMPOTENT,
@@ -573,6 +696,21 @@ def register_page_write_tools(
             str | None,
             Field(description="New full page content. Replaces the existing body."),
         ] = None,
+        redirect_to_page_id: Annotated[
+            int | None,
+            Field(
+                description=(
+                    "Make this page redirect to the page with this id. The "
+                    "page keeps its own content; the redirect state reads "
+                    "back via page_get with fields=['redirect']."
+                ),
+                gt=0,
+            ),
+        ] = None,
+        clear_redirect: Annotated[
+            bool,
+            Field(description="Remove this page's existing redirect."),
+        ] = False,
         allow_merge: Annotated[
             bool,
             Field(
@@ -586,8 +724,14 @@ def register_page_write_tools(
             ),
         ] = False,
     ) -> PageWriteResponse:
-        if title is None and content is None:
-            raise ValueError("Provide at least one of title or content.")
+        # Same validator the client runs, called here so a malformed request
+        # is refused before slug resolution spends a GET.
+        validate_page_update_args(
+            title=title,
+            content=content,
+            redirect_to_page_id=redirect_to_page_id,
+            clear_redirect=clear_redirect,
+        )
         resolved_page_id, resolved_page_type = await resolve_page_id_and_type(
             ctx, page_id=page_id, slug=slug
         )
@@ -595,6 +739,8 @@ def register_page_write_tools(
             resolved_page_id,
             title=title,
             content=content,
+            redirect_to_page_id=redirect_to_page_id,
+            clear_redirect=clear_redirect,
             allow_merge=allow_merge,
             is_silent=is_silent,
             auth=get_yandex_auth(ctx),
@@ -603,6 +749,102 @@ def register_page_write_tools(
         if content is not None:
             warnings = _content_warnings(resolved_page_type, content)
         return _with_yfm_warnings(page, warnings)
+
+    @mcp.tool(
+        title="Edit Wiki Page Content",
+        description=(
+            "Edit a Yandex Wiki page by exact-text replacements, without "
+            "resending the whole page: reads the current content, applies "
+            "the replacements in order, and writes the result back with a "
+            "single update. Each old_text must match the stored YFM markup "
+            "exactly (copy it from page_get, whitespace included) and occur "
+            "exactly once unless replace_all is set — a missing or ambiguous "
+            "match fails the whole call before anything is written. NOTE: "
+            "the Wiki API has no page revisions, so the read-modify-write is "
+            "not atomic; allow_merge (on by default) asks Wiki to merge a "
+            "concurrent edit that landed in between rather than overwrite it. "
+            "Do NOT blindly retry a call whose result you did not see: a "
+            "replacement whose new_text contains its own old_text applies "
+            f"again on a repeat. {YFM_CONTENT_NOTE}"
+        ),
+        # destructive_hint defaults to true (this overwrites existing state),
+        # and idempotent_hint is deliberately NOT set: an insertion-shaped
+        # replacement — old_text "## Setup" -> new_text "## Setup\n\n…" —
+        # still matches its own output, so a client retrying on the strength
+        # of the hint would insert twice. page_append_content is annotated
+        # without the hint for exactly the same reason.
+        annotations=NON_IDEMPOTENT_WRITE,
+    )
+    async def page_edit(
+        ctx: ToolContext,
+        replacements: Annotated[
+            list[PageEditReplacement],
+            Field(
+                min_length=1,
+                description="Replacements to apply sequentially: each "
+                "old_text is matched against the content as already edited "
+                "by the preceding entries.",
+            ),
+        ],
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+        allow_merge: Annotated[
+            bool,
+            Field(
+                description="Let Yandex Wiki three-way merge an edit that "
+                "landed between this tool's read and its write. On by "
+                "default: the read-modify-write has no revision to lock "
+                "against, so without it a concurrent edit is overwritten."
+            ),
+        ] = True,
+        is_silent: Annotated[
+            bool,
+            Field(
+                description="Whether to suppress notifications when supported by the API."
+            ),
+        ] = False,
+    ) -> PageEditResponse:
+        resolved_page_id, resolved_slug = resolve_page_locator(
+            page_id=page_id, slug=slug
+        )
+        auth = get_yandex_auth(ctx)
+        wiki = get_wiki(ctx)
+        if resolved_page_id is not None:
+            page = await wiki.page_get(resolved_page_id, fields=["content"], auth=auth)
+        elif resolved_slug is not None:
+            page = await wiki.page_get_by_slug(
+                resolved_slug, fields=["content"], auth=auth
+            )
+        else:  # pragma: no cover - narrowing; resolve_page_locator raised
+            # already unless exactly one of the two is set.
+            raise ValueError("Either page_id or slug must be provided.")
+        content = page.content if isinstance(page.content, str) else None
+        if content is None:
+            raise ValueError(
+                f"Page {page.slug or page.id} has no editable text content "
+                f"(page_type={page.page_type!r})."
+            )
+
+        new_content, occurrences_replaced = _apply_replacements(content, replacements)
+        # allow_merge defaults to True here, unlike on page_update: this is a
+        # read-modify-write, the same shape as page_append_content's anchor
+        # fallback, which passes it for the same reason. page_update's caller
+        # supplies the whole body and can mean the overwrite; here the body was
+        # derived from a read that may already be stale.
+        updated = await wiki.page_update(
+            page.id,
+            content=new_content,
+            allow_merge=allow_merge,
+            is_silent=is_silent,
+            auth=auth,
+        )
+        return PageEditResponse(
+            page_id=updated.id,
+            slug=updated.slug or page.slug,
+            title=updated.title or page.title,
+            occurrences_replaced=occurrences_replaced,
+            yfm_warnings=_content_warnings(page.page_type, new_content) or None,
+        )
 
     @mcp.tool(
         title="Append Wiki Content",
@@ -706,6 +948,49 @@ def register_page_write_tools(
             body=body,
             parent_id=parent_id,
             thread_id=thread_id,
+            auth=get_yandex_auth(ctx),
+        )
+
+    @mcp.tool(
+        title="Delete Page Comment",
+        description=(
+            "Delete a comment from a Yandex Wiki page and return the page's "
+            "updated comment count. Comment ids come from page_get_comments."
+        ),
+        annotations=DESTRUCTIVE,
+    )
+    async def page_delete_comment(
+        ctx: ToolContext,
+        comment_id: CommentID,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+    ) -> DeleteCommentResponse:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_delete_comment(
+            resolved_page_id,
+            comment_id=comment_id,
+            auth=get_yandex_auth(ctx),
+        )
+
+    @mcp.tool(
+        title="Delete Page Attachment",
+        description=(
+            "Delete an attachment from a Yandex Wiki page. File ids come "
+            "from page_get_attachments. Does not touch page content — any "
+            "file macro referencing the attachment stays behind, broken."
+        ),
+        annotations=DESTRUCTIVE,
+    )
+    async def page_delete_attachment(
+        ctx: ToolContext,
+        file_id: AttachmentID,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+    ) -> AttachmentDeleteResponse:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_delete_attachment(
+            resolved_page_id,
+            file_id=file_id,
             auth=get_yandex_auth(ctx),
         )
 

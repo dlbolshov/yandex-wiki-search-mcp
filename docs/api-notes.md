@@ -90,15 +90,38 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   replies it used to return.
 - **Server-side filters arrived with the 2026-08 drop and work** (probed 2026-08-11):
   `filters.type` (`page`/`file`) returns only that type; `filters.cluster` restricts
-  results to a section; `filters.created_at`/`modified_at` take a `{from, to}` interval
+  results to a section and **takes deep prefixes** (`a/b` returns only slugs under
+  `a/b`; an unknown cluster is 200 with 0 results, not an error) — filtering happens
+  before `limit`, so hits are not lost to it; `filters.created_at`/`modified_at` take
+  a `{from, to}` interval
   and **require both bounds** — `from` alone is a 400 `SEARCH_BAD_REQUEST`.
-  `filters.authors` and `show_obsolete` are documented but not probed yet. `order_by`
+  `filters.authors` **works** (probed 2026-08-18): entries are `{uid, cloud_uid}`
+  identities matched against the page **owner**, either field alone filters, several
+  entries OR together, an unknown identity is 200 with 0 results, and an empty list
+  is the same as no filter — exposed as the tool's `authors` argument, fed by
+  `user_get_current` for "my pages". `filters.show_obsolete` is documented but
+  **dead** (probed 2026-08-18): pages that `descendants?actuality=obsolete` itself
+  reports as obsolete come back identically with `false`, `true`, and the flag
+  omitted — unexposed, third dead search parameter after `cursor` and `order_by`.
+  `order_by`
   (`relevancy`/`creation_date`/`modified_date`) is documented but **ignored** — neither
-  value changes the order. As of 1.2.x the tool still applies `slug_prefix`/`result_type`
-  client-side; moving onto the server filters is planned (ROADMAP M7).
+  value changes the order. Since 1.3.0 the tool forwards `slug_prefix` as
+  `filters.cluster` and `result_type` as `filters.type`, and exposes the date intervals
+  as `created_between`/`modified_between` — nothing is filtered client-side anymore.
+- **`filters.cluster` matches path segments, includes the cluster page itself, and is
+  the strictest slug on the API** (probed 2026-08-18 against a family of real pages:
+  `users/igor/mlflow` with three descendants and four siblings sharing its string
+  prefix). Both halves of the guarantee the tool advertises hold: `cluster=a/b`
+  returns `a/b` itself **and** its segment descendants, and does **not** leak
+  `a/bc` — verified at two depths. But the value is matched **literally**, unlike
+  every other slug on the API: `Users/Igor/MLflow`, `users/igor/mlflow/` and
+  `/users/igor/mlflow` each answer **200 with 0 results**, while
+  `GET /pages?slug=` resolves all three to the same page. A wrong spelling is
+  therefore indistinguishable from an empty section, so `WikiClient.page_search`
+  normalizes and lowercases `cluster` itself rather than leaving it to callers.
 - **`highlight: true` works**: matches inside `content` arrive wrapped in `<em>`
-  (9/10 snippets changed against the same query without it). Off by default and not
-  exposed by the tool yet.
+  (9/10 snippets changed against the same query without it). Off by default; exposed
+  as the tool's `highlight` argument since 1.3.0.
 - Quoted `"exact phrase"` queries work and produce phrase-matched results;
   `-minus` and boolean operators are ignored.
 
@@ -115,6 +138,11 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   owned by `yandex360-wiki` (per slartus, see above).
 - Two organization header sources exist: `X-Org-Id` (Yandex 360) and `X-Cloud-Org-Id`
   (Yandex Cloud); the server sets one based on `WIKI_ORG_ID`/`WIKI_CLOUD_ORG_ID`.
+- **`GET /users/me` is documented and live** (probed 2026-08-11): `username`,
+  `home_cluster` (the caller's personal-section slug, e.g. `users/<login>`),
+  `identity` (`uid`, `cloud_uid`) and `org` (`dir_id`, `collab_id`). Before the 2026-08
+  reference this project did not know the endpoint existed. Exposed as
+  `user_get_current` — it turns "create it in my section" from a guess into a lookup.
 
 ## Pages
 
@@ -144,8 +172,9 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   the copy's id and slug.
 - **Redirects work through the regular update** (probed 2026-08-11): `POST /pages/{id}`
   with `redirect: {"page": {"id": N}}` sets one, `redirect: {"page": null}` clears it,
-  and the state reads back via `page_get` with `fields=["redirect"]`. Not exposed as a
-  tool yet (ROADMAP M7).
+  and the state reads back via `page_get` with `fields=["redirect"]` as
+  `{"page_id": N, "redirect_target": {id, slug, title, page_type}}` (`null` when there
+  is none). Exposed via `page_update` (`redirect_to_page_id` / `clear_redirect`).
 - **Per-page access management is documented and live** (`POST`/`DELETE
   /pages/{idx}/access`): granting yourself a role you already hold is refused with
   `PAGE_ACCESS_ALREADY_GRANTED`, so the endpoint validates for real; a full grant/revoke
@@ -179,8 +208,9 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
 - There is **no root page**. `homepage` exists and is an ordinary page — its subtree held
   a single child — while the real top level is a set of sibling slugs (`tech-doc`,
   `users`, `common`, …). The organization root is reachable only as the empty slug above.
-- `GET /pages/{id}/descendants` is an **undocumented by-id variant** of the same
-  endpoint and works (`404` for an unknown id). The client uses the `?slug=` form only.
+- `GET /pages/{id}/descendants` is a by-id variant of the same endpoint and works
+  (`404` for an unknown id); undocumented when first probed, it appears in the 2026-08
+  reference. The client uses the `?slug=` form only.
 - **No other enumeration endpoint exists.** `GET /pages` without a slug is a `400`;
   `/pages/tree`, `/pages/root`, `/pages/list`, `/navigation` and `/clusters` are all
   `404` (probed 2026-08-10).
@@ -190,8 +220,16 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
 - Attachment objects include an `is_downloadable` flag. **Download and deletion are
   documented and live** (probed 2026-08-11): `GET /pages/{id}/attachments/{fid}/download`
   streams the bytes, `GET /pages/attachments/download_by_url?url=<slug>/.files/<name>`
-  works too, `DELETE /pages/{id}/attachments/{fid}` answers 204. Not exposed as tools
-  yet (ROADMAP M7).
+  works too, `DELETE /pages/{id}/attachments/{fid}` answers 204. Exposed as
+  `page_read_attachment` (an embedded resource: text inline, otherwise a
+  base64 blob, 128 KiB cap enforced from `Content-Length` before the body is
+  read) and `page_delete_attachment`.
+- **A missing attachment on the download endpoint is a 404 with a placeholder GIF
+  body**, not the JSON error envelope (found 2026-08-17, during implementation) —
+  the client maps it to `AttachmentNotFound` itself. The delete endpoints answer misses with the normal
+  envelope (`NOT_FOUND`, "No File matches the given query." / "No Comment matches the
+  given query."), which also distinguishes a missing sub-resource from a missing page
+  — so those pass through unmapped.
 - Deleting a page **frees its slug immediately**: the page stops resolving and the
   same slug can be created again, even though the delete is recoverable by token
   (verified 2026-08-05).
@@ -203,8 +241,7 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   early versions of this project modeled one).
 - Cursor pagination on `GET /pages/{id}/comments` works (verified with `page_size=2` walks).
 - **Comment deletion is live**: `DELETE /pages/{id}/comments/{cid}` answers 200 with the
-  page's updated `comments_count` (probed 2026-08-11). Not exposed as a tool yet
-  (ROADMAP M7).
+  page's updated `comments_count` (probed 2026-08-11). Exposed as `page_delete_comment`.
 - The documented thread endpoint (`GET /pages/{id}/comments/{cid}/thread`) answers 200
   but returned an **empty list for a root comment with a live reply** (the reply carried
   `parent_id`, `thread_id` was null on both) — semantics unclear, left alone.

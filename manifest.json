@@ -68,6 +68,14 @@
       "description": "Get attachments for a Yandex Wiki page"
     },
     {
+      "name": "page_read_attachment",
+      "description": "Read a page attachment's content into the conversation as an embedded resource: text as text, other files base64-encoded (up to 128 KiB)"
+    },
+    {
+      "name": "user_get_current",
+      "description": "Get the calling user: username and personal-section slug"
+    },
+    {
       "name": "grid_create",
       "description": "Create a Yandex Wiki dynamic table on a page"
     },
@@ -117,7 +125,11 @@
     },
     {
       "name": "page_update",
-      "description": "Update an existing Yandex Wiki page"
+      "description": "Update an existing Yandex Wiki page: title, content, or a redirect to another page"
+    },
+    {
+      "name": "page_edit",
+      "description": "Edit a Yandex Wiki page by exact-text replacements, without resending the whole page"
     },
     {
       "name": "page_append_content",
@@ -130,6 +142,14 @@
     {
       "name": "page_add_comment",
       "description": "Add a comment to a Yandex Wiki page"
+    },
+    {
+      "name": "page_delete_comment",
+      "description": "Delete a comment from a Yandex Wiki page"
+    },
+    {
+      "name": "page_delete_attachment",
+      "description": "Delete an attachment from a Yandex Wiki page"
     },
     {
       "name": "page_delete",

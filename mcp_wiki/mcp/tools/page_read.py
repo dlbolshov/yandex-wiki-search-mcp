@@ -1,13 +1,20 @@
 import asyncio
+import base64
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, TypeVar
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
+from mcp.types import (
+    BlobResourceContents,
+    EmbeddedResource,
+    TextResourceContents,
+    ToolAnnotations,
+)
 from pydantic import Field
 
 from mcp_wiki.mcp.params import (
+    AttachmentID,
     Cursor,
     FetchAll,
     GridFields,
@@ -40,7 +47,10 @@ from mcp_wiki.wiki.proto.types.pages import (
     DescendantsResponse,
     GridsResponse,
     ResourcesResponse,
+    SearchAuthor,
+    SearchDateInterval,
     SearchResponse,
+    WikiCurrentUser,
     WikiGrid,
     WikiPage,
 )
@@ -51,7 +61,36 @@ FETCH_ALL_MAX_ITEMS = 500
 FETCH_ALL_BUDGET_SECONDS = 25.0
 _FETCH_ALL_MAX_REQUESTS = 50
 
+# Inline ceiling for page_read_attachment, enforced by the client BEFORE
+# the body is read (Content-Length, else a capped stream read), so an oversized
+# attachment never lands in this process at all.
+#
+# 128 KiB, not the megabyte it started as: this guards the conversation, and a
+# megabyte of base64 is ~1.4M characters — several hundred thousand tokens,
+# past any context window, i.e. a ceiling that admits exactly what it exists to
+# refuse. At 128 KiB the base64 worst case is ~175k characters, which is large
+# but survivable. Bigger files stay reachable via the attachment's download_url.
+MAX_INLINE_ATTACHMENT_BYTES = 131_072
+
 EnvelopeT = TypeVar("EnvelopeT", bound=CursorEnvelope)
+
+
+def _as_text(raw: bytes) -> str | None:
+    """Decode an attachment as text, or None when it should travel as a blob.
+
+    Decodability alone is not the test. UTF-16LE without a BOM — the ordinary
+    shape of a Windows-exported .txt or .csv — decodes cleanly as UTF-8 because
+    every byte is a valid code point (NUL is U+0000), and so does any binary
+    whose bytes all fall below 0x80. Both would arrive as NUL-riddled mojibake
+    labelled "text". A NUL is the cheap, reliable discriminator: no real
+    plain-text file contains one.
+    """
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return None if "\x00" in text else text
+
 
 # open_world_hint=False: every tool talks to exactly one configured Wiki
 # organization — a closed domain, unlike e.g. web search. Left unset it
@@ -133,14 +172,14 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
             "to DISCOVER pages, then call page_get with a result's "
             "slug to read full content. `content` is an excerpt of at most ~510 "
             "characters cut from wherever the match sits in the page — not the page "
-            "and not a summary of it, with no highlighting and no guarantee the query "
-            "terms are even inside it — so treat it as a relevance signal and read the "
-            "page before answering from it. Wrap multi-word exact phrases in double "
-            "quotes. Search is global: there is no server-side section filter. "
-            "slug_prefix and result_type are applied client-side AFTER fetching, so "
-            "combine them with limit=50 to avoid missing matches. To enumerate a "
-            "section (or the whole Wiki) rather than search it, use "
-            "page_get_descendants."
+            "and not a summary of it, with no guarantee the query terms are even "
+            "inside it — so treat it as a relevance signal and read the page before "
+            "answering from it; highlight=true marks the matches it does contain "
+            "with <em> tags. Wrap multi-word exact phrases in double quotes. All "
+            "filters (slug_prefix, result_type, authors, dates) run in the search "
+            "backend itself, before the result limit, so a filtered search does not "
+            "lose matches to it. To enumerate a section (or the whole Wiki) rather "
+            "than search it, use page_get_descendants."
         ),
         annotations=READ_ONLY,
     )
@@ -151,39 +190,74 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         slug_prefix: Annotated[
             str | None,
             Field(
-                description="Optional client-side filter: keep only results whose slug "
-                "equals this prefix or lies under it as a path segment, "
-                "e.g. 'tech-doc/ml'."
+                description="Optional server-side section filter: only results whose "
+                "slug equals this prefix or lies under it, e.g. 'tech-doc/ml'. Deep "
+                "prefixes are fine. An unknown prefix simply yields no results."
             ),
         ] = None,
         result_type: Annotated[
             Literal["page", "file"] | None,
-            Field(description="Optional client-side filter by result type."),
+            Field(description="Optional server-side filter by result type."),
         ] = None,
+        authors: Annotated[
+            list[SearchAuthor] | None,
+            Field(
+                # min_length=1: an empty list would be dropped on the wire and
+                # silently search the whole Wiki — the opposite of what a caller
+                # who asked for an author filter wants, and the same trap
+                # slug_prefix refuses below. Omit the argument to search
+                # everything; never pass an empty list to mean that.
+                min_length=1,
+                description="Optional server-side filter by page owner: a list "
+                "of user identities (each with uid or cloud_uid), ORed together. "
+                "Take your own from user_get_current's identity. Omit it to "
+                "search every author — an empty list is rejected, because it "
+                "would silently mean the same thing. An unknown identity "
+                "simply yields no results.",
+            ),
+        ] = None,
+        created_between: Annotated[
+            SearchDateInterval | None,
+            Field(
+                description="Optional server-side filter by creation time. "
+                "Both bounds are required — the API rejects open intervals."
+            ),
+        ] = None,
+        modified_between: Annotated[
+            SearchDateInterval | None,
+            Field(
+                description="Optional server-side filter by last-modification time. "
+                "Both bounds are required — the API rejects open intervals."
+            ),
+        ] = None,
+        highlight: Annotated[
+            bool,
+            Field(
+                description="Wrap query matches inside `content` excerpts in "
+                "<em>…</em> tags."
+            ),
+        ] = False,
     ) -> SearchResponse:
         app_context = ctx.request_context.lifespan_context
+        if slug_prefix is not None and not normalize_slug(slug_prefix):
+            # '/' and whitespace normalize to '', which matches no slug at all
+            # — an empty result reads as an empty wiki rather than as a filter
+            # that threw everything away. Only the emptiness check lives here;
+            # the client normalizes the value it sends, like every other slug.
+            raise ValueError(
+                "slug_prefix must not be empty. Omit it to search the whole Wiki."
+            )
         response = await app_context.wiki.page_search(
             query,
             limit=limit,
+            cluster=slug_prefix,
+            result_type=result_type,
+            authors=authors,
+            created_at=created_between,
+            modified_at=modified_between,
+            highlight=highlight,
             auth=get_yandex_auth(ctx),
         )
-        if slug_prefix is not None:
-            prefix = normalize_slug(slug_prefix).lower()
-            if not prefix:
-                # '/' and whitespace normalize to '', which matches no slug
-                # at all — an empty result reads as an empty wiki rather
-                # than as a filter that threw everything away.
-                raise ValueError(
-                    "slug_prefix must not be empty. Omit it to search the whole Wiki."
-                )
-            response.results = [
-                r
-                for r in response.results
-                if (slug := (r.slug or "").lower()) == prefix
-                or slug.startswith(prefix + "/")
-            ]
-        if result_type:
-            response.results = [r for r in response.results if r.type == result_type]
         web_base_url = app_context.web_base_url.rstrip("/")
         for r in response.results:
             if r.url and r.url.startswith("/"):
@@ -497,3 +571,67 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
             )
 
         return await _paginate(fetch, cursor, fetch_all, page_size)
+
+    @mcp.tool(
+        title="Read Page Attachment",
+        description=(
+            "Read a Yandex Wiki page attachment's content into the "
+            "conversation as an embedded resource (nothing is saved "
+            "anywhere): text files arrive as text, anything else "
+            "base64-encoded. Meant for text attachments — configs, CSVs, "
+            "logs. Refuses files over 128 KiB without transferring them — "
+            "fetch those yourself via the attachment's download_url from "
+            "page_get_attachments. That listing is also where file ids "
+            "come from."
+        ),
+        annotations=READ_ONLY,
+        # An embedded resource is a real content block, so the SDK ships it
+        # once. Returning a pydantic model instead would put the payload in
+        # structured_content AND in the spec-recommended text mirror of it —
+        # the same bytes twice on every call (see WikiMCPServer.call_tool,
+        # which deliberately leaves non-text blocks alone).
+        structured_output=False,
+    )
+    async def page_read_attachment(
+        ctx: ToolContext,
+        file_id: AttachmentID,
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+    ) -> EmbeddedResource:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        raw = await get_wiki(ctx).page_download_attachment(
+            resolved_page_id,
+            file_id=file_id,
+            max_bytes=MAX_INLINE_ATTACHMENT_BYTES,
+            auth=get_yandex_auth(ctx),
+        )
+        uri = f"wiki-mcp://pages/{resolved_page_id}/attachments/{file_id}"
+        text = _as_text(raw)
+        if text is not None:
+            return EmbeddedResource(
+                type="resource",
+                resource=TextResourceContents(
+                    uri=uri, mime_type="text/plain; charset=utf-8", text=text
+                ),
+            )
+        return EmbeddedResource(
+            type="resource",
+            resource=BlobResourceContents(
+                uri=uri,
+                mime_type="application/octet-stream",
+                blob=base64.b64encode(raw).decode("ascii"),
+            ),
+        )
+
+    @mcp.tool(
+        title="Get Current User",
+        description=(
+            "Get the calling Yandex Wiki user: username, home_cluster (the "
+            "caller's personal-section slug, e.g. 'users/<login>' — where "
+            "'create it in my section' requests belong), and identity/org "
+            "ids."
+        ),
+        annotations=READ_ONLY,
+    )
+    async def user_get_current(ctx: ToolContext) -> WikiCurrentUser:
+        return await get_wiki(ctx).user_get_current(auth=get_yandex_auth(ctx))

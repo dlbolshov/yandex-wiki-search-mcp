@@ -19,7 +19,7 @@
 ![Demo: search a wiki page and summarize it via MCP](https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/demo_eng_small.gif)
 
 Connect Claude, Cursor, Windsurf, or any MCP client to **Yandex Wiki**: full-text search,
-pages, comments, attachments, and dynamic tables ("grids") — **27 tools** with typed schemas.
+pages, comments, attachments, and dynamic tables ("grids") — **32 tools** with typed schemas.
 
 *An unofficial project — not affiliated with or endorsed by Yandex.*
 
@@ -127,30 +127,35 @@ pip install "yandex-wiki-search-mcp<1.1"
 
 ## Tools
 
-27 tools. All write tools disappear when `WIKI_READ_ONLY=true`.
+32 tools. All write tools disappear when `WIKI_READ_ONLY=true`.
 
-### Search & read (8)
+### Search & read (10)
 
 | Tool | What it does |
 |---|---|
-| `page_search` | Full-text search across the entire Wiki (pages and files), up to 50 ranked results with a text excerpt each |
+| `page_search` | Full-text search across the entire Wiki (pages and files), up to 50 ranked results with a text excerpt each; server-side filters and optional `<em>` match highlighting |
 | `page_get` | Get a page by `page_id` or `slug` (accepts full Wiki URLs too) |
 | `page_get_descendants` | Traverse a page subtree — one flat list of `{id, slug}` from all nesting levels; `from_root=true` walks the whole Wiki; `fetch_all` drains the cursor in one call |
 | `page_get_comments` | List page comments (`fetch_all` supported) |
 | `page_get_resources` | List page resources (attachments + grids) with server-side title search (`fetch_all` supported) |
 | `page_get_attachments` | List page attachments (`fetch_all` supported) |
+| `page_read_attachment` | Read an attachment's content straight into the conversation (nothing is saved anywhere) — text as text, small binaries as a base64 blob. Meant for text attachments: configs, CSVs, logs. Capped at 128 KiB to protect the model's context window; anything larger is refused before transfer with a pointer to `download_url` from `page_get_attachments` — the right path for images and PDFs anyway |
 | `page_get_grids` | List grids attached to a page (`fetch_all` supported) |
 | `grid_get` | Get a grid by `grid_id` with row/column/revision filters |
+| `user_get_current` | Who am I — `username` and `home_cluster` (the caller's personal-section slug) |
 
-### Pages: write (8)
+### Pages: write (11)
 
 | Tool | What it does |
 |---|---|
 | `page_create` | Create a page |
-| `page_update` | Update page title and/or full content |
+| `page_update` | Update page title and/or full content; set or clear a redirect to another page |
+| `page_edit` | Edit content by exact-text replacements without resending the whole page; a missing or ambiguous match fails the call before anything is written; writes back with `allow_merge` so a concurrent edit is merged, not overwritten |
 | `page_append_content` | Append content to top, bottom, or a named anchor |
 | `page_clone` | Copy a page to a new slug — the copy gets a new id; children, comments, and history stay with the original; occupied slugs are refused. The API has no true move/rename ([details](docs/api-notes.md#pages)) |
 | `page_add_comment` | Add a comment or reply in a thread |
+| `page_delete_comment` | Delete a comment; returns the page's updated comment count |
+| `page_delete_attachment` | Delete an attachment from a page |
 | `page_delete` | Delete a page and receive a recovery token |
 | `page_recover` | Recover a deleted page by recovery token |
 | `page_upload_attachment` | Upload a local file in chunks and attach it to a page — not registered under `OAUTH_ENABLED=true`, where "local" would mean the shared server's filesystem |
@@ -191,11 +196,11 @@ the official hosted server's tool list captured live from `mcp.wiki.yandex.net`
 
 | | **yandex-wiki-search-mcp** | [Yandex's official MCP](https://yandex.ru/support/wiki/en/mcp) (hosted) | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) |
 |---|---|---|---|---|---|
-| Full-text search | ✅ up to 50 results, client-side filters | ❌ no search tool | ❌ | ✅ up to 10 results | ❌ |
-| Pages: create / update / append / delete + recover | ✅ all | partial — no append / recover; adds partial edits via text replacement | ✅ all | partial — no append / recover | partial — no recover |
+| Full-text search | ✅ up to 50 results, server-side filters + highlighting | ❌ no search tool | ❌ | ✅ up to 10 results | ❌ |
+| Pages: create / update / append / delete + recover | ✅ all, plus partial edits via text replacement (`page_edit`) | partial — no append / recover; has partial edits via text replacement | ✅ all | partial — no append / recover | partial — no recover |
 | Pages: clone to a new slug | ✅ `page_clone` | ❌ | ❌ | ❌ | ✅ |
 | Grids: write tools | ✅ 11 | ✅ 12, incl. column update + row pin/color | ✅ 11 | ❌ read-only | ✅ 11, incl. clone |
-| Comments, attachment upload | ✅ | comments ✅ / upload ❌ (download + preview instead) | ✅ | ❌ | ❌ |
+| Comments, attachment upload | ✅ incl. deletion and attachment download | comments ✅ / upload ❌ (download + preview instead) | ✅ | ❌ | ❌ |
 | Server-side read-only mode | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Typed output schemas + tool annotations | ✅ | ❌ | ❌ | ❌ | ❌ tools return plain strings |
 | YFM helpers | ✅ syntax cheat sheet resource + `yfm_warnings` in write tools | ❌ | ❌ | ❌ | ✅ Markdown→YFM converter + page-tree cache, prompt templates |
@@ -224,9 +229,9 @@ Wiki web search bar, undocumented until Yandex published its
 August 2026. Search first, then open a result with `page_get` by its `slug`.
 
 - Up to **50** results per call (`limit` is clamped to 1–50; the API rejects anything else).
-- Search is **global only for now** — `slug_prefix` and `result_type` filters are applied client-side after fetching, so combine them with `limit=50` to avoid missing matches (the API's new server-side filters are on the [roadmap](ROADMAP.md)).
+- **Filters run server-side, before the limit** — a filtered search does not lose matches to it: `slug_prefix` (section filter, deep prefixes like `tech-doc/ml` are fine), `result_type` (`page`/`file`), `authors` (page owners by `uid`/`cloud_uid` — `user_get_current` supplies your own, turning "find my pages about X" into two calls), and `created_between`/`modified_between` date intervals (both bounds required — the API rejects open ones).
 - Quoted `"exact phrase"` queries work; `page` results get absolute `https://wiki.yandex.ru/...` links, `file` results get direct download links.
-- `content` is a **~510-character excerpt, not the page and not a summary**: it is cut from wherever the match sits, nothing is highlighted, the query terms need not be inside it, and its line breaks and tabs are the page's own layout (table cells arrive tab-separated) rather than separators between fragments. Read the page with `page_get` before answering from it. Empty for `file` results.
+- `content` is a **~510-character excerpt, not the page and not a summary**: it is cut from wherever the match sits, the query terms need not be inside it, and its line breaks and tabs are the page's own layout (table cells arrive tab-separated) rather than separators between fragments. Pass `highlight=true` to get matches wrapped in `<em>` tags. Read the page with `page_get` before answering from it. Empty for `file` results.
 
 ## Traversing the tree
 
@@ -380,7 +385,7 @@ weekly when the `DRIFT_*` repository secrets are configured
 This project began as a fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
 (`ya-yandex-wiki-mcp`) by Aleksandr Ponkratov, an excellent, well-tested Python MCP server
 for the Yandex Wiki API, licensed under Apache-2.0. It has since grown its own surface —
-full-text search, typed input *and* output schemas across all 27 tools, YFM helpers,
+full-text search, typed input *and* output schemas across all 32 tools, YFM helpers,
 cursor draining, multi-user OAuth and a live contract sweep against the API — while the
 original copyright and license are preserved (see [LICENSE](LICENSE) and [NOTICE](NOTICE)).
 

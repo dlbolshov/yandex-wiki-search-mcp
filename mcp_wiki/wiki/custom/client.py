@@ -11,6 +11,7 @@ from aiohttp import (
     ClientConnectionError,
     ClientError,
     ClientPayloadError,
+    ClientResponse,
     ClientSession,
     ClientTimeout,
     TraceConfig,
@@ -21,8 +22,10 @@ from aiohttp import (
 
 from mcp_wiki.wiki.custom.anchors import append_content_to_anchor_source
 from mcp_wiki.wiki.custom.errors import (
+    AttachmentNotFound,
     GridNotFound,
     PageNotFound,
+    ResponseTooLarge,
     WikiApiError,
     WikiConfigError,
     WikiError,
@@ -32,12 +35,14 @@ from mcp_wiki.wiki.custom.errors import (
 )
 from mcp_wiki.wiki.custom.slugs import normalize_slug
 from mcp_wiki.wiki.proto.common import YandexAuth, select_org
-from mcp_wiki.wiki.proto.pages import WikiProtocol
+from mcp_wiki.wiki.proto.pages import WikiProtocol, validate_page_update_args
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentDeleteResponse,
     AttachmentListResponse,
     AttachmentResultsResponse,
     ClonedPageRef,
     CommentsResponse,
+    DeleteCommentResponse,
     DeletePageResponse,
     DescendantsResponse,
     GridCellsResponse,
@@ -52,10 +57,13 @@ from mcp_wiki.wiki.proto.types.pages import (
     PageComment,
     RecoverPageResponse,
     ResourcesResponse,
+    SearchAuthor,
+    SearchDateInterval,
     SearchResponse,
     UploadAttachmentResult,
     UploadLocation,
     UploadSessionResponse,
+    WikiCurrentUser,
     WikiGrid,
     WikiPage,
 )
@@ -72,6 +80,11 @@ CLONE_FAILED_STATUSES = frozenset({"failed", "error", "cancelled"})
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 RETRY_BASE_DELAY = 0.3
 RETRY_AFTER_MAX = 3.0
+
+# Ceiling for an error body on a request that set max_bytes. Generous for a
+# JSON error envelope, and unlike the success ceiling it truncates instead of
+# raising — the point is to keep the API's own message, not to police it.
+ERROR_BODY_MAX_BYTES = 65_536
 
 logger = logging.getLogger(__name__)
 
@@ -254,12 +267,21 @@ class WikiClient(WikiProtocol):
         not_found: Callable[[], WikiError] | None = None,
         timeout: ClientTimeout | None = None,  # noqa: ASYNC109
         retryable: bool | None = None,
+        max_bytes: int | None = None,
     ) -> bytes:
         """Perform a Wiki API request.
 
         ``retryable`` marks the call as safe to repeat; it defaults to GET. Only such
         calls are retried, because a 5xx may well arrive after the write has been
         applied — repeating a page creation or an append would duplicate content.
+
+        ``max_bytes`` caps the response body. Every other endpoint answers with
+        JSON the API itself keeps small, but attachment download streams whatever
+        was uploaded, so the ceiling has to live here rather than above: by the
+        time a caller can measure ``len(payload)`` the bytes are already resident,
+        which on a shared OAuth deployment is a per-caller memory hole. Enforced
+        twice — against ``Content-Length`` before reading anything, and against the
+        stream itself for a chunked response that declares no length.
         """
         headers = self._build_headers(auth)
         if content_type:
@@ -283,7 +305,23 @@ class WikiClient(WikiProtocol):
                 async with self._http.request(method, path, **kwargs) as response:
                     status = response.status
                     retry_after = response.headers.get("Retry-After")
-                    payload = await response.read()
+                    if max_bytes is None:
+                        payload = await response.read()
+                    elif status < 400:
+                        payload = await self._read_capped(
+                            response, method, path, max_bytes
+                        )
+                    else:
+                        # An error body is a diagnostic, not the payload the
+                        # caller asked for, so it is truncated rather than
+                        # refused: raising ResponseTooLarge here would replace
+                        # the API's own explanation of what went wrong with a
+                        # complaint about its size. build_api_error already
+                        # degrades to a bare status when the JSON does not
+                        # parse, which is what a truncated envelope looks like.
+                        payload = await self._read_truncated(
+                            response, ERROR_BODY_MAX_BYTES
+                        )
             except (ClientError, TimeoutError) as exc:
                 # A plain total timeout raises bare TimeoutError, which is not a
                 # ClientError; ServerTimeoutError is both. Timeouts are never
@@ -331,6 +369,51 @@ class WikiClient(WikiProtocol):
         raise RuntimeError(  # pragma: no cover
             "unreachable: request loop exited without a result"
         )
+
+    @staticmethod
+    async def _read_capped(
+        response: ClientResponse, method: str, path: str, max_bytes: int
+    ) -> bytes:
+        """Read a body, refusing to materialize more than ``max_bytes``.
+
+        ``Content-Length`` settles it without reading a byte when the server
+        sends one. Otherwise read up to one byte past the cap and stop.
+        The loop is load-bearing: aiohttp's ``StreamReader.read(n)`` returns
+        whatever is already buffered, up to ``n`` — not ``n`` bytes — so a
+        single call would silently truncate a body that arrives in several
+        network chunks. Overflow raises inside the caller's ``async with``,
+        which leaves the response undrained, so aiohttp closes the connection
+        instead of pulling the rest down.
+        """
+        declared = response.content_length
+        if declared is not None and declared > max_bytes:
+            raise ResponseTooLarge(method, path, declared, max_bytes)
+        body = bytearray()
+        while len(body) <= max_bytes:
+            chunk = await response.content.read(max_bytes + 1 - len(body))
+            if not chunk:
+                break
+            body.extend(chunk)
+        if len(body) > max_bytes:
+            raise ResponseTooLarge(method, path, None, max_bytes)
+        return bytes(body)
+
+    @staticmethod
+    async def _read_truncated(response: ClientResponse, limit: int) -> bytes:
+        """Read at most ``limit`` bytes, stopping quietly rather than raising.
+
+        Same drain loop as ``_read_capped`` and for the same reason (``read(n)``
+        is a partial read), but overflow is not an error here: the caller wants
+        whatever the body says, and a body this large is malformed rather than
+        forbidden.
+        """
+        body = bytearray()
+        while len(body) < limit:
+            chunk = await response.content.read(limit - len(body))
+            if not chunk:
+                break
+            body.extend(chunk)
+        return bytes(body)
 
     @staticmethod
     def _json_or_empty(payload: bytes) -> Any:
@@ -384,17 +467,59 @@ class WikiClient(WikiProtocol):
         query: str,
         *,
         limit: int = 10,
+        cluster: str | None = None,
+        result_type: str | None = None,
+        authors: list[SearchAuthor] | None = None,
+        created_at: SearchDateInterval | None = None,
+        modified_at: SearchDateInterval | None = None,
+        highlight: bool = False,
         auth: YandexAuth | None = None,
     ) -> SearchResponse:
         # The search endpoint reads "limit" from the POST body and silently
         # ignores "page_size" (always returning 10); limit > 50 is a 400.
         # Verified against the live API 2026-08-02. Named limit rather than
         # page_size on purpose: there is no pagination behind it — the
-        # endpoint's cursors are always null.
-        body = {
+        # endpoint's cursors are always null. The documented "cursor" and
+        # "order_by" are dead on the wire (2026-08-11) and stay unexposed.
+        # Filters run server-side, before the limit (verified 2026-08-11):
+        # "cluster" takes deep slug prefixes, an unknown one is 200 with no
+        # results, and the date intervals require both bounds — the model
+        # enforces that so the wire error never happens. "authors" entries
+        # OR together and match the page owner; an unknown identity is 200
+        # with no results, and an empty list is the same as no filter, so
+        # it is dropped here rather than sent (verified 2026-08-18).
+        # The documented "show_obsolete" is dead on the wire — obsolete
+        # pages come back regardless (verified 2026-08-18) — and stays
+        # unexposed alongside "cursor" and "order_by".
+        body: dict[str, Any] = {
             "query": query,
             "limit": max(1, min(limit, SEARCH_LIMIT_MAX)),
         }
+        filters: dict[str, Any] = {}
+        if result_type is not None:
+            filters["type"] = result_type
+        if cluster is not None:
+            # Normalized here, like every other slug-shaped argument in this
+            # client, because "cluster" is the strictest slug on the API.
+            # `GET /pages?slug=` resolves "Users/Igor/MLflow", "users/igor/mlflow/"
+            # and "/users/igor/mlflow" all to the same page, but the search
+            # filter matches the stored slug literally: any of those three
+            # spellings answers 200 with zero results, indistinguishable from an
+            # empty section (probed 2026-08-18). Leaving normalization to the
+            # tool layer would mean a direct client caller silently gets nothing.
+            filters["cluster"] = normalize_slug(cluster).lower()
+        if authors:
+            filters["authors"] = [
+                author.model_dump(exclude_none=True) for author in authors
+            ]
+        if created_at is not None:
+            filters["created_at"] = created_at.model_dump(by_alias=True)
+        if modified_at is not None:
+            filters["modified_at"] = modified_at.model_dump(by_alias=True)
+        if filters:
+            body["filters"] = filters
+        if highlight:
+            body["highlight"] = True
         payload = await self._request(
             "POST",
             "v1/search",
@@ -894,18 +1019,30 @@ class WikiClient(WikiProtocol):
         *,
         title: str | None = None,
         content: str | None = None,
+        redirect_to_page_id: int | None = None,
+        clear_redirect: bool = False,
         allow_merge: bool = False,
         is_silent: bool = False,
         auth: YandexAuth | None = None,
     ) -> WikiPage:
-        if title is None and content is None:
-            raise ValueError("Provide at least one of title or content.")
+        validate_page_update_args(
+            title=title,
+            content=content,
+            redirect_to_page_id=redirect_to_page_id,
+            clear_redirect=clear_redirect,
+        )
 
         body: dict[str, Any] = {}
         if title is not None:
             body["title"] = title
         if content is not None:
             body["content"] = content
+        # Wire shape verified live 2026-08-11 (docs/api-notes.md):
+        # {"page": {"id": N}} sets a redirect, {"page": null} clears it.
+        if redirect_to_page_id is not None:
+            body["redirect"] = {"page": {"id": redirect_to_page_id}}
+        elif clear_redirect:
+            body["redirect"] = {"page": None}
 
         params: dict[str, Any] = {}
         if allow_merge:
@@ -994,6 +1131,94 @@ class WikiClient(WikiProtocol):
             not_found=lambda: PageNotFound(page_id),
         )
         return PageComment.model_validate_json(payload)
+
+    async def page_delete_comment(
+        self,
+        page_id: int,
+        *,
+        comment_id: int,
+        auth: YandexAuth | None = None,
+    ) -> DeleteCommentResponse:
+        # No not_found mapping: a 404 here is ambiguous (page or comment
+        # missing), and the API's own envelope already names the culprit —
+        # debug_message says "No Comment matches the given query." for a
+        # bogus comment id (probed 2026-08-11). PageNotFound would mislabel
+        # that case.
+        payload = await self._request(
+            "DELETE",
+            f"v1/pages/{page_id}/comments/{comment_id}",
+            auth=auth,
+        )
+        # The 200 body carries comments_count, but that is the only field it
+        # carries, so an empty body (or a renamed key) would dump to `{}` once
+        # _drop_none runs — a successful call with no evidence in it. The id
+        # pair and `deleted` are built here as the floor, mirroring
+        # page_delete_attachment; the isinstance guard mirrors grid_delete, so
+        # a non-object body cannot raise a bare ValidationError past WikiError.
+        data = self._json_or_empty(payload)
+        body = data if isinstance(data, dict) else {}
+        return DeleteCommentResponse.model_validate(
+            {**body, "page_id": page_id, "comment_id": comment_id, "deleted": True}
+        )
+
+    async def page_download_attachment(
+        self,
+        page_id: int,
+        *,
+        file_id: int,
+        max_bytes: int | None = None,
+        auth: YandexAuth | None = None,
+    ) -> bytes:
+        # not_found IS mapped here, unlike the deletes: this endpoint
+        # answers a miss with a placeholder GIF body instead of the JSON
+        # error envelope (probed 2026-08-11), which build_api_error would
+        # reduce to a bare "status 404".
+        #
+        # retryable=False although this is a GET: every other GET returns a
+        # small JSON body where a repeat costs nothing, while here a repeat
+        # re-transfers the whole file. The caller wants one attempt and a
+        # clear error, not three transfers of the same blob.
+        return await self._request(
+            "GET",
+            f"v1/pages/{page_id}/attachments/{file_id}/download",
+            auth=auth,
+            not_found=lambda: AttachmentNotFound(page_id, file_id),
+            retryable=False,
+            max_bytes=max_bytes,
+        )
+
+    async def page_delete_attachment(
+        self,
+        page_id: int,
+        *,
+        file_id: int,
+        auth: YandexAuth | None = None,
+    ) -> AttachmentDeleteResponse:
+        # No not_found mapping: the 404 envelope names the culprit itself —
+        # "No File matches the given query." (probed 2026-08-11).
+        payload = await self._request(
+            "DELETE",
+            f"v1/pages/{page_id}/attachments/{file_id}",
+            auth=auth,
+        )
+        # 204 No Content (documented and verified live): the acknowledgment
+        # fields are ours. Merged rather than constructed, exactly like
+        # grid_delete — any JSON object the API starts sending still reaches
+        # the model, where the contract sweep watches for undeclared keys.
+        # Constructing it directly would make that drift undetectable.
+        data = self._json_or_empty(payload)
+        body = data if isinstance(data, dict) else {}
+        return AttachmentDeleteResponse.model_validate(
+            {**body, "page_id": page_id, "file_id": file_id, "deleted": True}
+        )
+
+    async def user_get_current(
+        self,
+        *,
+        auth: YandexAuth | None = None,
+    ) -> WikiCurrentUser:
+        payload = await self._request("GET", "v1/users/me", auth=auth)
+        return WikiCurrentUser.model_validate_json(payload)
 
     async def page_delete(
         self,

@@ -36,25 +36,19 @@ from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
     GridUpdateRequest,
     PageFieldEnum,
+    SearchAuthor,
     WikiGridPageRef,
 )
 
 REPORT: list[tuple[str, str, str]] = []
 
 
-KNOWN_DROPPED = frozenset(
-    {
-        # Identity payloads on every user reference, trimmed to WikiUser in
-        # v0.8.0 on purpose (docs/api-notes.md). They arrive on every comment
-        # and attachment, so without this list the sweep would cry drift
-        # every single run.
-        "identity",
-        "uid",
-        "cloud_uid",
-        "is_dismissed",
-        "affiliation",
-    }
-)
+# Identity payloads ride along on every user reference, where WikiUser
+# deliberately drops them (v0.8.0, docs/api-notes.md) — without this the sweep
+# would cry drift on every comment and attachment, every run.
+IDENTITY_KEYS = frozenset({"identity", "uid", "cloud_uid"})
+
+KNOWN_DROPPED = IDENTITY_KEYS | frozenset({"is_dismissed", "affiliation"})
 
 
 def enable_extras_detection() -> None:
@@ -144,6 +138,8 @@ async def check(
     name: str,
     fn: Callable[[], Awaitable[Any]],
     note_from_result: Callable[[Any], str] | None = None,
+    *,
+    watch_identity: bool = False,
 ) -> Any:
     """Run one live call and record what the contract looked like.
 
@@ -168,7 +164,8 @@ async def check(
         notes.append(note_from_result(result))
     status = "OK"
     if isinstance(result, BaseModel | list):
-        undeclared = extras_of(result) - KNOWN_DROPPED
+        ignored = KNOWN_DROPPED - IDENTITY_KEYS if watch_identity else KNOWN_DROPPED
+        undeclared = extras_of(result) - ignored
         if undeclared:
             status = "UNDECLARED EXTRAS"
             notes.append(", ".join(sorted(undeclared)))
@@ -257,6 +254,7 @@ class CursorWalk:
 
 
 ROOT_TITLE = "Contract sweep"
+ATTACHMENT_PAYLOAD = "attachment payload for the contract sweep\n"
 
 
 async def _clear_own_leftovers(wiki: WikiClient, base: str) -> bool:
@@ -326,7 +324,7 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         lambda: wiki.page_add_comment(root.id, body="sweep comment 1"),
     )
     await wiki.page_add_comment(root.id, body="sweep comment 2")
-    await wiki.page_add_comment(root.id, body="sweep comment 3")
+    doomed = await wiki.page_add_comment(root.id, body="sweep comment 3")
     if comment is not None:
         await check(
             "page_add_comment (reply)",
@@ -334,19 +332,102 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
                 root.id, body="sweep reply", parent_id=comment.id
             ),
         )
+    await check(
+        "page_delete_comment",
+        lambda: wiki.page_delete_comment(root.id, comment_id=doomed.id),
+        note_from_result=lambda r: f"comments_count={r.comments_count}",
+    )
 
     with tempfile.NamedTemporaryFile(
         "w", suffix=".txt", prefix="sweep-", delete=False
     ) as handle:
-        handle.write("attachment payload for the contract sweep\n")
+        handle.write(ATTACHMENT_PAYLOAD)
         tmp_path = Path(handle.name)
     try:
-        await check(
+        uploaded = await check(
             "page_upload_attachment",
             lambda: wiki.page_upload_attachment(root.id, file_path=str(tmp_path)),
         )
     finally:
         await asyncio.to_thread(tmp_path.unlink, True)
+    attachment_id = None
+    if uploaded is None or not uploaded.attachments:
+        REPORT.append(
+            (
+                "page_download_attachment",
+                "SKIP",
+                "upload produced no attachment to download",
+            )
+        )
+    else:
+        attachment_id = uploaded.attachments[0].id
+        downloaded = await check(
+            "page_download_attachment",
+            lambda: wiki.page_download_attachment(root.id, file_id=attachment_id),
+            note_from_result=lambda b: f"{len(b)} bytes",
+        )
+        # The round-trip verdict has to be a REPORT row, not a note: check()
+        # only escalates status for BaseModel/list results, so bytes are always
+        # "OK" and an assertion smuggled into note_from_result could never fail
+        # the sweep. Comparing raw bytes also keeps a non-UTF-8 body from
+        # raising inside the note, which check() evaluates outside its
+        # try/except and would turn into a traceback instead of a verdict.
+        if downloaded is not None and downloaded != ATTACHMENT_PAYLOAD.encode():
+            REPORT.append(
+                (
+                    "page_download_attachment round-trip",
+                    "BROKEN",
+                    f"wrote {ATTACHMENT_PAYLOAD!r}, read back {downloaded[:120]!r}",
+                )
+            )
+
+    print(f"\n=== redirect cycle (on {base}/p-00) ===")
+    if children:
+        target = children[0]
+        await check(
+            "page_update (set redirect)",
+            lambda: wiki.page_update(target.id, redirect_to_page_id=root.id),
+        )
+        await check(
+            "page_get (redirect reads back)",
+            lambda: wiki.page_get(target.id, fields=["redirect"]),
+            note_from_result=lambda r: f"redirect={r.redirect}",
+        )
+        await check(
+            "page_update (clear redirect)",
+            lambda: wiki.page_update(target.id, clear_redirect=True),
+        )
+
+    print(f"\n=== page_edit cycle (on {base}/p-01) ===")
+    # The page_edit tool is a client-side read-modify-write; the live
+    # contract it leans on is that GET content, string-replaced and PUT
+    # back, reads back verbatim (no server-side markup normalization).
+    if len(children) > 1:
+        editee = children[1]
+        fetched = await check(
+            "page_get (content for edit)",
+            lambda: wiki.page_get(editee.id, fields=["content"]),
+            note_from_result=lambda r: f"content={r.content!r}",
+        )
+        if fetched is not None and isinstance(fetched.content, str):
+            edited = fetched.content.replace("page 1", "page 1 (edited)")
+            await check(
+                "page_update (edited content)",
+                lambda: wiki.page_update(editee.id, content=edited),
+            )
+            reread = await check(
+                "page_get (edit round-trips)",
+                lambda: wiki.page_get(editee.id, fields=["content"]),
+                note_from_result=lambda r: f"round-trips: {r.content == edited}",
+            )
+            if reread is not None and reread.content != edited:
+                REPORT.append(
+                    (
+                        "page_edit round-trip",
+                        "BROKEN",
+                        f"wrote {edited!r}, read back {reread.content!r}",
+                    )
+                )
 
     print(f"\n=== grids (host page {base}/grid-host) ===")
     grid_host = await check(
@@ -455,6 +536,19 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         await check("grid_delete", lambda: wiki.grid_delete(grid_id))
 
     print("\n=== reads ===")
+    # watch_identity: `/users/me` DECLARES identity/uid/cloud_uid — they are what
+    # the authors search filter is built from — so the global suppression that
+    # exists for user references must not apply here, or drift on the one
+    # endpoint that owns those keys would be subtracted before it is reported.
+    me = await check(
+        "user_get_current",
+        lambda: wiki.user_get_current(),
+        note_from_result=lambda r: (
+            f"username={r.username!r}, home_cluster={r.home_cluster!r}, "
+            f"uid={(r.identity.uid if r.identity else None)!r}"
+        ),
+        watch_identity=True,
+    )
     all_fields = [field.value for field in PageFieldEnum]
     await check(
         "page_get (all fields)",
@@ -490,6 +584,72 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         "page_search (existing corpus)",
         lambda: wiki.page_search("документация", limit=50),
     )
+    own_uid = me.identity.uid if me is not None and me.identity is not None else None
+    if own_uid is None:
+        # A SKIP row, not a silent `if`: this check and user_get_current are the
+        # two contracts the authors filter stands on, and a skip that prints
+        # nothing lets both break under a green summary.
+        REPORT.append(
+            (
+                "page_search (filters + highlight)",
+                "SKIP",
+                "user_get_current returned no identity.uid to filter by",
+            )
+        )
+    else:
+        # The sweep's own fixtures are owned by the token's user, so a search
+        # filtered to that author with highlighting exercises the whole
+        # filters+highlight wire shape against pages that must match.
+        await check(
+            "page_search (filters + highlight)",
+            lambda: wiki.page_search(
+                "sweep",
+                limit=50,
+                cluster=base,
+                result_type="page",
+                authors=[SearchAuthor(uid=own_uid)],
+                highlight=True,
+            ),
+            note_from_result=lambda r: f"{len(r.results)} hits under {base!r}",
+        )
+
+    # The tool promises "slug equals this prefix or lies under it", which is now
+    # the backend's job (probed 2026-08-18). Both halves are pinned here because
+    # nothing in the unit suite can see them any more: the client-side sieve
+    # that used to enforce them is gone.
+    cluster_hits = await check(
+        "page_search (cluster = segment boundary + self)",
+        lambda: wiki.page_search("sweep", limit=50, cluster=f"{base}/p-00"),
+        note_from_result=lambda r: f"{len(r.results)} hits",
+    )
+    if cluster_hits is not None:
+        prefix = f"{base}/p-00"
+        leaked = [
+            item.slug
+            for item in cluster_hits.results
+            if item.slug
+            and item.slug != prefix
+            and not item.slug.startswith(prefix + "/")
+        ]
+        if leaked:
+            REPORT.append(
+                (
+                    "page_search (cluster boundary)",
+                    "BROKEN",
+                    f"cluster={prefix!r} returned slugs outside the subtree: {leaked[:5]}",
+                )
+            )
+
+    print("\n=== attachment deletion ===")
+    if attachment_id is None:
+        REPORT.append(
+            ("page_delete_attachment", "SKIP", "no attachment id from the upload")
+        )
+    else:
+        await check(
+            "page_delete_attachment",
+            lambda: wiki.page_delete_attachment(root.id, file_id=attachment_id),
+        )
 
     print("\n=== page_clone ===")
     # One fixture, four contracts, matching the page_clone tool description:

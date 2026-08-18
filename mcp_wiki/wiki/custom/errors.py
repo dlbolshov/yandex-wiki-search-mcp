@@ -108,6 +108,56 @@ class GridNotFound(WikiError):
         self.grid_id = grid_id
 
 
+class AttachmentNotFound(WikiError):
+    """404 from the attachment download endpoint.
+
+    Mapped in the client because that endpoint answers a miss with a
+    placeholder GIF body, not the JSON error envelope (probed 2026-08-11) —
+    build_api_error would reduce it to a bare status code.
+    """
+
+    def __init__(self, page_id: int, file_id: int):
+        super().__init__(
+            f"Wiki attachment not found: file {file_id} on page {page_id} "
+            "(or the page itself is missing)."
+        )
+        self.page_id = page_id
+        self.file_id = file_id
+
+
+class ResponseTooLarge(WikiError):
+    """A response body exceeded the caller's ``max_bytes`` ceiling.
+
+    A transport-level refusal rather than an API error: the request succeeded,
+    this process simply declined to hold the answer.
+
+    The two paths are described separately because they differ in what actually
+    happened. With a ``Content-Length`` the refusal costs nothing — not one byte
+    of the body is read. Without one the ceiling can only be found by reading,
+    so the stream is drained to one byte past it and abandoned there; saying
+    "the body was not read" in that case would be false.
+    """
+
+    def __init__(
+        self, method: str, path: str, declared: int | None, max_bytes: int
+    ) -> None:
+        detail = (
+            f"declared {declared} bytes, past the {max_bytes}-byte ceiling for "
+            "this request; the body was not read."
+            if declared is not None
+            else (
+                f"sent no Content-Length and ran past the {max_bytes}-byte "
+                "ceiling for this request; the read stopped there instead of "
+                "fetching the rest."
+            )
+        )
+        super().__init__(f"{method} {path} {detail}")
+        self.method = method
+        self.path = path
+        self.declared = declared
+        self.max_bytes = max_bytes
+
+
 def build_api_error(status: int, payload: bytes) -> WikiApiError:
     """Build a WikiApiError from an HTTP status and a raw response body.
 

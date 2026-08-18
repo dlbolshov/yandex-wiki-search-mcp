@@ -10,6 +10,15 @@ from mcp_wiki.wiki.proto.types.pages import (
 
 PageID = Annotated[int, Field(description="Wiki page numeric ID.", gt=0)]
 CommentID = Annotated[int, Field(description="Wiki comment numeric ID.", gt=0)]
+AttachmentID = Annotated[
+    int,
+    Field(
+        description=(
+            "Attachment (file) numeric ID, as listed by page_get_attachments."
+        ),
+        gt=0,
+    ),
+]
 OptionalPageID = Annotated[
     int | None,
     Field(description="Wiki page numeric ID. Provide either page_id or slug.", gt=0),
@@ -107,8 +116,9 @@ SearchQuery = Annotated[
 SearchResultLimit = Annotated[
     int,
     Field(
-        description="Number of search results to return (1-50). "
-        "Use 50 when combining with the client-side filters (slug_prefix/result_type).",
+        description="Number of search results to return (1-50). Filters are "
+        "applied by the search backend before this limit, so filtered "
+        "searches do not need a larger limit to compensate.",
         ge=1,
         le=50,
     ),
@@ -249,22 +259,23 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
         "- Discover pages across the whole Wiki with page_search, then open a result by its slug with page_get.",
         "- Read Wiki pages by slug or ID",
         "- Traverse a page subtree, or the whole Wiki with page_get_descendants(from_root=true)",
-        "- Read comments, resources, and attachments",
+        "- Read comments, resources, and attachments — and read an attachment's content into the conversation with page_read_attachment",
         "- Read page grids and get dynamic tables",
+        "- Look up the calling user's username and personal-section slug with user_get_current",
     ]
     if not read_only:
         capabilities += [
             "- Create, update, copy, and delete dynamic tables; add, move, and delete grid rows and columns; update cells",
-            "- Create, update, append to, clone, delete, and recover pages",
-            "- Add comments and upload attachments from the local filesystem"
+            "- Create, update, append to, clone, delete, and recover pages; point a page at another with a redirect; edit page content by exact-text replacements with page_edit instead of resending the whole page",
+            "- Add and delete comments, delete attachments, and upload attachments from the local filesystem"
             if include_local_uploads
-            else "- Add comments",
+            else "- Add and delete comments, and delete attachments",
         ]
 
     notes = [
         'In russian Yandex Wiki is called "Яндекс Вики" or "Вики".',
         "If a tool accepts `page_id` and `slug`, provide exactly one of them.",
-        "The `content` on a `page_search` result is an excerpt of at most ~510 characters taken from wherever the match sits in the page — not the page and not a summary, unhighlighted, and sometimes without the query terms in it. Use it to pick a result, then read the page with `page_get` before answering from it.",
+        "The `content` on a `page_search` result is an excerpt of at most ~510 characters taken from wherever the match sits in the page — not the page and not a summary, sometimes without the query terms in it, highlighted with <em> tags only when highlight=true was passed. Use it to pick a result, then read the page with `page_get` before answering from it.",
         "When you need a full list from a cursor-paginated tool, pass `fetch_all=true` — the server follows the cursors for you and returns everything in one call. Only if the reply carries `truncated: true` is the list incomplete: continue from `next_cursor`, or narrow the request. Walk cursors by hand only when a tool has no `fetch_all`.",
     ]
     if read_only:

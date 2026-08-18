@@ -87,13 +87,20 @@ jobs:
       run: |
         /tmp/smoke/bin/python - <<'PY'
         import asyncio
+        import json
+        import pathlib
+
         from mcp_wiki.mcp.server import create_mcp_server
         from mcp_wiki.settings import Settings
 
+        # The expected count comes from manifest.json — the manifest is pinned
+        # to the registered surface by the test suite, so hardcoding a number
+        # here would only add a copy that rots (as 27 did when M7 landed).
+        expected = len(json.loads(pathlib.Path("manifest.json").read_text())["tools"])
         server = create_mcp_server(Settings())
         tools = asyncio.run(server.list_tools())
         print(f"{len(tools)} tools registered")
-        assert len(tools) == 27, f"expected 27 tools, got {len(tools)}"
+        assert len(tools) == expected, f"expected {expected} tools, got {len(tools)}"
         PY
 
   test:

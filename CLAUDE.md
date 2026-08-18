@@ -10,13 +10,15 @@ It exposes Wiki-oriented tools through the MCP Python SDK's `MCPServer` and keep
 The SDK is pinned to `mcp[cli]>=2,<3`. One v2 server answers both protocol eras — every handshake revision back to `2024-11-05` plus the modern `2026-07-28` — so nothing here needs a per-era branch.
 
 Main capabilities:
-- full-text search across the whole Wiki
+- full-text search across the whole Wiki, with server-side filters (section, type, author, date interval) and optional `<em>` highlighting
 - read pages by `page_id` or `slug`
 - fetch descendants for page trees
-- read comments, resources, and attachments
-- create and update pages
+- read comments, resources, and attachments, and download an attachment's content inline
+- look up the calling user (`/users/me`): username, personal-section slug, identity ids
+- create and update pages, including setting and clearing redirects
+- edit page content by exact-text replacements, without resending the whole page
 - append content to pages
-- delete and recover pages
+- delete and recover pages; delete comments and attachments
 - upload local files through Wiki upload sessions and attach them to pages
 
 ## Commands
@@ -91,17 +93,22 @@ Read-only tools:
 - `page_get_resources`
 - `page_get_attachments`
 - `page_get_grids`
+- `page_read_attachment`
+- `user_get_current`
 - `grid_get`
 
 Write tools:
 - `page_create`
 - `page_update`
+- `page_edit`
 - `page_append_content`
 - `page_clone`
 - `page_add_comment`
+- `page_delete_comment`
 - `page_delete`
 - `page_recover`
 - `page_upload_attachment`
+- `page_delete_attachment`
 - `grid_create`
 - `grid_update`
 - `grid_delete`
@@ -215,7 +222,8 @@ Constraints:
 - file upload uses Yandex Wiki multipart upload sessions
 - `HOST` must reach `run()` / `streamable_http_app()`, or HTTP transports answer `421` behind any non-loopback hostname
 - `GET /pages/descendants?slug=` **empty means the whole organization** — a real contract, not bad input (an unresolvable slug 404s). `page_get_descendants(from_root=true)` is the only caller that sends it; do not add an "empty slug" guard to `WikiClient.page_get_descendants` or to the params model, and note that omitting the parameter entirely is a `400`. `resolve_page_locator` still rejects the empty slug for every other tool, where the API genuinely needs a page
-- `page_search` results carry a ~510-character excerpt in `content`, cut from wherever the match sits and unhighlighted — not the page and not a summary. Its `\n`/`\t` are the source page's layout, not fragment separators. This is documented in three places that must stay in sync: the field description in `wiki/proto/types/pages.py`, the tool description, and `build_instructions()`
+- `page_search` results carry a ~510-character excerpt in `content`, cut from wherever the match sits — not the page and not a summary. Matches inside it are wrapped in `<em>` tags only when the call passed `highlight=true`; otherwise the excerpt is unmarked. Its `\n`/`\t` are the source page's layout, not fragment separators. This is documented in four places that must stay in sync: the field description in `wiki/proto/types/pages.py`, the tool description, `build_instructions()`, and this bullet
+- `page_search`'s `slug_prefix` reaches the API as `filters.cluster`, which is the strictest slug on the wire: it matches the stored slug **literally**, so mixed case, a leading slash or a trailing slash each answer 200 with zero results — indistinguishable from an empty section. `GET /pages?slug=` resolves all three spellings happily, so the two endpoints disagree. `WikiClient.page_search` therefore normalizes and lowercases `cluster` itself, like every other slug-shaped client argument; the tool layer only rejects a prefix that normalizes to empty. Verified live 2026-08-18, along with the two guarantees the tool description promises: the filter matches on path segments (`a/b` does not pull in `a/bc`) and includes the cluster page itself
 
 Per-request organization override:
 - a client may append `?orgId=` or `?cloudOrgId=` to the server endpoint, and those replace the configured organization for that request

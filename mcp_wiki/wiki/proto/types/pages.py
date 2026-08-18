@@ -9,6 +9,7 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     field_validator,
     model_serializer,
+    model_validator,
 )
 
 
@@ -121,6 +122,62 @@ class WikiPage(BaseWikiModel):
     modified_at: str | None = None
 
 
+class SearchDateInterval(BaseWikiModel):
+    """Closed date-time interval for search filters.
+
+    The API requires both bounds: `from` alone is a 400 SEARCH_BAD_REQUEST
+    (verified live 2026-08-11), so both fields are required here and the
+    schema says so instead of the wire error.
+    """
+
+    from_: str = Field(
+        alias="from",
+        description="Interval start, ISO 8601 date-time, e.g. '2026-01-01T00:00:00Z'.",
+    )
+    to: str = Field(
+        description="Interval end, ISO 8601 date-time. The API rejects an "
+        "open-ended interval, so both bounds are required."
+    )
+
+
+class UserIdentity(BaseWikiModel):
+    """A user's identifiers, as `/users/me` and every user reference send them."""
+
+    uid: str | None = Field(
+        default=None,
+        description="User id, e.g. from user_get_current's identity.uid or a "
+        "page owner.",
+    )
+    cloud_uid: str | None = Field(
+        default=None,
+        description="Cloud user id — the alternative identifier for Yandex "
+        "Cloud organizations.",
+    )
+
+
+class SearchAuthor(UserIdentity):
+    """Search author filter entry: a user identity, matched against page owner.
+
+    Deliberately the same shape as `UserIdentity` — these are the two ends of
+    one round trip, since the ids come from `user_get_current`. Subclassing
+    rather than re-declaring keeps them from drifting when the API grows a
+    third identifier.
+
+    The wire shape is `{uid, cloud_uid}` and either field alone filters
+    (verified live 2026-08-18); when both are present the backend matches on
+    `uid`. An entry carrying neither is silently ignored by the wire, so it is
+    rejected here instead — and a blank string counts as "neither": it is
+    accepted by the API and answers 200 with zero results, which reads as
+    "this user wrote nothing" rather than "you sent an empty id".
+    """
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> "SearchAuthor":
+        if not self.uid and not self.cloud_uid:
+            raise ValueError("provide a non-empty uid or cloud_uid")
+        return self
+
+
 class SearchResultItem(BaseWikiModel):
     url: str | None = None
     slug: str | None = None
@@ -131,12 +188,13 @@ class SearchResultItem(BaseWikiModel):
             "Rendered text excerpt from the page, capped at ~510 characters. "
             "It is NOT the page's content and NOT a summary of it: the excerpt "
             "is a window taken from wherever the match is, which on a long page "
-            "can start thousands of characters in. The query terms are not "
-            "highlighted and need not appear in the excerpt at all, so never "
-            "answer from this field — call page_get with the result's slug to "
-            "read the page. Line breaks and tabs inside it are the source page's "
-            "own layout (table cells arrive tab-separated), not separators "
-            "between excerpts. Empty for type='file' results."
+            "can start thousands of characters in. The query terms need not "
+            "appear in the excerpt at all, and matches are marked with "
+            "<em>…</em> only when the search was called with highlight=true — "
+            "so never answer from this field: call page_get with the result's "
+            "slug to read the page. Line breaks and tabs inside it are the "
+            "source page's own layout (table cells arrive tab-separated), not "
+            "separators between excerpts. Empty for type='file' results."
         ),
     )
     type: str | None = None
@@ -401,6 +459,55 @@ class PageCloneStatus(BaseWikiModel):
 
 class DeletePageResponse(BaseWikiModel):
     recovery_token: str | None = None
+
+
+class DeleteCommentResponse(BaseWikiModel):
+    """Acknowledgment for `DELETE /pages/{id}/comments/{cid}`.
+
+    The endpoint answers 200 with the page's updated comment tally (probed
+    2026-08-11), but that tally is the only thing it sends — on an empty body,
+    or once the key is renamed, a model holding just `comments_count` would
+    serialize to `{}` and report success with nothing in it. So the id pair and
+    `deleted` are filled in client-side, same pattern as
+    `AttachmentDeleteResponse`, and `comments_count` stays optional on top.
+    """
+
+    page_id: int
+    comment_id: int
+    deleted: bool
+    comments_count: int | None = None
+
+
+class AttachmentDeleteResponse(BaseWikiModel):
+    """Acknowledgment for `DELETE /pages/{id}/attachments/{fid}`.
+
+    The endpoint answers 204 No Content (documented and verified live
+    2026-08-11), so the fields are filled in client-side — same pattern as
+    GridDeleteResponse: they confirm which attachment the deletion was
+    applied to.
+    """
+
+    page_id: int
+    file_id: int
+    deleted: bool
+
+
+class UserOrg(BaseWikiModel):
+    dir_id: str | None = None
+    collab_id: str | None = None
+
+
+class WikiCurrentUser(BaseWikiModel):
+    username: str | None = None
+    home_cluster: str | None = Field(
+        default=None,
+        description=(
+            "Slug of the caller's personal section, e.g. 'users/<login>' — "
+            "the parent for pages that belong in 'my' space."
+        ),
+    )
+    identity: UserIdentity | None = None
+    org: UserOrg | None = None
 
 
 class RecoverPageResponse(BaseWikiModel):
