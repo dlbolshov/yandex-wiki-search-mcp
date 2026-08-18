@@ -128,22 +128,30 @@ class AttachmentNotFound(WikiError):
 class ResponseTooLarge(WikiError):
     """A response body exceeded the caller's ``max_bytes`` ceiling.
 
-    Raised before the body is materialized, so the size in the message is what
-    the server declared (or the ceiling itself when the response was chunked and
-    declared nothing). A transport-level refusal rather than an API error: the
-    request succeeded, this process simply declined to hold the answer.
+    A transport-level refusal rather than an API error: the request succeeded,
+    this process simply declined to hold the answer.
+
+    The two paths are described separately because they differ in what actually
+    happened. With a ``Content-Length`` the refusal costs nothing — not one byte
+    of the body is read. Without one the ceiling can only be found by reading,
+    so the stream is drained to one byte past it and abandoned there; saying
+    "the body was not read" in that case would be false.
     """
 
     def __init__(
         self, method: str, path: str, declared: int | None, max_bytes: int
     ) -> None:
-        size = (
-            f"{declared} bytes" if declared is not None else f"over {max_bytes} bytes"
+        detail = (
+            f"declared {declared} bytes, past the {max_bytes}-byte ceiling for "
+            "this request; the body was not read."
+            if declared is not None
+            else (
+                f"sent no Content-Length and ran past the {max_bytes}-byte "
+                "ceiling for this request; the read stopped there instead of "
+                "fetching the rest."
+            )
         )
-        super().__init__(
-            f"{method} {path} answered with {size}, past the {max_bytes}-byte "
-            "ceiling for this request; the body was not read."
-        )
+        super().__init__(f"{method} {path} {detail}")
         self.method = method
         self.path = path
         self.declared = declared

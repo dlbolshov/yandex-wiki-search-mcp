@@ -9,7 +9,7 @@ forks.
 
 import asyncio
 import re
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import cast
@@ -336,19 +336,80 @@ class TestPageDownloadAttachment:
                 await wiki_client.page_download_attachment(42, file_id=5)
 
 
+async def _capture_too_large(response: ClientResponse) -> ResponseTooLarge | None:
+    """Run the capped read inside gather() and hand back the refusal it raised."""
+    try:
+        await WikiClient._read_capped(response, "GET", "path", 10)
+    except ResponseTooLarge as exc:
+        return exc
+    return None
+
+
+def _live_stream(
+    prefetched: bytes, *, later: bytes = b"", declared: int | None = None
+) -> tuple[ClientResponse, Callable[[], Awaitable[None]]]:
+    """A real StreamReader holding `prefetched`, plus a coroutine feeding `later`.
+
+    aioresponses hands the whole body over in one piece, so nothing it drives can
+    tell a drained read from a single one. Feeding the rest only after the read
+    has started is what makes these tests discriminate: on a single
+    `read(n)` the body ends at `prefetched`.
+    """
+    reader = StreamReader(
+        mock.Mock(_reading_paused=False),
+        limit=2**16,
+        loop=asyncio.get_event_loop(),
+    )
+    reader.feed_data(prefetched)
+
+    async def feed_the_rest() -> None:
+        await asyncio.sleep(0)
+        if later:
+            reader.feed_data(later)
+        reader.feed_eof()
+
+    response = cast(
+        ClientResponse, SimpleNamespace(content=reader, content_length=declared)
+    )
+    return response, feed_the_rest
+
+
 class TestDownloadCeiling:
-    async def test_content_length_over_the_cap_refuses_before_reading(
-        self, wiki_client: WikiClient
-    ) -> None:
-        # aioresponses sets Content-Length from the body, so a body larger than
-        # the cap exercises the declared-length branch.
-        with aioresponses() as mocked:
-            mocked.get(
-                "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
-                body=b"x" * 100,
+    async def test_content_length_over_the_cap_refuses_before_reading(self) -> None:
+        # The stream is left with nothing in it and no EOF, so any attempt to
+        # read would block: returning at all proves the refusal came from the
+        # declared length. (aioresponses cannot drive this branch — it sets no
+        # Content-Length, so everything it mocks takes the streaming path.)
+        response, _ = _live_stream(b"", declared=100)
+
+        with pytest.raises(ResponseTooLarge, match="declared 100 bytes"):
+            await asyncio.wait_for(
+                WikiClient._read_capped(response, "GET", "path", 10), timeout=2
             )
-            with pytest.raises(ResponseTooLarge, match="past the 10-byte ceiling"):
-                await wiki_client.page_download_attachment(42, file_id=5, max_bytes=10)
+
+    async def test_content_length_under_the_cap_is_read_normally(self) -> None:
+        response, feed_the_rest = _live_stream(b"abc", later=b"def", declared=6)
+
+        body, _ = await asyncio.gather(
+            WikiClient._read_capped(response, "GET", "path", 10),
+            feed_the_rest(),
+        )
+
+        assert body == b"abcdef"
+
+    async def test_a_lying_content_length_does_not_defeat_the_ceiling(self) -> None:
+        # Content-Length is the compressed size on a compressed response, so a
+        # small declared length can precede a large decompressed body. The
+        # stream loop is the real guard, not the header.
+        response, feed_the_rest = _live_stream(b"x" * 8, later=b"x" * 8, declared=5)
+
+        refused, _ = await asyncio.gather(
+            _capture_too_large(response),
+            feed_the_rest(),
+        )
+
+        assert refused is not None
+        assert "ran past the 10-byte ceiling" in str(refused)
 
     async def test_a_body_at_the_cap_still_arrives(
         self, wiki_client: WikiClient
@@ -366,47 +427,55 @@ class TestDownloadCeiling:
     async def test_a_body_arriving_in_pieces_is_read_to_completion(self) -> None:
         # aiohttp's StreamReader.read(n) returns whatever is already buffered,
         # up to n — not n bytes. A body under the cap that arrives in several
-        # network chunks must be drained, not silently truncated at the first
-        # chunk. aioresponses feeds the whole body in one piece, so this test
-        # drives _read_capped against a real StreamReader by hand.
-        reader = StreamReader(
-            mock.Mock(_reading_paused=False),
-            limit=2**16,
-            loop=asyncio.get_running_loop(),
-        )
-        reader.feed_data(b"abc")
+        # network chunks must be drained, not silently truncated.
+        response, feed_the_rest = _live_stream(b"abc", later=b"def")
 
-        async def feed_the_rest() -> None:
-            await asyncio.sleep(0)
-            reader.feed_data(b"def")
-            reader.feed_eof()
-
-        response = cast(
-            ClientResponse, SimpleNamespace(content=reader, content_length=None)
-        )
         body, _ = await asyncio.gather(
             WikiClient._read_capped(response, "GET", "path", 10),
             feed_the_rest(),
         )
+
         assert body == b"abcdef"
 
-    async def test_a_chunked_body_past_the_cap_is_refused(self) -> None:
-        # No Content-Length to refuse upfront: the ceiling must hold from the
-        # stream itself, across chunk boundaries.
-        reader = StreamReader(
-            mock.Mock(_reading_paused=False),
-            limit=2**16,
-            loop=asyncio.get_running_loop(),
-        )
-        reader.feed_data(b"x" * 8)
-        reader.feed_data(b"x" * 8)
-        reader.feed_eof()
+    async def test_a_body_that_crosses_the_cap_late_is_still_refused(self) -> None:
+        # The overflow arrives only after the read has begun, so the ceiling has
+        # to hold across chunk boundaries rather than on the first buffer alone.
+        # With a single read(n) the body would stop at 8 bytes and pass.
+        response, feed_the_rest = _live_stream(b"x" * 8, later=b"x" * 8)
 
-        response = cast(
-            ClientResponse, SimpleNamespace(content=reader, content_length=None)
+        refused, _ = await asyncio.gather(
+            _capture_too_large(response),
+            feed_the_rest(),
         )
-        with pytest.raises(ResponseTooLarge, match="past the 10-byte ceiling"):
-            await WikiClient._read_capped(response, "GET", "path", 10)
+
+        assert refused is not None
+        assert "no Content-Length" in str(refused)
+        assert "ran past the 10-byte ceiling" in str(refused)
+
+    async def test_an_error_body_is_truncated_not_refused(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # The ceiling must not swallow the API's own explanation: a capped
+        # request that fails still has to surface the error, so the error body
+        # is truncated rather than turned into a ResponseTooLarge.
+        with aioresponses() as mocked:
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
+                status=403,
+                payload={"error_code": "FORBIDDEN", "debug_message": "nope"},
+            )
+            with pytest.raises(WikiApiError, match="FORBIDDEN"):
+                await wiki_client.page_download_attachment(42, file_id=5, max_bytes=1)
+
+    async def test_a_huge_error_body_stops_at_the_error_ceiling(self) -> None:
+        response, feed_the_rest = _live_stream(b"y" * 8, later=b"y" * 8)
+
+        body, _ = await asyncio.gather(
+            WikiClient._read_truncated(response, 10),
+            feed_the_rest(),
+        )
+
+        assert body == b"y" * 10
 
     async def test_no_max_bytes_reads_everything(self, wiki_client: WikiClient) -> None:
         with aioresponses() as mocked:

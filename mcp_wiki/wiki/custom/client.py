@@ -81,6 +81,11 @@ RETRY_STATUSES = frozenset({429, 502, 503, 504})
 RETRY_BASE_DELAY = 0.3
 RETRY_AFTER_MAX = 3.0
 
+# Ceiling for an error body on a request that set max_bytes. Generous for a
+# JSON error envelope, and unlike the success ceiling it truncates instead of
+# raising — the point is to keep the API's own message, not to police it.
+ERROR_BODY_MAX_BYTES = 65_536
+
 logger = logging.getLogger(__name__)
 
 
@@ -300,12 +305,23 @@ class WikiClient(WikiProtocol):
                 async with self._http.request(method, path, **kwargs) as response:
                     status = response.status
                     retry_after = response.headers.get("Retry-After")
-                    if max_bytes is not None and status < 400:
+                    if max_bytes is None:
+                        payload = await response.read()
+                    elif status < 400:
                         payload = await self._read_capped(
                             response, method, path, max_bytes
                         )
                     else:
-                        payload = await response.read()
+                        # An error body is a diagnostic, not the payload the
+                        # caller asked for, so it is truncated rather than
+                        # refused: raising ResponseTooLarge here would replace
+                        # the API's own explanation of what went wrong with a
+                        # complaint about its size. build_api_error already
+                        # degrades to a bare status when the JSON does not
+                        # parse, which is what a truncated envelope looks like.
+                        payload = await self._read_truncated(
+                            response, ERROR_BODY_MAX_BYTES
+                        )
             except (ClientError, TimeoutError) as exc:
                 # A plain total timeout raises bare TimeoutError, which is not a
                 # ClientError; ServerTimeoutError is both. Timeouts are never
@@ -380,6 +396,23 @@ class WikiClient(WikiProtocol):
             body.extend(chunk)
         if len(body) > max_bytes:
             raise ResponseTooLarge(method, path, None, max_bytes)
+        return bytes(body)
+
+    @staticmethod
+    async def _read_truncated(response: ClientResponse, limit: int) -> bytes:
+        """Read at most ``limit`` bytes, stopping quietly rather than raising.
+
+        Same drain loop as ``_read_capped`` and for the same reason (``read(n)``
+        is a partial read), but overflow is not an error here: the caller wants
+        whatever the body says, and a body this large is malformed rather than
+        forbidden.
+        """
+        body = bytearray()
+        while len(body) < limit:
+            chunk = await response.content.read(limit - len(body))
+            if not chunk:
+                break
+            body.extend(chunk)
         return bytes(body)
 
     @staticmethod
