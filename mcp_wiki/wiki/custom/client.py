@@ -361,17 +361,26 @@ class WikiClient(WikiProtocol):
         """Read a body, refusing to materialize more than ``max_bytes``.
 
         ``Content-Length`` settles it without reading a byte when the server
-        sends one. Otherwise read one byte past the cap and stop: raising inside
-        the caller's ``async with`` leaves the response undrained, so aiohttp
-        closes the connection instead of pulling the rest down.
+        sends one. Otherwise read up to one byte past the cap and stop.
+        The loop is load-bearing: aiohttp's ``StreamReader.read(n)`` returns
+        whatever is already buffered, up to ``n`` — not ``n`` bytes — so a
+        single call would silently truncate a body that arrives in several
+        network chunks. Overflow raises inside the caller's ``async with``,
+        which leaves the response undrained, so aiohttp closes the connection
+        instead of pulling the rest down.
         """
         declared = response.content_length
         if declared is not None and declared > max_bytes:
             raise ResponseTooLarge(method, path, declared, max_bytes)
-        chunk = await response.content.read(max_bytes + 1)
-        if len(chunk) > max_bytes:
+        body = bytearray()
+        while len(body) <= max_bytes:
+            chunk = await response.content.read(max_bytes + 1 - len(body))
+            if not chunk:
+                break
+            body.extend(chunk)
+        if len(body) > max_bytes:
             raise ResponseTooLarge(method, path, None, max_bytes)
-        return chunk
+        return bytes(body)
 
     @staticmethod
     def _json_or_empty(payload: bytes) -> Any:

@@ -7,11 +7,17 @@ up only in the weekly contract sweep, which is opt-in and does not run on
 forks.
 """
 
+import asyncio
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
+from types import SimpleNamespace
+from typing import cast
+from unittest import mock
 
 import pytest
+from aiohttp import ClientResponse
+from aiohttp.streams import StreamReader
 from aioresponses import aioresponses
 from pydantic import BaseModel
 
@@ -356,6 +362,51 @@ class TestDownloadCeiling:
                 await wiki_client.page_download_attachment(42, file_id=5, max_bytes=10)
                 == b"x" * 10
             )
+
+    async def test_a_body_arriving_in_pieces_is_read_to_completion(self) -> None:
+        # aiohttp's StreamReader.read(n) returns whatever is already buffered,
+        # up to n — not n bytes. A body under the cap that arrives in several
+        # network chunks must be drained, not silently truncated at the first
+        # chunk. aioresponses feeds the whole body in one piece, so this test
+        # drives _read_capped against a real StreamReader by hand.
+        reader = StreamReader(
+            mock.Mock(_reading_paused=False),
+            limit=2**16,
+            loop=asyncio.get_running_loop(),
+        )
+        reader.feed_data(b"abc")
+
+        async def feed_the_rest() -> None:
+            await asyncio.sleep(0)
+            reader.feed_data(b"def")
+            reader.feed_eof()
+
+        response = cast(
+            ClientResponse, SimpleNamespace(content=reader, content_length=None)
+        )
+        body, _ = await asyncio.gather(
+            WikiClient._read_capped(response, "GET", "path", 10),
+            feed_the_rest(),
+        )
+        assert body == b"abcdef"
+
+    async def test_a_chunked_body_past_the_cap_is_refused(self) -> None:
+        # No Content-Length to refuse upfront: the ceiling must hold from the
+        # stream itself, across chunk boundaries.
+        reader = StreamReader(
+            mock.Mock(_reading_paused=False),
+            limit=2**16,
+            loop=asyncio.get_running_loop(),
+        )
+        reader.feed_data(b"x" * 8)
+        reader.feed_data(b"x" * 8)
+        reader.feed_eof()
+
+        response = cast(
+            ClientResponse, SimpleNamespace(content=reader, content_length=None)
+        )
+        with pytest.raises(ResponseTooLarge, match="past the 10-byte ceiling"):
+            await WikiClient._read_capped(response, "GET", "path", 10)
 
     async def test_no_max_bytes_reads_everything(self, wiki_client: WikiClient) -> None:
         with aioresponses() as mocked:
