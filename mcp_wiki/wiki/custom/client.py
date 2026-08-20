@@ -1,11 +1,13 @@
 import asyncio
 import json
 import logging
+import os
 import random
-from collections.abc import Callable
+import tempfile
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, BinaryIO, Literal
+from typing import Any, BinaryIO, Literal, NamedTuple
 
 from aiohttp import (
     ClientConnectionError,
@@ -37,7 +39,9 @@ from mcp_wiki.wiki.custom.slugs import normalize_slug
 from mcp_wiki.wiki.proto.common import YandexAuth, select_org
 from mcp_wiki.wiki.proto.pages import WikiProtocol, validate_page_update_args
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentContent,
     AttachmentDeleteResponse,
+    AttachmentDownloadResult,
     AttachmentListResponse,
     AttachmentResultsResponse,
     ClonedPageRef,
@@ -81,16 +85,37 @@ RETRY_STATUSES = frozenset({429, 502, 503, 504})
 RETRY_BASE_DELAY = 0.3
 RETRY_AFTER_MAX = 3.0
 
-# Ceiling for an error body on a request that set max_bytes. Generous for a
-# JSON error envelope, and unlike the success ceiling it truncates instead of
-# raising — the point is to keep the API's own message, not to police it.
+# Ceiling for an error body on a request that set max_bytes or a sink. Generous
+# for a JSON error envelope, and unlike the success ceiling it truncates instead
+# of raising — the point is to keep the API's own message, not to police it.
 ERROR_BODY_MAX_BYTES = 65_536
+
+# Chunk size for streaming a download to disk. Deliberately not CHUNK_SIZE
+# (the 5 MiB upload part size, which the upload API dictates): this one only
+# bounds how much of the body is resident between two file writes.
+DOWNLOAD_CHUNK_SIZE = 65_536
+
+
+class _WireReply(NamedTuple):
+    body: bytes
+    content_type: str | None
+
 
 logger = logging.getLogger(__name__)
 
 
 def _open_binary(path: Path) -> BinaryIO:
     return path.open("rb")
+
+
+def _expand_target(save_to: str) -> Path:
+    """`~`-expand a download target.
+
+    Sync on purpose: expanduser only reads environment state, but pathlib
+    methods inside an async function trip ASYNC240 — and the rule is right
+    in general, so it is not silenced there.
+    """
+    return Path(save_to).expanduser()
 
 
 def _backoff_delay(attempt: int) -> float:
@@ -269,7 +294,43 @@ class WikiClient(WikiProtocol):
         retryable: bool | None = None,
         max_bytes: int | None = None,
     ) -> bytes:
-        """Perform a Wiki API request.
+        """Perform a Wiki API request and return the response body.
+
+        The thin common case of `_request_raw`, for the callers — all but the
+        attachment endpoints — that have no use for the Content-Type header.
+        """
+        reply = await self._request_raw(
+            method,
+            path,
+            auth=auth,
+            params=params,
+            json_body=json_body,
+            data=data,
+            content_type=content_type,
+            not_found=not_found,
+            timeout=timeout,
+            retryable=retryable,
+            max_bytes=max_bytes,
+        )
+        return reply.body
+
+    async def _request_raw(
+        self,
+        method: str,
+        path: str,
+        *,
+        auth: YandexAuth | None = None,
+        params: dict[str, Any] | None = None,
+        json_body: Any = None,
+        data: Any = None,
+        content_type: str | None = None,
+        not_found: Callable[[], WikiError] | None = None,
+        timeout: ClientTimeout | None = None,  # noqa: ASYNC109
+        retryable: bool | None = None,
+        max_bytes: int | Callable[[str | None], int] | None = None,
+        body_sink: Callable[[bytes], Awaitable[None]] | None = None,
+    ) -> _WireReply:
+        """Perform a Wiki API request; the body travels with its Content-Type.
 
         ``retryable`` marks the call as safe to repeat; it defaults to GET. Only such
         calls are retried, because a 5xx may well arrive after the write has been
@@ -281,7 +342,16 @@ class WikiClient(WikiProtocol):
         time a caller can measure ``len(payload)`` the bytes are already resident,
         which on a shared OAuth deployment is a per-caller memory hole. Enforced
         twice — against ``Content-Length`` before reading anything, and against the
-        stream itself for a chunked response that declares no length.
+        stream itself for a chunked response that declares no length. A callable
+        picks the ceiling per response, from its Content-Type: the download
+        endpoint serves images and text through one URL, and which ceiling is
+        right is only known once the header arrives (always before the body).
+
+        ``body_sink`` diverts a success body out of memory: chunks go to the
+        sink as they arrive and the returned body is empty. Error bodies still
+        materialize (truncated) — they are diagnostics, not payload. A sink
+        call must not be retried: chunks already delivered cannot be unsent,
+        so a second attempt would duplicate them.
         """
         headers = self._build_headers(auth)
         if content_type:
@@ -298,6 +368,8 @@ class WikiClient(WikiProtocol):
             kwargs["timeout"] = timeout
 
         can_retry = method == "GET" if retryable is None else retryable
+        if body_sink is not None and can_retry:
+            raise ValueError("body_sink requires retryable=False")
         attempts = self._max_retries + 1 if can_retry else 1
 
         for attempt in range(1, attempts + 1):
@@ -305,23 +377,36 @@ class WikiClient(WikiProtocol):
                 async with self._http.request(method, path, **kwargs) as response:
                     status = response.status
                     retry_after = response.headers.get("Retry-After")
-                    if max_bytes is None:
-                        payload = await response.read()
-                    elif status < 400:
-                        payload = await self._read_capped(
-                            response, method, path, max_bytes
-                        )
-                    else:
+                    reply_type = response.headers.get("Content-Type")
+                    if status >= 400:
                         # An error body is a diagnostic, not the payload the
-                        # caller asked for, so it is truncated rather than
-                        # refused: raising ResponseTooLarge here would replace
-                        # the API's own explanation of what went wrong with a
+                        # caller asked for, so on a capped or sunk request it
+                        # is truncated rather than refused or diverted:
+                        # raising ResponseTooLarge here would replace the
+                        # API's own explanation of what went wrong with a
                         # complaint about its size. build_api_error already
                         # degrades to a bare status when the JSON does not
                         # parse, which is what a truncated envelope looks like.
-                        payload = await self._read_truncated(
-                            response, ERROR_BODY_MAX_BYTES
+                        payload = (
+                            await response.read()
+                            if max_bytes is None and body_sink is None
+                            else await self._read_truncated(
+                                response, ERROR_BODY_MAX_BYTES
+                            )
                         )
+                    elif body_sink is not None:
+                        async for chunk in response.content.iter_chunked(
+                            DOWNLOAD_CHUNK_SIZE
+                        ):
+                            await body_sink(chunk)
+                        payload = b""
+                    elif max_bytes is None:
+                        payload = await response.read()
+                    else:
+                        limit = (
+                            max_bytes(reply_type) if callable(max_bytes) else max_bytes
+                        )
+                        payload = await self._read_capped(response, method, path, limit)
             except (ClientError, TimeoutError) as exc:
                 # A plain total timeout raises bare TimeoutError, which is not a
                 # ClientError; ServerTimeoutError is both. Timeouts are never
@@ -362,7 +447,7 @@ class WikiClient(WikiProtocol):
                     continue
             if status >= 400:
                 raise build_api_error(status, payload)
-            return payload
+            return _WireReply(payload, reply_type)
 
         # The loop always returns or raises; this only keeps the function's
         # return type honest if that ever stops being true.
@@ -1166,9 +1251,9 @@ class WikiClient(WikiProtocol):
         page_id: int,
         *,
         file_id: int,
-        max_bytes: int | None = None,
+        max_bytes: int | Callable[[str | None], int] | None = None,
         auth: YandexAuth | None = None,
-    ) -> bytes:
+    ) -> AttachmentContent:
         # not_found IS mapped here, unlike the deletes: this endpoint
         # answers a miss with a placeholder GIF body instead of the JSON
         # error envelope (probed 2026-08-11), which build_api_error would
@@ -1178,13 +1263,82 @@ class WikiClient(WikiProtocol):
         # small JSON body where a repeat costs nothing, while here a repeat
         # re-transfers the whole file. The caller wants one attempt and a
         # clear error, not three transfers of the same blob.
-        return await self._request(
+        body, mime_type = await self._request_raw(
             "GET",
             f"v1/pages/{page_id}/attachments/{file_id}/download",
             auth=auth,
             not_found=lambda: AttachmentNotFound(page_id, file_id),
             retryable=False,
             max_bytes=max_bytes,
+        )
+        return AttachmentContent(body, mime_type)
+
+    async def page_download_attachment_to_path(
+        self,
+        page_id: int,
+        *,
+        file_id: int,
+        save_to: str,
+        overwrite: bool = False,
+        auth: YandexAuth | None = None,
+    ) -> AttachmentDownloadResult:
+        """Stream an attachment to a local file, never holding it in memory.
+
+        The inline reader above exists to bring text into the conversation
+        and is capped accordingly; this is the uncapped counterpart for
+        getting the artifact itself. Chunks go from the socket to a temp
+        file in the target directory, renamed over `save_to` only on
+        success — an interrupted transfer never leaves a half-written file
+        under the final name, and `overwrite` stays honest because the
+        pre-existing file survives any failure intact.
+        """
+        target = _expand_target(save_to)
+        if not overwrite and await asyncio.to_thread(target.exists):
+            raise WikiOperationError(
+                f"File already exists: {target}. Pass overwrite=true to replace it."
+            )
+        await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
+        handle = await asyncio.to_thread(
+            lambda: tempfile.NamedTemporaryFile(  # noqa: SIM115 — closed below on both paths
+                mode="wb",
+                dir=target.parent,
+                prefix=target.name + ".",
+                suffix=".part",
+                delete=False,
+            )
+        )
+        size = 0
+
+        async def sink(chunk: bytes) -> None:
+            nonlocal size
+            size += len(chunk)
+            await asyncio.to_thread(handle.write, chunk)
+
+        try:
+            _, mime_type = await self._request_raw(
+                "GET",
+                f"v1/pages/{page_id}/attachments/{file_id}/download",
+                auth=auth,
+                not_found=lambda: AttachmentNotFound(page_id, file_id),
+                retryable=False,
+                body_sink=sink,
+            )
+            await asyncio.to_thread(handle.close)
+            await asyncio.to_thread(os.replace, handle.name, target)
+        except BaseException:
+            # BaseException on purpose: asyncio.CancelledError is not an
+            # Exception, and a cancelled transfer must not leak its .part
+            # file either. Always re-raised — this is cleanup, not handling.
+            await asyncio.to_thread(handle.close)
+            await asyncio.to_thread(Path(handle.name).unlink, missing_ok=True)
+            raise
+        resolved = await asyncio.to_thread(target.resolve)
+        return AttachmentDownloadResult(
+            page_id=page_id,
+            file_id=file_id,
+            path=str(resolved),
+            size_bytes=size,
+            mime_type=mime_type,
         )
 
     async def page_delete_attachment(

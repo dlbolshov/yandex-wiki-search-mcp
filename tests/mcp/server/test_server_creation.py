@@ -63,6 +63,7 @@ NON_READ_TOOL_NAMES = [
     "page_delete",
     "page_recover",
     "page_upload_attachment",
+    "page_download_attachment",
 ]
 
 EXPECTED_TOOL_NAMES = READ_ONLY_TOOL_NAMES + NON_READ_TOOL_NAMES
@@ -152,7 +153,9 @@ class TestOAuthUploadGating:
 
         tool_names = [tool.name for tool in await server.list_tools()]
         assert "page_upload_attachment" not in tool_names
-        # only the local-filesystem tool is gated; other writes stay
+        # download writes to the local disk, so it is gated the same way
+        assert "page_download_attachment" not in tool_names
+        # only the local-filesystem tools are gated; other writes stay
         assert "page_clone" in tool_names
         assert "page_create" in tool_names
         # the instructions must not advertise the tool that is not there
@@ -168,6 +171,7 @@ class TestOAuthUploadGating:
 
         tool_names = [tool.name for tool in await server.list_tools()]
         assert "page_upload_attachment" in tool_names
+        assert "page_download_attachment" in tool_names
         assert server.instructions is not None
         assert "upload attachments from the local filesystem" in server.instructions
 

@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+Attachments in both directions: pictures into the conversation, files onto the
+disk. Tool surface grows to 33 (a minor bump when released).
+
+### Added
+- `page_read_attachment` returns **images as a native MCP image block** — vision-capable clients render them and models see them, where the previous base64 blob was opaque to both. An attachment counts as an image when the download endpoint's `Content-Type` says `image/*` (the endpoint declares a precise per-file type — probed 2026-08-19, see api-notes) or, failing that, when the first bytes carry a PNG/JPEG/GIF/WebP magic number — so a lying `octet-stream` header cannot hide a picture, while SVG (plain XML, invisible to magic) still arrives as an image on the header's word. Images get their own 1 MiB ceiling against the base 128 KiB: a vision block is priced by decoded pixels, not by the base64 bytes a text cap was budgeted for. The cap is picked **by mime before the body is read** — `max_bytes` on the client is now int-or-callable, receiving the response's `Content-Type` (the endpoint sends no `Content-Length`, so enforcement stays on the capped stream read); the refusal message now points to `page_download_attachment` alongside `download_url`
+- `page_download_attachment` — the counterpart for everything too big or not worth reading: streams an attachment to a local file in 64 KiB chunks (`page_id`/`slug` + `file_id` + `save_to`), uncapped, nothing enters the conversation. The write is atomic — a `.part` temp file in the target directory, fsync, then `os.replace` — so a crashed download can never masquerade as a finished one; an existing target is refused unless `overwrite=true`, checked before the request so refusal costs no transfer, and a failed attempt leaves an existing file untouched. Returns `{page_id, file_id, path, size_bytes, mime_type}` with the path resolved absolute. Annotated destructive (it writes to the caller's disk), registered outside `WIKI_READ_ONLY` and gated with `page_upload_attachment` under OAuth for the same reason in the other direction: `save_to` would name paths on the shared server's filesystem, not the caller's
+- `WikiClient.page_download_attachment` now returns `AttachmentContent` (bytes + the wire's mime), and the new `WikiClient.page_download_attachment_to_path` drives the streaming path via a `body_sink` on the raw request layer — a sink is refused on anything retryable, since a retry would append a second copy after the first attempt's chunks (downloads were already never retried)
+
+### Internal
+- The contract sweep's attachment round-trip now also asserts the download's `mime_type` and covers `page_download_attachment_to_path` end-to-end: bytes on disk equal bytes uploaded, no `.part` leftovers
+- `docs/api-notes.md` (EN/RU): the download endpoint's header contract recorded — precise `Content-Type`, no `Content-Length`, no `Content-Disposition`, chunked at any size (probed 2026-08-19)
+
 ## [1.3.0] - 2026-08-18
 
 In August 2026 Yandex published a full Wiki API reference (the search endpoint

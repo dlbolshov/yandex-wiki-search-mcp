@@ -11,6 +11,7 @@ import asyncio
 import re
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 from unittest import mock
@@ -27,6 +28,7 @@ from mcp_wiki.wiki.custom.errors import (
     PageNotFound,
     ResponseTooLarge,
     WikiApiError,
+    WikiOperationError,
 )
 from mcp_wiki.wiki.proto.common import YandexAuth
 from mcp_wiki.wiki.proto.types.pages import AttachmentDeleteResponse
@@ -310,16 +312,47 @@ class TestPageDeleteComment:
 
 
 class TestPageDownloadAttachment:
-    async def test_returns_the_raw_bytes(self, wiki_client: WikiClient) -> None:
+    async def test_returns_the_body_with_its_content_type(
+        self, wiki_client: WikiClient
+    ) -> None:
         blob = b"\x89PNG\r\n\x1a\n binary"
         with aioresponses() as mocked:
             mocked.get(
                 "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
                 body=blob,
+                content_type="image/png",
             )
-            data = await wiki_client.page_download_attachment(42, file_id=5)
+            reply = await wiki_client.page_download_attachment(42, file_id=5)
 
-        assert data == blob
+        # The header rides along: the tool above decides how the bytes
+        # travel (image block vs text vs blob) and needs the wire's claim.
+        assert reply.content == blob
+        assert reply.mime_type == "image/png"
+
+    async def test_a_callable_ceiling_is_picked_by_the_content_type(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # One 10-byte body, one mime-dependent cap: images get 100, the
+        # rest get 4. Which ceiling applied is observable in the outcome.
+        def ceiling(content_type: str | None) -> int:
+            if content_type is not None and content_type.startswith("image/"):
+                return 100
+            return 4
+
+        url = "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download"
+        with aioresponses() as mocked:
+            mocked.get(url, body=b"x" * 10, content_type="image/png")
+            reply = await wiki_client.page_download_attachment(
+                42, file_id=5, max_bytes=ceiling
+            )
+        assert reply.content == b"x" * 10
+
+        with aioresponses() as mocked:
+            mocked.get(url, body=b"x" * 10, content_type="text/plain")
+            with pytest.raises(ResponseTooLarge):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, max_bytes=ceiling
+                )
 
     async def test_404_maps_to_attachment_not_found(
         self, wiki_client: WikiClient
@@ -419,10 +452,10 @@ class TestDownloadCeiling:
                 "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
                 body=b"x" * 10,
             )
-            assert (
-                await wiki_client.page_download_attachment(42, file_id=5, max_bytes=10)
-                == b"x" * 10
+            reply = await wiki_client.page_download_attachment(
+                42, file_id=5, max_bytes=10
             )
+            assert reply.content == b"x" * 10
 
     async def test_a_body_arriving_in_pieces_is_read_to_completion(self) -> None:
         # aiohttp's StreamReader.read(n) returns whatever is already buffered,
@@ -483,7 +516,8 @@ class TestDownloadCeiling:
                 "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
                 body=b"x" * 100,
             )
-            assert len(await wiki_client.page_download_attachment(42, file_id=5)) == 100
+            reply = await wiki_client.page_download_attachment(42, file_id=5)
+            assert len(reply.content) == 100
 
     async def test_a_download_is_not_retried(self, wiki_client: WikiClient) -> None:
         # GETs are retryable by default, but repeating this one re-transfers
@@ -499,6 +533,138 @@ class TestDownloadCeiling:
                 await wiki_client.page_download_attachment(42, file_id=5)
 
         capture.assert_request_count(1)
+
+
+DOWNLOAD_URL = "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download"
+
+
+def _dir_names(path: Path) -> list[str]:
+    # Sync on purpose: pathlib inside an async function trips ASYNC240,
+    # while os.listdir trips PTH208 — a sync helper satisfies both.
+    return [p.name for p in path.iterdir()]
+
+
+class TestPageDownloadAttachmentToPath:
+    async def test_streams_the_body_to_the_target_file(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # Big enough to cross several stream chunks, and a missing parent
+        # directory on purpose: the client must create it.
+        blob = bytes(range(256)) * 1024
+        target = tmp_path / "out" / "report.pdf"
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=blob, content_type="application/pdf")
+            result = await wiki_client.page_download_attachment_to_path(
+                42, file_id=5, save_to=str(target)
+            )
+
+        assert target.read_bytes() == blob
+        assert result.page_id == 42
+        assert result.file_id == 5
+        assert result.path == str(target.resolve())
+        assert result.size_bytes == len(blob)
+        assert result.mime_type == "application/pdf"
+        # The temp file was renamed, not left beside the result.
+        assert _dir_names(target.parent) == [target.name]
+
+    async def test_refuses_an_existing_target_without_overwrite(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "exists.bin"
+        target.write_bytes(b"old")
+        # No route is mocked: had the client touched the wire at all,
+        # aioresponses would fail the request with a connection error, and
+        # the assertion below would see the wrong exception type.
+        with aioresponses(), pytest.raises(WikiOperationError, match="already exists"):
+            await wiki_client.page_download_attachment_to_path(
+                42, file_id=5, save_to=str(target)
+            )
+        assert target.read_bytes() == b"old"
+
+    async def test_overwrite_replaces_the_file(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "exists.bin"
+        target.write_bytes(b"old")
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"new bytes")
+            await wiki_client.page_download_attachment_to_path(
+                42, file_id=5, save_to=str(target), overwrite=True
+            )
+        assert target.read_bytes() == b"new bytes"
+
+    async def test_a_miss_leaves_nothing_behind(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "missing.gif"
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, status=404, body=b"GIF89a...")
+            with pytest.raises(AttachmentNotFound):
+                await wiki_client.page_download_attachment_to_path(
+                    42, file_id=5, save_to=str(target)
+                )
+        # Neither the target nor an orphaned .part file.
+        assert _dir_names(tmp_path) == []
+
+    async def test_a_failure_leaves_the_existing_file_intact(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # overwrite=true promises replacement on success, not destruction on
+        # failure: the rename never happens, so the old bytes survive.
+        target = tmp_path / "precious.bin"
+        target.write_bytes(b"precious")
+        with aioresponses() as mocked:
+            mocked.get(
+                DOWNLOAD_URL,
+                status=500,
+                payload={"error_code": "INTERNAL", "debug_message": "boom"},
+            )
+            with pytest.raises(WikiApiError):
+                await wiki_client.page_download_attachment_to_path(
+                    42, file_id=5, save_to=str(target), overwrite=True
+                )
+        assert target.read_bytes() == b"precious"
+        assert _dir_names(tmp_path) == [target.name]
+
+    async def test_tilde_expands_to_the_home_directory(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"x")
+            result = await wiki_client.page_download_attachment_to_path(
+                42, file_id=5, save_to="~/tilde.bin"
+            )
+        assert (tmp_path / "tilde.bin").read_bytes() == b"x"
+        assert result.path == str((tmp_path / "tilde.bin").resolve())
+
+    async def test_a_download_to_path_is_not_retried(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # Same argument as the inline download, plus one more: a retried
+        # sink would append the retry's chunks after the first attempt's.
+        capture = RequestCapture(status=503)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, callback=capture.callback, repeat=True)
+            with pytest.raises(WikiApiError):
+                await wiki_client.page_download_attachment_to_path(
+                    42, file_id=5, save_to=str(tmp_path / "f.bin")
+                )
+        capture.assert_request_count(1)
+
+    async def test_a_sink_on_a_retryable_call_is_a_programming_error(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # The guard behind the tests above: _request_raw itself refuses a
+        # sink on anything retryable, so no future caller can pair them.
+        async def sink(_: bytes) -> None:  # pragma: no cover - never invoked
+            raise AssertionError("must not be called")
+
+        with pytest.raises(ValueError, match="retryable"):
+            await wiki_client._request_raw("GET", "v1/anything", body_sink=sink)
 
 
 class TestPageDeleteAttachment:

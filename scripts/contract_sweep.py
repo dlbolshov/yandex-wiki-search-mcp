@@ -364,7 +364,7 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         downloaded = await check(
             "page_download_attachment",
             lambda: wiki.page_download_attachment(root.id, file_id=attachment_id),
-            note_from_result=lambda b: f"{len(b)} bytes",
+            note_from_result=lambda r: f"{len(r.content)} bytes, mime={r.mime_type}",
         )
         # The round-trip verdict has to be a REPORT row, not a note: check()
         # only escalates status for BaseModel/list results, so bytes are always
@@ -372,14 +372,44 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         # the sweep. Comparing raw bytes also keeps a non-UTF-8 body from
         # raising inside the note, which check() evaluates outside its
         # try/except and would turn into a traceback instead of a verdict.
-        if downloaded is not None and downloaded != ATTACHMENT_PAYLOAD.encode():
+        if downloaded is not None and downloaded.content != ATTACHMENT_PAYLOAD.encode():
             REPORT.append(
                 (
                     "page_download_attachment round-trip",
                     "BROKEN",
-                    f"wrote {ATTACHMENT_PAYLOAD!r}, read back {downloaded[:120]!r}",
+                    f"wrote {ATTACHMENT_PAYLOAD!r}, "
+                    f"read back {downloaded.content[:120]!r}",
                 )
             )
+        with tempfile.TemporaryDirectory(prefix="sweep-dl-") as download_dir:
+            save_to = Path(download_dir) / "sweep-attachment.txt"
+            saved = await check(
+                "page_download_attachment_to_path",
+                lambda: wiki.page_download_attachment_to_path(
+                    root.id, file_id=attachment_id, save_to=str(save_to)
+                ),
+                note_from_result=lambda r: f"{r.size_bytes} bytes -> {r.path}",
+            )
+            if saved is not None:
+                on_disk = save_to.read_bytes()
+                if on_disk != ATTACHMENT_PAYLOAD.encode():
+                    REPORT.append(
+                        (
+                            "page_download_attachment_to_path round-trip",
+                            "BROKEN",
+                            f"wrote {ATTACHMENT_PAYLOAD!r}, "
+                            f"file holds {on_disk[:120]!r}",
+                        )
+                    )
+                leftovers = [p.name for p in save_to.parent.iterdir() if p != save_to]
+                if leftovers:
+                    REPORT.append(
+                        (
+                            "page_download_attachment_to_path round-trip",
+                            "BROKEN",
+                            f"leftover files beside the target: {leftovers}",
+                        )
+                    )
 
     print(f"\n=== redirect cycle (on {base}/p-00) ===")
     if children:

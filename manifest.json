@@ -162,6 +162,10 @@
     {
       "name": "page_upload_attachment",
       "description": "Upload a local file and attach it to a Yandex Wiki page"
+    },
+    {
+      "name": "page_download_attachment",
+      "description": "Download a Yandex Wiki page attachment to a local file"
     }
   ],
   "user_config": {

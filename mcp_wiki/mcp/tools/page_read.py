@@ -8,6 +8,7 @@ from mcp.server import MCPServer
 from mcp.types import (
     BlobResourceContents,
     EmbeddedResource,
+    ImageContent,
     TextResourceContents,
     ToolAnnotations,
 )
@@ -71,6 +72,66 @@ _FETCH_ALL_MAX_REQUESTS = 50
 # refuse. At 128 KiB the base64 worst case is ~175k characters, which is large
 # but survivable. Bigger files stay reachable via the attachment's download_url.
 MAX_INLINE_ATTACHMENT_BYTES = 131_072
+
+# Images get their own, higher ceiling: an ImageContent block goes to the
+# model's vision input, where cost scales with pixels, not with base64
+# characters — the 128 KiB argument above simply does not apply. 1 MiB admits
+# an ordinary screenshot or exported diagram; past that, download-to-disk or
+# the attachment's download_url.
+MAX_INLINE_IMAGE_BYTES = 1_048_576
+
+
+def _inline_ceiling(content_type: str | None) -> int:
+    """Byte ceiling for an inline read, picked by the wire's Content-Type.
+
+    Called by the client between headers and body — the download endpoint
+    never declares a Content-Length (chunked, probed 2026-08-19), so the
+    Content-Type header is the only pre-body signal there is. It is also
+    trustworthy: the endpoint reports a precise per-file mime (same probe).
+    A lying `application/octet-stream` over a large image degrades safely —
+    the text ceiling applies and the read is refused, never oversized.
+    """
+    if _mime_base(content_type).startswith("image/"):
+        return MAX_INLINE_IMAGE_BYTES
+    return MAX_INLINE_ATTACHMENT_BYTES
+
+
+def _mime_base(content_type: str | None) -> str:
+    """`text/plain; charset=utf-8` -> `text/plain`; None -> ``""``."""
+    if not content_type:
+        return ""
+    return content_type.split(";", 1)[0].strip().lower()
+
+
+# Magic-byte fallback for when the wire does not claim image/*: the four
+# formats vision-capable clients actually render. Checked against the bytes,
+# not the filename — there is no filename.
+_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def _image_mime(raw: bytes, content_type: str | None) -> str | None:
+    """The mime an image should travel under, or None for non-images.
+
+    The wire's Content-Type wins when it claims image/* (precise per file,
+    probed 2026-08-19). Otherwise the bytes speak for themselves — an image
+    served as octet-stream still renders in the client, it just had to be
+    recognized here first.
+    """
+    base = _mime_base(content_type)
+    if base.startswith("image/"):
+        return base
+    for magic, mime in _IMAGE_MAGIC:
+        if raw.startswith(magic):
+            return mime
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
 
 EnvelopeT = TypeVar("EnvelopeT", bound=CursorEnvelope)
 
@@ -576,13 +637,15 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         title="Read Page Attachment",
         description=(
             "Read a Yandex Wiki page attachment's content into the "
-            "conversation as an embedded resource (nothing is saved "
-            "anywhere): text files arrive as text, anything else "
-            "base64-encoded. Meant for text attachments — configs, CSVs, "
-            "logs. Refuses files over 128 KiB without transferring them — "
+            "conversation (nothing is saved anywhere): images arrive as a "
+            "native image block — vision-capable clients render and see "
+            "them — text files as text, anything else base64-encoded. "
+            "Meant for images and text attachments — diagrams, "
+            "screenshots, configs, CSVs, logs. Refuses text/binary over "
+            "128 KiB and images over 1 MiB without transferring them — "
             "fetch those yourself via the attachment's download_url from "
-            "page_get_attachments. That listing is also where file ids "
-            "come from."
+            "page_get_attachments, or use page_download_attachment to "
+            "save locally. The listing is also where file ids come from."
         ),
         annotations=READ_ONLY,
         # An embedded resource is a real content block, so the SDK ships it
@@ -597,14 +660,23 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         file_id: AttachmentID,
         page_id: OptionalPageID = None,
         slug: OptionalPageSlug = None,
-    ) -> EmbeddedResource:
+    ) -> EmbeddedResource | ImageContent:
         resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        raw = await get_wiki(ctx).page_download_attachment(
+        raw, wire_mime = await get_wiki(ctx).page_download_attachment(
             resolved_page_id,
             file_id=file_id,
-            max_bytes=MAX_INLINE_ATTACHMENT_BYTES,
+            max_bytes=_inline_ceiling,
             auth=get_yandex_auth(ctx),
         )
+        image_mime = _image_mime(raw, wire_mime)
+        if image_mime is not None:
+            # A native image block, not an embedded blob: this is the one
+            # shape clients render inline and vision models actually see.
+            return ImageContent(
+                type="image",
+                data=base64.b64encode(raw).decode("ascii"),
+                mime_type=image_mime,
+            )
         uri = f"wiki-mcp://pages/{resolved_page_id}/attachments/{file_id}"
         text = _as_text(raw)
         if text is not None:

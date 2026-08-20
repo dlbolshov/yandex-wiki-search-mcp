@@ -108,6 +108,7 @@ Write tools:
 - `page_delete`
 - `page_recover`
 - `page_upload_attachment`
+- `page_download_attachment`
 - `page_delete_attachment`
 - `grid_create`
 - `grid_update`
@@ -198,6 +199,19 @@ When adding a new MCP tool:
    - `CHANGELOG.md`
    - `docs/architecture.md` + `docs/architecture_ru.md` (if the change touches anything they describe)
 6. Add tests in the matching `tests/mcp/...` or `tests/wiki/...` location.
+
+## Versioning And Release Flow
+
+**Never bump the version in a feature branch.** Feature work lands under
+`## [Unreleased]` in `CHANGELOG.md`; version numbers are assigned by a
+dedicated release commit on `main` (`Release vX.Y.Z`) that updates everything
+at once: `pyproject.toml`, `uv.lock` (via `uv lock`, never by hand),
+`manifest.json`, `server.json` (both `version` fields **and** the OCI image
+tag), promotes `[Unreleased]` to `[X.Y.Z] - date`, and appends the ROADMAP
+log entry. `scripts/check_versions.py` verifies the sync (except the OCI
+tag). Full procedure: `docs/architecture.md` → "Release process". Do not
+reference the future version number from docs, ROADMAP entries, or code
+comments before that commit exists — the number is not decided until release.
 
 ## Configuration Notes
 

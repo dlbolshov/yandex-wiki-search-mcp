@@ -8,16 +8,19 @@ from mcp import Client
 from mcp.types import (
     BlobResourceContents,
     EmbeddedResource,
+    ImageContent,
     TextResourceContents,
 )
 
 from mcp_wiki.mcp.tools.page_read import (
     _FETCH_ALL_MAX_REQUESTS,
     MAX_INLINE_ATTACHMENT_BYTES,
+    MAX_INLINE_IMAGE_BYTES,
     _drain_cursor,
 )
 from mcp_wiki.wiki.custom.errors import ResponseTooLarge, WikiTransportError
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentContent,
     AttachmentListResponse,
     CommentsResponse,
     CursorEnvelope,
@@ -785,7 +788,9 @@ class TestPageReadAttachment:
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_download_attachment.return_value = b"col1;col2\na;b\n"
+        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+            b"col1;col2\na;b\n", "text/csv"
+        )
 
         result = await client.call_tool(
             "page_read_attachment",
@@ -804,19 +809,28 @@ class TestPageReadAttachment:
         args = mock_wiki_protocol.page_download_attachment.await_args
         assert args.args[0] == 10
         assert args.kwargs["file_id"] == 5
-        # The ceiling reaches the client, which enforces it before reading.
-        assert args.kwargs["max_bytes"] == MAX_INLINE_ATTACHMENT_BYTES
+        # The ceiling reaches the client as a mime-keyed callable, enforced
+        # there before the body is read: text gets the conversation budget,
+        # images the vision budget.
+        ceiling = args.kwargs["max_bytes"]
+        assert ceiling("text/csv") == MAX_INLINE_ATTACHMENT_BYTES
+        assert ceiling(None) == MAX_INLINE_ATTACHMENT_BYTES
+        assert ceiling("image/png") == MAX_INLINE_IMAGE_BYTES
+        assert ceiling("IMAGE/PNG; foo=bar") == MAX_INLINE_IMAGE_BYTES
 
     async def test_binary_content_arrives_as_a_base64_blob(
         self,
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        blob = b"\x89PNG\r\n\x1a\n\x00\xff"
+        # A ZIP header: binary, but not an image — those get their own block.
+        blob = b"PK\x03\x04\x00\xff\xfe"
         mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
             id=10
         )
-        mock_wiki_protocol.page_download_attachment.return_value = blob
+        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+            blob, "application/zip"
+        )
 
         result = await client.call_tool(
             "page_read_attachment",
@@ -837,7 +851,9 @@ class TestPageReadAttachment:
         # bare decode() succeeds and would hand the model NUL-riddled mojibake
         # labelled "text".
         blob = "hello".encode("utf-16-le")
-        mock_wiki_protocol.page_download_attachment.return_value = blob
+        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+            blob, "application/octet-stream"
+        )
 
         result = await client.call_tool(
             "page_read_attachment",
@@ -871,6 +887,84 @@ class TestPageReadAttachment:
 
         assert result.is_error is True
         assert "ceiling" in get_tool_result_text(result)
+
+    async def test_an_image_arrives_as_an_image_block(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+            png, "image/png"
+        )
+
+        result = await client.call_tool(
+            "page_read_attachment",
+            {"page_id": 10, "file_id": 5},
+        )
+
+        # A native image block: vision-capable clients render it, models see
+        # it — an embedded blob would be opaque base64 to both.
+        assert result.structured_content is None
+        assert len(result.content) == 1
+        block = result.content[0]
+        assert isinstance(block, ImageContent)
+        assert block.mime_type == "image/png"
+        assert base64.b64decode(block.data) == png
+
+    @pytest.mark.parametrize(
+        ("magic_body", "expected_mime"),
+        [
+            (b"\x89PNG\r\n\x1a\n" + b"\x00" * 8, "image/png"),
+            (b"\xff\xd8\xff\xe0" + b"\x00" * 8, "image/jpeg"),
+            (b"GIF87a" + b"\x00" * 8, "image/gif"),
+            (b"GIF89a" + b"\x00" * 8, "image/gif"),
+            (b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image/webp"),
+        ],
+    )
+    async def test_an_image_without_a_mime_claim_is_recognized_by_magic(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+        magic_body: bytes,
+        expected_mime: str,
+    ) -> None:
+        # The wire says octet-stream; the bytes say image. The bytes win —
+        # otherwise the picture ships as an opaque blob for a header's lie.
+        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+            magic_body, "application/octet-stream"
+        )
+
+        result = await client.call_tool(
+            "page_read_attachment",
+            {"page_id": 10, "file_id": 5},
+        )
+
+        block = result.content[0]
+        assert isinstance(block, ImageContent)
+        assert block.mime_type == expected_mime
+        assert base64.b64decode(block.data) == magic_body
+
+    async def test_the_wire_mime_wins_over_the_magic_bytes(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # SVG is the case the magic table cannot see: plain XML bytes, image
+        # only per the header. The wire's image/* claim decides.
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg"/>'
+        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+            svg, "image/svg+xml"
+        )
+
+        result = await client.call_tool(
+            "page_read_attachment",
+            {"page_id": 10, "file_id": 5},
+        )
+
+        block = result.content[0]
+        assert isinstance(block, ImageContent)
+        assert block.mime_type == "image/svg+xml"
 
 
 class TestUserGetCurrent:

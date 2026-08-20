@@ -18,7 +18,7 @@ change lands. It complements, not replaces:
 ## The system at a glance
 
 `yandex-wiki-search-mcp` is an MCP server in front of the public Yandex Wiki
-HTTP API: 32 tools (10 read, 22 write), 2 resources, three transports (stdio,
+HTTP API: 33 tools (10 read, 23 write), 2 resources, three transports (stdio,
 streamable HTTP, SSE), one optional OAuth layer for multi-user HTTP
 deployments.
 
@@ -87,8 +87,9 @@ precedent).
   - The model validator enforces the invariants: exactly one of
     `WIKI_ORG_ID`/`WIKI_CLOUD_ORG_ID`, a token unless OAuth is on, the OAuth
     triple when it is. `include_local_uploads` is a property, not a field:
-    `page_upload_attachment` reads the *server's* filesystem, so it is only
-    offered outside multi-user OAuth deployments.
+    `page_upload_attachment` and `page_download_attachment` read and write
+    the *server's* filesystem, so they are only offered outside multi-user
+    OAuth deployments.
 
 ### MCP layer
 
@@ -129,8 +130,9 @@ precedent).
   it can never report a combination no request carries) and
   `wiki-mcp://yfm-cheatsheet`.
 - **`mcp_wiki/mcp/tools/`** — `page_read.py` (10 read tools), `page_write.py`
-  (22 write tools; registered only when `WIKI_READ_ONLY=false`, and
-  `page_upload_attachment` only when OAuth is off), `common.py` (locator
+  (23 write tools; registered only when `WIKI_READ_ONLY=false`, and the
+  local-filesystem pair — `page_upload_attachment`,
+  `page_download_attachment` — only when OAuth is off), `common.py` (locator
   resolution against the live API when a slug must become an id or vice
   versa). Write tools attach non-blocking `yfm_warnings` from `mcp_wiki/yfm.py`.
 - **`mcp_wiki/yfm.py`** — dependency-free YFM lint (warnings only, never
@@ -293,7 +295,7 @@ Things that are asserted nowhere (or only partially) and must be kept in sync
 by hand:
 
 - **Tool list**: `manifest.json` ↔ registered surface — test-pinned; README
-  tool tables and the "32 tools" claims in both READMEs are not.
+  tool tables and the "33 tools" claims in both READMEs are not.
 - **`page_search.content` semantics**: field description in
   `wiki/proto/types/pages.py`, the tool description in `page_read.py`, and
   `build_instructions()` — three copies, one truth.

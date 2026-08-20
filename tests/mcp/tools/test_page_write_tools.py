@@ -882,6 +882,59 @@ class TestPageWriteTools:
         assert get_tool_result_content(result)["attachments"][0]["name"] == "file.zip"
         mock_wiki_protocol.page_upload_attachment.assert_awaited_once()
 
+    async def test_page_download_attachment(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_download_attachment_to_path.return_value = {
+            "page_id": 10,
+            "file_id": 5,
+            "path": "/home/user/report.pdf",
+            "size_bytes": 2048,
+            "mime_type": "application/pdf",
+        }
+
+        result = await client.call_tool(
+            "page_download_attachment",
+            {"page_id": 10, "file_id": 5, "save_to": "/home/user/report.pdf"},
+        )
+
+        content = get_tool_result_content(result)
+        assert content["path"] == "/home/user/report.pdf"
+        assert content["size_bytes"] == 2048
+        args = mock_wiki_protocol.page_download_attachment_to_path.await_args
+        assert args.args[0] == 10
+        assert args.kwargs["file_id"] == 5
+        assert args.kwargs["save_to"] == "/home/user/report.pdf"
+        # Not passed explicitly, so the safe default must reach the client.
+        assert args.kwargs["overwrite"] is False
+
+    async def test_page_download_attachment_forwards_overwrite(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        mock_wiki_protocol.page_download_attachment_to_path.return_value = {
+            "page_id": 10,
+            "file_id": 5,
+            "path": "/home/user/report.pdf",
+            "size_bytes": 1,
+        }
+
+        await client.call_tool(
+            "page_download_attachment",
+            {
+                "page_id": 10,
+                "file_id": 5,
+                "save_to": "/home/user/report.pdf",
+                "overwrite": True,
+            },
+        )
+
+        args = mock_wiki_protocol.page_download_attachment_to_path.await_args
+        assert args.kwargs["overwrite"] is True
+
     async def test_page_edit_by_id(
         self,
         client: Client,

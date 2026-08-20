@@ -1,8 +1,11 @@
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from mcp_wiki.wiki.proto.common import YandexAuth
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentContent,
     AttachmentDeleteResponse,
+    AttachmentDownloadResult,
     AttachmentListResponse,
     AttachmentResultsResponse,
     ClonedPageRef,
@@ -326,9 +329,19 @@ class WikiProtocol(Protocol):
         page_id: int,
         *,
         file_id: int,
-        max_bytes: int | None = None,
+        max_bytes: int | Callable[[str | None], int] | None = None,
         auth: YandexAuth | None = None,
-    ) -> bytes: ...
+    ) -> AttachmentContent: ...
+
+    async def page_download_attachment_to_path(
+        self,
+        page_id: int,
+        *,
+        file_id: int,
+        save_to: str,
+        overwrite: bool = False,
+        auth: YandexAuth | None = None,
+    ) -> AttachmentDownloadResult: ...
 
     async def page_delete_attachment(
         self,

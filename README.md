@@ -19,7 +19,7 @@
 ![Demo: search a wiki page and summarize it via MCP](https://raw.githubusercontent.com/dlbolshov/yandex-wiki-search-mcp/main/docs/assets/demo_eng_small.gif)
 
 Connect Claude, Cursor, Windsurf, or any MCP client to **Yandex Wiki**: full-text search,
-pages, comments, attachments, and dynamic tables ("grids") — **32 tools** with typed schemas.
+pages, comments, attachments, and dynamic tables ("grids") — **33 tools** with typed schemas.
 
 *An unofficial project — not affiliated with or endorsed by Yandex.*
 
@@ -127,7 +127,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 
 ## Tools
 
-32 tools. All write tools disappear when `WIKI_READ_ONLY=true`.
+33 tools. All write tools disappear when `WIKI_READ_ONLY=true`.
 
 ### Search & read (10)
 
@@ -139,12 +139,12 @@ pip install "yandex-wiki-search-mcp<1.1"
 | `page_get_comments` | List page comments (`fetch_all` supported) |
 | `page_get_resources` | List page resources (attachments + grids) with server-side title search (`fetch_all` supported) |
 | `page_get_attachments` | List page attachments (`fetch_all` supported) |
-| `page_read_attachment` | Read an attachment's content straight into the conversation (nothing is saved anywhere) — text as text, small binaries as a base64 blob. Meant for text attachments: configs, CSVs, logs. Capped at 128 KiB to protect the model's context window; anything larger is refused before transfer with a pointer to `download_url` from `page_get_attachments` — the right path for images and PDFs anyway |
+| `page_read_attachment` | Read an attachment's content straight into the conversation (nothing is saved anywhere) — images as a native image block that vision-capable clients render, text as text, small binaries as a base64 blob. Capped before transfer to protect the model's context window: 128 KiB for text/binary, 1 MiB for images; anything larger is refused with a pointer to `page_download_attachment` or `download_url` from `page_get_attachments` |
 | `page_get_grids` | List grids attached to a page (`fetch_all` supported) |
 | `grid_get` | Get a grid by `grid_id` with row/column/revision filters |
 | `user_get_current` | Who am I — `username` and `home_cluster` (the caller's personal-section slug) |
 
-### Pages: write (11)
+### Pages: write (12)
 
 | Tool | What it does |
 |---|---|
@@ -159,6 +159,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 | `page_delete` | Delete a page and receive a recovery token |
 | `page_recover` | Recover a deleted page by recovery token |
 | `page_upload_attachment` | Upload a local file in chunks and attach it to a page — not registered under `OAUTH_ENABLED=true`, where "local" would mean the shared server's filesystem |
+| `page_download_attachment` | Download an attachment to a local file — streamed to disk with no size cap, nothing enters the conversation; refuses to overwrite unless asked. Gated the same way as `page_upload_attachment` under OAuth |
 
 ### Grids: write (11)
 
@@ -200,7 +201,7 @@ the official hosted server's tool list captured live from `mcp.wiki.yandex.net`
 | Pages: create / update / append / delete + recover | ✅ all, plus partial edits via text replacement (`page_edit`) | partial — no append / recover; has partial edits via text replacement | ✅ all | partial — no append / recover | partial — no recover |
 | Pages: clone to a new slug | ✅ `page_clone` | ❌ | ❌ | ❌ | ✅ |
 | Grids: write tools | ✅ 11 | ✅ 12, incl. column update + row pin/color | ✅ 11 | ❌ read-only | ✅ 11, incl. clone |
-| Comments, attachment upload | ✅ incl. deletion and attachment download | comments ✅ / upload ❌ (download + preview instead) | ✅ | ❌ | ❌ |
+| Comments, attachment upload | ✅ incl. deletion, inline image preview, and download to disk | comments ✅ / upload ❌ (download + preview instead) | ✅ | ❌ | ❌ |
 | Server-side read-only mode | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Typed output schemas + tool annotations | ✅ | ❌ | ❌ | ❌ | ❌ tools return plain strings |
 | YFM helpers | ✅ syntax cheat sheet resource + `yfm_warnings` in write tools | ❌ | ❌ | ❌ | ✅ Markdown→YFM converter + page-tree cache, prompt templates |
@@ -267,9 +268,9 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 
 With `OAUTH_ENABLED=true` the server becomes an OAuth provider: each MCP user
 authorizes with their own Yandex account, and requests to the Wiki API are made with
-their personal token. `page_upload_attachment` is not registered in this mode: it
-reads files from the machine the server runs on, which is not the caller's machine
-in a shared deployment.
+their personal token. `page_upload_attachment` and `page_download_attachment` are
+not registered in this mode: they read and write files on the machine the server
+runs on, which is not the caller's machine in a shared deployment.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -385,7 +386,7 @@ weekly when the `DRIFT_*` repository secrets are configured
 This project began as a fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
 (`ya-yandex-wiki-mcp`) by Aleksandr Ponkratov, an excellent, well-tested Python MCP server
 for the Yandex Wiki API, licensed under Apache-2.0. It has since grown its own surface —
-full-text search, typed input *and* output schemas across all 32 tools, YFM helpers,
+full-text search, typed input *and* output schemas across all 33 tools, YFM helpers,
 cursor draining, multi-user OAuth and a live contract sweep against the API — while the
 original copyright and license are preserved (see [LICENSE](LICENSE) and [NOTICE](NOTICE)).
 
