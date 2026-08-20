@@ -158,6 +158,27 @@ class ResponseTooLarge(WikiError):
         self.max_bytes = max_bytes
 
 
+class WikiLocalFileError(WikiError):
+    """A local path the caller named cannot be used.
+
+    The attachment tools are the only ones that touch the caller's filesystem,
+    and both of them used to signal this differently: upload raised a builtin
+    ``FileNotFoundError``, download a ``WikiOperationError`` — a class whose own
+    contract is "a deferred Wiki operation failed *after* every HTTP exchange
+    succeeded", which a pre-flight check on a local path plainly is not. One
+    ``WikiError`` subclass for both keeps `except WikiError` sufficient, which
+    is what every layer above the client relies on.
+
+    ``cause`` carries the original OSError when there was one, so the errno is
+    not lost when a write fails halfway through.
+    """
+
+    def __init__(self, message: str, *, cause: OSError | None = None) -> None:
+        detail = f"{message} ({cause.strerror})" if cause is not None else message
+        super().__init__(detail)
+        self.cause = cause
+
+
 def build_api_error(status: int, payload: bytes) -> WikiApiError:
     """Build a WikiApiError from an HTTP status and a raw response body.
 

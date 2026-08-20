@@ -139,7 +139,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 | `page_get_comments` | List page comments (`fetch_all` supported) |
 | `page_get_resources` | List page resources (attachments + grids) with server-side title search (`fetch_all` supported) |
 | `page_get_attachments` | List page attachments (`fetch_all` supported) |
-| `page_read_attachment` | Read an attachment's content straight into the conversation (nothing is saved anywhere) — images as a native image block that vision-capable clients render, text as text, small binaries as a base64 blob. Capped before transfer to protect the model's context window: 128 KiB for text/binary, 1 MiB for images; anything larger is refused with a pointer to `page_download_attachment` or `download_url` from `page_get_attachments` |
+| `page_read_attachment` | Read an attachment's content straight into the conversation (nothing is saved anywhere) — PNG/JPEG/GIF/WebP as a native image block that vision-capable clients render, text as text (SVG included: it is XML, and an image block a vision API cannot decode fails the host's next call), other binaries as a base64 blob. The format is decided by the file's magic bytes, not by the wire's claim. Capped to protect the model's context window: 128 KiB for text/binary, 2 MiB for images; anything larger is refused with a pointer to `page_download_attachment` or `download_url` from `page_get_attachments` |
 | `page_get_grids` | List grids attached to a page (`fetch_all` supported) |
 | `grid_get` | Get a grid by `grid_id` with row/column/revision filters |
 | `user_get_current` | Who am I — `username` and `home_cluster` (the caller's personal-section slug) |
@@ -159,7 +159,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 | `page_delete` | Delete a page and receive a recovery token |
 | `page_recover` | Recover a deleted page by recovery token |
 | `page_upload_attachment` | Upload a local file in chunks and attach it to a page — not registered under `OAUTH_ENABLED=true`, where "local" would mean the shared server's filesystem |
-| `page_download_attachment` | Download an attachment to a local file — streamed to disk with no size cap, nothing enters the conversation; refuses to overwrite unless asked. Gated the same way as `page_upload_attachment` under OAuth |
+| `page_download_attachment` | Download an attachment to a local file — streamed to disk with no size cap, nothing enters the conversation. Written atomically (`.part` → fsync → rename), refuses to overwrite unless asked, and lands with the permissions a normal write would give (`0666 & ~umask`, never executable); replacing a file keeps that file's own mode. Gated the same way as `page_upload_attachment` under OAuth |
 
 ### Grids: write (11)
 

@@ -184,14 +184,19 @@ client → /token ──► our code → Yandex access/refresh token pair, store
   fields at serialization (token diet for LLM output) and strips `title` noise
   from generated JSON schemas; `DynamicWikiModel` additionally keeps unknown
   keys through round-trips. Grid cell/row/column shapes live here too.
-- **`custom/client.py`** — `aiohttp` client. One `_request()` funnel applies
+- **`custom/client.py`** — `aiohttp` client. One `_request_raw()` funnel applies
   auth headers (`OAuth`/`Bearer` scheme, IAM, or per-request token),
   organization headers via `select_org()`, retries idempotent failures
   (exponential backoff with equal jitter, `Retry-After` honored up to a cap,
   grid `409 CONFLICTING_OPERATION` retried as a lock rather than an error),
-  and maps failures to the error taxonomy. Also owns the multi-step flows:
-  upload sessions (create → parts → finish → attach) and `page_clone`'s
-  deferred-operation polling.
+  and maps failures to the error taxonomy. It also carries a per-response
+  byte ceiling (resolved from the reply's Content-Type, since the download
+  endpoint declares no Content-Length) and a `body_sink` that streams a
+  response straight to a caller-supplied consumer instead of memory;
+  `_request()` is the thin bytes-only wrapper the other endpoints use.
+  Also owns the multi-step flows: upload sessions (create → parts → finish
+  → attach), `page_clone`'s deferred-operation polling, and the atomic
+  download-to-disk (`.part` file → fsync → link/replace).
 - **`custom/errors.py`** — the taxonomy. `WikiError` → `WikiApiError`
   (HTTP-level, `build_api_error()` picks the subclass; `GridConflict` for the
   grid lock) plus `PageNotFound`/`GridNotFound`, `WikiOperationError` (a

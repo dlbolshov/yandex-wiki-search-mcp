@@ -29,7 +29,11 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin", "linux", "win32"],
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ],
     "runtimes": {
       "python": ">=3.11"
     }
@@ -69,7 +73,7 @@
     },
     {
       "name": "page_read_attachment",
-      "description": "Read a page attachment's content into the conversation as an embedded resource: text as text, other files base64-encoded (up to 128 KiB)"
+      "description": "Read a page attachment into the conversation: PNG/JPEG/GIF/WebP as a native image block, text (SVG included) as text, other binaries base64-encoded (128 KiB, or 2 MiB for images)"
     },
     {
       "name": "user_get_current",
@@ -165,7 +169,7 @@
     },
     {
       "name": "page_download_attachment",
-      "description": "Download a Yandex Wiki page attachment to a local file"
+      "description": "Download a Yandex Wiki page attachment to a local file, streamed and uncapped; refuses to replace an existing file unless asked"
     }
   ],
   "user_config": {

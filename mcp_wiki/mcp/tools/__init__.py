@@ -8,7 +8,16 @@ from mcp_wiki.settings import Settings
 
 
 def register_all_tools(settings: Settings, mcp: MCPServer[Any]) -> None:
-    register_page_read_tools(mcp)
+    # page_read_attachment points oversized reads at page_download_attachment,
+    # which exists only when the write tools are registered AND local file
+    # access is on. Passing the same condition keeps the read tool from
+    # advertising a tool this server does not offer.
+    register_page_read_tools(
+        mcp,
+        include_local_downloads=(
+            not settings.wiki_read_only and settings.include_local_uploads
+        ),
+    )
     if not settings.wiki_read_only:
         register_page_write_tools(
             mcp,

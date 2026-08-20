@@ -188,14 +188,19 @@ conftest уже импортировал пакет в рабочем поряд
   шум `title` из генерируемых JSON-схем; `DynamicWikiModel` вдобавок сохраняет
   неизвестные ключи при round-trip. Формы ячеек/строк/колонок гридов тоже
   живут здесь.
-- **`custom/client.py`** — `aiohttp`-клиент. Единая воронка `_request()`
+- **`custom/client.py`** — `aiohttp`-клиент. Единая воронка `_request_raw()`
   применяет auth-заголовки (схема `OAuth`/`Bearer`, IAM или per-request
   токен), заголовки организации через `select_org()`, ретраит идемпотентные
   сбои (экспоненциальный бэкофф с equal jitter, `Retry-After` уважается до
   потолка, гридовый `409 CONFLICTING_OPERATION` ретраится как лок, а не
-  ошибка) и маппит сбои в таксономию ошибок. Также владеет многошаговыми флоу:
-  upload-сессии (create → parts → finish → attach) и поллинг отложенной
-  операции `page_clone`.
+  ошибка) и маппит сбои в таксономию ошибок. Она же несёт потолок на тело
+  ответа (выбирается по Content-Type ответа — download-эндпоинт не шлёт
+  Content-Length) и `body_sink`, который стримит ответ прямо в переданный
+  потребитель, минуя память; `_request()` — тонкая обёртка «только байты»
+  для остальных эндпоинтов. Также владеет многошаговыми флоу: upload-сессии
+  (create → parts → finish → attach), поллинг отложенной операции
+  `page_clone` и атомарная запись загрузки на диск (`.part` → fsync →
+  link/replace).
 - **`custom/errors.py`** — таксономия. `WikiError` → `WikiApiError`
   (HTTP-уровень, `build_api_error()` выбирает подкласс; `GridConflict` для
   гридового лока) плюс `PageNotFound`/`GridNotFound`, `WikiOperationError`

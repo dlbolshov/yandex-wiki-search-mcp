@@ -223,7 +223,9 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   works too, `DELETE /pages/{id}/attachments/{fid}` answers 204. Exposed as
   `page_read_attachment` (a content block: images as a native image block,
   text inline, otherwise a base64 blob — capped at 128 KiB for text/binary
-  and 1 MiB for images), `page_download_attachment` (streams to a local
+  and 2 MiB for images; the four renderable formats are recognized by magic
+  bytes, never by the header, because an image block the vision API cannot
+  decode fails the host's next model call), `page_download_attachment` (streams to a local
   file, uncapped) and `page_delete_attachment`.
 - **The download endpoint declares a precise per-file `Content-Type`
   (`image/png`, `text/markdown; charset=UTF-8`, …) but no `Content-Length`

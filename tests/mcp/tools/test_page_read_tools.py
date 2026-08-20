@@ -788,7 +788,7 @@ class TestPageReadAttachment:
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+        mock_wiki_protocol.page_read_attachment_bytes.return_value = AttachmentContent(
             b"col1;col2\na;b\n", "text/csv"
         )
 
@@ -806,7 +806,7 @@ class TestPageReadAttachment:
         assert isinstance(block.resource, TextResourceContents)
         assert block.resource.text == "col1;col2\na;b\n"
         assert str(block.resource.uri) == "wiki-mcp://pages/10/attachments/5"
-        args = mock_wiki_protocol.page_download_attachment.await_args
+        args = mock_wiki_protocol.page_read_attachment_bytes.await_args
         assert args.args[0] == 10
         assert args.kwargs["file_id"] == 5
         # The ceiling reaches the client as a mime-keyed callable, enforced
@@ -814,9 +814,14 @@ class TestPageReadAttachment:
         # images the vision budget.
         ceiling = args.kwargs["max_bytes"]
         assert ceiling("text/csv") == MAX_INLINE_ATTACHMENT_BYTES
-        assert ceiling(None) == MAX_INLINE_ATTACHMENT_BYTES
         assert ceiling("image/png") == MAX_INLINE_IMAGE_BYTES
-        assert ceiling("IMAGE/PNG; foo=bar") == MAX_INLINE_IMAGE_BYTES
+        # An unrenderable image subtype is not an image for our purposes, so
+        # it keeps the small budget and is refused before transfer.
+        assert ceiling("image/svg+xml") == MAX_INLINE_ATTACHMENT_BYTES
+        # "the server said nothing" and octet-stream both get the image budget:
+        # only bytes that were read can reach the magic-byte fallback.
+        assert ceiling(None) == MAX_INLINE_IMAGE_BYTES
+        assert ceiling("application/octet-stream") == MAX_INLINE_IMAGE_BYTES
 
     async def test_binary_content_arrives_as_a_base64_blob(
         self,
@@ -828,7 +833,7 @@ class TestPageReadAttachment:
         mock_wiki_protocol.page_get_by_slug.return_value = WikiPage.model_construct(
             id=10
         )
-        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+        mock_wiki_protocol.page_read_attachment_bytes.return_value = AttachmentContent(
             blob, "application/zip"
         )
 
@@ -851,7 +856,7 @@ class TestPageReadAttachment:
         # bare decode() succeeds and would hand the model NUL-riddled mojibake
         # labelled "text".
         blob = "hello".encode("utf-16-le")
-        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+        mock_wiki_protocol.page_read_attachment_bytes.return_value = AttachmentContent(
             blob, "application/octet-stream"
         )
 
@@ -873,7 +878,7 @@ class TestPageReadAttachment:
         # The refusal now happens in the client, before the body is read, so
         # the tool surfaces the client's error rather than measuring bytes it
         # already holds.
-        mock_wiki_protocol.page_download_attachment.side_effect = ResponseTooLarge(
+        mock_wiki_protocol.page_read_attachment_bytes.side_effect = ResponseTooLarge(
             "GET",
             "v1/pages/10/attachments/5/download",
             9_000_000,
@@ -894,7 +899,7 @@ class TestPageReadAttachment:
         mock_wiki_protocol: AsyncMock,
     ) -> None:
         png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
-        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+        mock_wiki_protocol.page_read_attachment_bytes.return_value = AttachmentContent(
             png, "image/png"
         )
 
@@ -931,7 +936,7 @@ class TestPageReadAttachment:
     ) -> None:
         # The wire says octet-stream; the bytes say image. The bytes win —
         # otherwise the picture ships as an opaque blob for a header's lie.
-        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+        mock_wiki_protocol.page_read_attachment_bytes.return_value = AttachmentContent(
             magic_body, "application/octet-stream"
         )
 
@@ -945,15 +950,18 @@ class TestPageReadAttachment:
         assert block.mime_type == expected_mime
         assert base64.b64decode(block.data) == magic_body
 
-    async def test_the_wire_mime_wins_over_the_magic_bytes(
+    async def test_an_unrenderable_image_mime_travels_as_text(
         self,
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        # SVG is the case the magic table cannot see: plain XML bytes, image
-        # only per the header. The wire's image/* claim decides.
+        # An ImageContent block the vision API cannot decode does not degrade
+        # to "the model sees nothing" — the host's next call fails with
+        # `Could not process image` and the retry loop kills the session
+        # (anthropics/claude-code#28279). SVG is XML, so text is both safe and
+        # more useful.
         svg = b'<svg xmlns="http://www.w3.org/2000/svg"/>'
-        mock_wiki_protocol.page_download_attachment.return_value = AttachmentContent(
+        mock_wiki_protocol.page_read_attachment_bytes.return_value = AttachmentContent(
             svg, "image/svg+xml"
         )
 
@@ -963,8 +971,73 @@ class TestPageReadAttachment:
         )
 
         block = result.content[0]
+        assert isinstance(block, EmbeddedResource)
+        assert isinstance(block.resource, TextResourceContents)
+        assert block.resource.text == svg.decode()
+
+    @pytest.mark.parametrize(
+        "unrenderable", ["image/bmp", "image/tiff", "image/x-icon", "image/heic"]
+    )
+    async def test_other_unrenderable_image_subtypes_do_not_become_blocks(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+        unrenderable: str,
+    ) -> None:
+        body = b"\x00\x01\x02 not a renderable image"
+        mock_wiki_protocol.page_read_attachment_bytes.return_value = AttachmentContent(
+            body, unrenderable
+        )
+
+        result = await client.call_tool(
+            "page_read_attachment",
+            {"page_id": 10, "file_id": 5},
+        )
+
+        assert not isinstance(result.content[0], ImageContent)
+
+    async def test_an_octet_stream_image_above_the_text_ceiling_still_arrives(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # The whole point of the magic-byte fallback: a real PNG served as
+        # octet-stream, larger than the text ceiling. Picking the ceiling from
+        # the header alone would have refused it before the bytes could speak.
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * (MAX_INLINE_ATTACHMENT_BYTES + 1)
+        mock_wiki_protocol.page_read_attachment_bytes.return_value = AttachmentContent(
+            png, "application/octet-stream"
+        )
+
+        result = await client.call_tool(
+            "page_read_attachment",
+            {"page_id": 10, "file_id": 5},
+        )
+
+        block = result.content[0]
         assert isinstance(block, ImageContent)
-        assert block.mime_type == "image/svg+xml"
+        assert block.mime_type == "image/png"
+
+    async def test_oversized_non_image_under_the_image_budget_is_refused(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # Read under the image budget because the mime was uninformative, then
+        # found not to be an image: refused here, with a usable remedy.
+        mock_wiki_protocol.page_read_attachment_bytes.return_value = AttachmentContent(
+            b"t" * (MAX_INLINE_ATTACHMENT_BYTES + 1), "application/octet-stream"
+        )
+
+        result = await client.call_tool(
+            "page_read_attachment",
+            {"page_id": 10, "file_id": 5},
+        )
+
+        assert result.is_error is True
+        text = get_tool_result_text(result)
+        assert "page_read_attachment_bytes" in text
+        assert "download_url" in text
 
 
 class TestUserGetCurrent:

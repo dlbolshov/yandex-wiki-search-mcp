@@ -887,7 +887,7 @@ class TestPageWriteTools:
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_download_attachment_to_path.return_value = {
+        mock_wiki_protocol.page_download_attachment.return_value = {
             "page_id": 10,
             "file_id": 5,
             "path": "/home/user/report.pdf",
@@ -903,7 +903,7 @@ class TestPageWriteTools:
         content = get_tool_result_content(result)
         assert content["path"] == "/home/user/report.pdf"
         assert content["size_bytes"] == 2048
-        args = mock_wiki_protocol.page_download_attachment_to_path.await_args
+        args = mock_wiki_protocol.page_download_attachment.await_args
         assert args.args[0] == 10
         assert args.kwargs["file_id"] == 5
         assert args.kwargs["save_to"] == "/home/user/report.pdf"
@@ -915,7 +915,7 @@ class TestPageWriteTools:
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_download_attachment_to_path.return_value = {
+        mock_wiki_protocol.page_download_attachment.return_value = {
             "page_id": 10,
             "file_id": 5,
             "path": "/home/user/report.pdf",
@@ -932,7 +932,7 @@ class TestPageWriteTools:
             },
         )
 
-        args = mock_wiki_protocol.page_download_attachment_to_path.await_args
+        args = mock_wiki_protocol.page_download_attachment.await_args
         assert args.kwargs["overwrite"] is True
 
     async def test_page_edit_by_id(

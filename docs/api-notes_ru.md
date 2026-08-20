@@ -229,7 +229,9 @@ OAuth-скоупы, которые не проверяются. Эти заме�
   `DELETE /pages/{id}/attachments/{fid}` отвечает 204. Выведено как
   `page_read_attachment` (контентный блок: картинки нативным image-блоком,
   текст прямо в ответе, иначе base64-блоб — кап 128 KiB для текста/бинаря и
-  1 MiB для картинок), `page_download_attachment` (поток в локальный файл,
+  2 MiB для картинок; четыре рендерящихся формата опознаются по magic-байтам,
+  а не по заголовку: image-блок, который vision API не декодирует, роняет
+  следующий вызов модели у хоста), `page_download_attachment` (поток в локальный файл,
   без капа) и `page_delete_attachment`.
 - **Download-эндпоинт декларирует точный пофайловый `Content-Type`
   (`image/png`, `text/markdown; charset=UTF-8`, …), но не `Content-Length` и

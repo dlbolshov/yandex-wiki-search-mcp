@@ -500,10 +500,13 @@ class AttachmentContent(NamedTuple):
     (text, image, or blob), and the decision needs the wire's mime claim.
     The download endpoint sends a precise Content-Type per file (image/png,
     text/plain — probed 2026-08-19), so the header is signal, not boilerplate.
+    Spelled `mimetype` to match `WikiAttachment.mimetype`, which the attachment
+    listing has always returned: one attribute name for one concept across the
+    tool surface.
     """
 
     content: bytes
-    mime_type: str | None
+    mimetype: str | None
 
 
 class AttachmentDownloadResult(BaseWikiModel):
@@ -519,7 +522,7 @@ class AttachmentDownloadResult(BaseWikiModel):
     file_id: int
     path: str
     size_bytes: int
-    mime_type: str | None = None
+    mimetype: str | None = None
 
 
 class UserOrg(BaseWikiModel):

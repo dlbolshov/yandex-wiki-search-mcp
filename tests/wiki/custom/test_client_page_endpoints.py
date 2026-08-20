@@ -8,7 +8,9 @@ forks.
 """
 
 import asyncio
+import os
 import re
+import stat
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -28,7 +30,7 @@ from mcp_wiki.wiki.custom.errors import (
     PageNotFound,
     ResponseTooLarge,
     WikiApiError,
-    WikiOperationError,
+    WikiLocalFileError,
 )
 from mcp_wiki.wiki.proto.common import YandexAuth
 from mcp_wiki.wiki.proto.types.pages import AttachmentDeleteResponse
@@ -322,12 +324,12 @@ class TestPageDownloadAttachment:
                 body=blob,
                 content_type="image/png",
             )
-            reply = await wiki_client.page_download_attachment(42, file_id=5)
+            reply = await wiki_client.page_read_attachment_bytes(42, file_id=5)
 
         # The header rides along: the tool above decides how the bytes
         # travel (image block vs text vs blob) and needs the wire's claim.
         assert reply.content == blob
-        assert reply.mime_type == "image/png"
+        assert reply.mimetype == "image/png"
 
     async def test_a_callable_ceiling_is_picked_by_the_content_type(
         self, wiki_client: WikiClient
@@ -342,7 +344,7 @@ class TestPageDownloadAttachment:
         url = "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download"
         with aioresponses() as mocked:
             mocked.get(url, body=b"x" * 10, content_type="image/png")
-            reply = await wiki_client.page_download_attachment(
+            reply = await wiki_client.page_read_attachment_bytes(
                 42, file_id=5, max_bytes=ceiling
             )
         assert reply.content == b"x" * 10
@@ -350,7 +352,7 @@ class TestPageDownloadAttachment:
         with aioresponses() as mocked:
             mocked.get(url, body=b"x" * 10, content_type="text/plain")
             with pytest.raises(ResponseTooLarge):
-                await wiki_client.page_download_attachment(
+                await wiki_client.page_read_attachment_bytes(
                     42, file_id=5, max_bytes=ceiling
                 )
 
@@ -366,7 +368,7 @@ class TestPageDownloadAttachment:
                 body=b"GIF89a...",
             )
             with pytest.raises(AttachmentNotFound, match="file 5 on page 42"):
-                await wiki_client.page_download_attachment(42, file_id=5)
+                await wiki_client.page_read_attachment_bytes(42, file_id=5)
 
 
 async def _capture_too_large(response: ClientResponse) -> ResponseTooLarge | None:
@@ -452,8 +454,8 @@ class TestDownloadCeiling:
                 "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
                 body=b"x" * 10,
             )
-            reply = await wiki_client.page_download_attachment(
-                42, file_id=5, max_bytes=10
+            reply = await wiki_client.page_read_attachment_bytes(
+                42, file_id=5, max_bytes=lambda _: 10
             )
             assert reply.content == b"x" * 10
 
@@ -498,7 +500,9 @@ class TestDownloadCeiling:
                 payload={"error_code": "FORBIDDEN", "debug_message": "nope"},
             )
             with pytest.raises(WikiApiError, match="FORBIDDEN"):
-                await wiki_client.page_download_attachment(42, file_id=5, max_bytes=1)
+                await wiki_client.page_read_attachment_bytes(
+                    42, file_id=5, max_bytes=lambda _: 1
+                )
 
     async def test_a_huge_error_body_stops_at_the_error_ceiling(self) -> None:
         response, feed_the_rest = _live_stream(b"y" * 8, later=b"y" * 8)
@@ -516,7 +520,7 @@ class TestDownloadCeiling:
                 "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download",
                 body=b"x" * 100,
             )
-            reply = await wiki_client.page_download_attachment(42, file_id=5)
+            reply = await wiki_client.page_read_attachment_bytes(42, file_id=5)
             assert len(reply.content) == 100
 
     async def test_a_download_is_not_retried(self, wiki_client: WikiClient) -> None:
@@ -530,7 +534,7 @@ class TestDownloadCeiling:
                 repeat=True,
             )
             with pytest.raises(WikiApiError):
-                await wiki_client.page_download_attachment(42, file_id=5)
+                await wiki_client.page_read_attachment_bytes(42, file_id=5)
 
         capture.assert_request_count(1)
 
@@ -544,6 +548,131 @@ def _dir_names(path: Path) -> list[str]:
     return [p.name for p in path.iterdir()]
 
 
+class TestDownloadFilePermissions:
+    async def test_a_new_file_gets_the_umask_default_not_0600(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # tempfile.mkstemp hardcodes 0600 in defiance of the umask, and
+        # os.replace moves the inode, so that mode would become the delivered
+        # file's — every download owner-only. os.open with 0o666 lets the
+        # kernel apply the umask, exactly like a plain open(path, "wb").
+        target = tmp_path / "fresh.bin"
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(target)
+            )
+
+        umask = os.umask(0o022)
+        os.umask(umask)
+        assert stat.S_IMODE(target.stat().st_mode) == 0o666 & ~umask
+
+    async def test_a_download_is_never_executable(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # 0o666 carries no execute bit, so a downloaded script or binary
+        # cannot run until the user chmods it deliberately.
+        target = tmp_path / "script.sh"
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"#!/bin/sh\necho hi\n")
+            await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(target)
+            )
+
+        assert not stat.S_IMODE(target.stat().st_mode) & 0o111
+
+    async def test_overwrite_keeps_the_replaced_file_mode(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # Writing over a file does not change its permissions, and neither
+        # should this: someone set 0640 on purpose.
+        target = tmp_path / "kept.bin"
+        target.write_bytes(b"old")
+        target.chmod(0o640)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"new")
+            await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(target), overwrite=True
+            )
+
+        assert target.read_bytes() == b"new"
+        assert stat.S_IMODE(target.stat().st_mode) == 0o640
+
+
+class TestDownloadTargetErrors:
+    async def test_a_directory_target_is_refused_before_any_transfer(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # Path.exists() is true for a directory, so this used to answer "pass
+        # overwrite=true" — advice that then transferred the whole file and
+        # died on a raw IsADirectoryError.
+        target = tmp_path / "adir"
+        target.mkdir()
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="is a directory"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(target)
+                )
+
+        assert not [n for n in _dir_names(tmp_path) if n.endswith(".part")]
+
+    async def test_a_directory_target_is_refused_with_overwrite_too(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "adir"
+        target.mkdir()
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="is a directory"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(target), overwrite=True
+                )
+
+    async def test_a_parent_that_is_a_file_is_a_wiki_error(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        blocker = tmp_path / "afile"
+        blocker.write_bytes(b"x")
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(
+                WikiLocalFileError, match="a parent path component is a file"
+            ):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(blocker / "child.bin")
+                )
+
+    async def test_a_very_long_target_name_still_works(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # The .part prefix used to be the whole target name plus 14 bytes,
+        # which overflows NAME_MAX for a legal 245-character target.
+        target = tmp_path / ("x" * 245 + ".bin")
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            result = await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(target)
+            )
+
+        assert target.read_bytes() == b"payload"
+        assert result.size_bytes == 7
+
+    async def test_a_failed_download_leaves_no_directories_behind(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # The .part file and the parent tree are created on the first chunk,
+        # so a request that never delivers a body does not touch the disk.
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, status=404, body=b"GIF89a")
+            with pytest.raises(AttachmentNotFound):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "a" / "b" / "c" / "r.pdf")
+                )
+
+        assert _dir_names(tmp_path) == []
+
+
 class TestPageDownloadAttachmentToPath:
     async def test_streams_the_body_to_the_target_file(
         self, wiki_client: WikiClient, tmp_path: Path
@@ -554,7 +683,7 @@ class TestPageDownloadAttachmentToPath:
         target = tmp_path / "out" / "report.pdf"
         with aioresponses() as mocked:
             mocked.get(DOWNLOAD_URL, body=blob, content_type="application/pdf")
-            result = await wiki_client.page_download_attachment_to_path(
+            result = await wiki_client.page_download_attachment(
                 42, file_id=5, save_to=str(target)
             )
 
@@ -563,7 +692,7 @@ class TestPageDownloadAttachmentToPath:
         assert result.file_id == 5
         assert result.path == str(target.resolve())
         assert result.size_bytes == len(blob)
-        assert result.mime_type == "application/pdf"
+        assert result.mimetype == "application/pdf"
         # The temp file was renamed, not left beside the result.
         assert _dir_names(target.parent) == [target.name]
 
@@ -575,8 +704,8 @@ class TestPageDownloadAttachmentToPath:
         # No route is mocked: had the client touched the wire at all,
         # aioresponses would fail the request with a connection error, and
         # the assertion below would see the wrong exception type.
-        with aioresponses(), pytest.raises(WikiOperationError, match="already exists"):
-            await wiki_client.page_download_attachment_to_path(
+        with aioresponses(), pytest.raises(WikiLocalFileError, match="already exists"):
+            await wiki_client.page_download_attachment(
                 42, file_id=5, save_to=str(target)
             )
         assert target.read_bytes() == b"old"
@@ -588,7 +717,7 @@ class TestPageDownloadAttachmentToPath:
         target.write_bytes(b"old")
         with aioresponses() as mocked:
             mocked.get(DOWNLOAD_URL, body=b"new bytes")
-            await wiki_client.page_download_attachment_to_path(
+            await wiki_client.page_download_attachment(
                 42, file_id=5, save_to=str(target), overwrite=True
             )
         assert target.read_bytes() == b"new bytes"
@@ -600,7 +729,7 @@ class TestPageDownloadAttachmentToPath:
         with aioresponses() as mocked:
             mocked.get(DOWNLOAD_URL, status=404, body=b"GIF89a...")
             with pytest.raises(AttachmentNotFound):
-                await wiki_client.page_download_attachment_to_path(
+                await wiki_client.page_download_attachment(
                     42, file_id=5, save_to=str(target)
                 )
         # Neither the target nor an orphaned .part file.
@@ -620,7 +749,7 @@ class TestPageDownloadAttachmentToPath:
                 payload={"error_code": "INTERNAL", "debug_message": "boom"},
             )
             with pytest.raises(WikiApiError):
-                await wiki_client.page_download_attachment_to_path(
+                await wiki_client.page_download_attachment(
                     42, file_id=5, save_to=str(target), overwrite=True
                 )
         assert target.read_bytes() == b"precious"
@@ -635,7 +764,7 @@ class TestPageDownloadAttachmentToPath:
         monkeypatch.setenv("HOME", str(tmp_path))
         with aioresponses() as mocked:
             mocked.get(DOWNLOAD_URL, body=b"x")
-            result = await wiki_client.page_download_attachment_to_path(
+            result = await wiki_client.page_download_attachment(
                 42, file_id=5, save_to="~/tilde.bin"
             )
         assert (tmp_path / "tilde.bin").read_bytes() == b"x"
@@ -650,7 +779,7 @@ class TestPageDownloadAttachmentToPath:
         with aioresponses() as mocked:
             mocked.get(DOWNLOAD_URL, callback=capture.callback, repeat=True)
             with pytest.raises(WikiApiError):
-                await wiki_client.page_download_attachment_to_path(
+                await wiki_client.page_download_attachment(
                     42, file_id=5, save_to=str(tmp_path / "f.bin")
                 )
         capture.assert_request_count(1)

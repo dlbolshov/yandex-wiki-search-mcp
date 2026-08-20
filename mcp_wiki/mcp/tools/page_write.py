@@ -1115,7 +1115,7 @@ def register_page_write_tools(
         ] = False,
     ) -> AttachmentDownloadResult:
         resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        return await get_wiki(ctx).page_download_attachment_to_path(
+        return await get_wiki(ctx).page_download_attachment(
             resolved_page_id,
             file_id=file_id,
             save_to=save_to,

@@ -324,16 +324,16 @@ class WikiProtocol(Protocol):
         auth: YandexAuth | None = None,
     ) -> DeleteCommentResponse: ...
 
-    async def page_download_attachment(
+    async def page_read_attachment_bytes(
         self,
         page_id: int,
         *,
         file_id: int,
-        max_bytes: int | Callable[[str | None], int] | None = None,
+        max_bytes: Callable[[str | None], int] | None = None,
         auth: YandexAuth | None = None,
     ) -> AttachmentContent: ...
 
-    async def page_download_attachment_to_path(
+    async def page_download_attachment(
         self,
         page_id: int,
         *,
