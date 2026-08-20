@@ -316,7 +316,7 @@ MCP-сервер `mcp.wiki.yandex.net` (`wiki-mcp-server` 1.28.1 — 31 тулз
       download-эндпоинта (проба 2026-08-19: тип точный пофайловый, но без
       Content-Length — кап выбирается по mime через callable `max_bytes`),
       fallback — magic bytes PNG/JPEG/GIF/WebP. Кап для картинок отдельный
-      (1 MiB: у vision тарификация по пикселям, не по base64-символам).
+      (2 MiB: у vision тарификация по пикселям, не по base64-символам).
       PDF это не спасает — его путь download-to-disk или `download_url` —
       сделано 2026-08-19
 
@@ -476,9 +476,20 @@ MCP-сервер `mcp.wiki.yandex.net` (`wiki-mcp-server` 1.28.1 — 31 тулз
   `Content-Length`/`Content-Disposition` (chunked при любом размере) — поэтому
   `max_bytes` клиента стал int-or-callable (кап выбирается по mime до чтения
   тела), а размер по-прежнему ловится подсчётом на потоке. `page_read_attachment`
-  отдаёт `image/*` нативным `ImageContent` (кап 1 MiB против 128 KiB у
+  отдаёт `image/*` нативным `ImageContent` (кап 2 MiB против 128 KiB у
   текста/бинаря; провод → magic bytes PNG/JPEG/GIF/WebP как fallback, SVG — по
-  заголовку). Новая `page_download_attachment`: стрим в файл 64 KiB-чанками,
-  атомарная запись (`.part` + fsync + `os.replace`), отказ без `overwrite=true`
-  до запроса, `body_sink` в `_request_raw` запрещён на ретраябельных вызовах.
-  Поверхность 32 → 33 тулзы.
+  заголовку). Новая `page_download_attachment`: стрим в файл 1 MiB-чанками,
+  атомарная запись (`.part` + fsync + link/unlink; `os.replace` при
+  `overwrite=true`), отказ без `overwrite=true` до запроса, `body_sink` в
+  `_request_raw` запрещён на ретраябельных вызовах. Поверхность 32 → 33 тулзы.
+- 2026-08-20 (ревью attachments, второй заход): download-to-disk был мёртв на
+  Windows — `os.open` не открывает директорию (CRT отвечает EACCES), так что
+  fsync директории ронял каждый успешный трансфер уже после доставки файла;
+  теперь POSIX-only, как и `os.fchmod` (на Windows он появился лишь в 3.13, а
+  chmod там — только read-only-бит). Ошибки стадии коммита (ENOSPC на fsync,
+  EEXIST-гонка на link, отказ rename) заворачиваются в `WikiLocalFileError`
+  внутри `_commit_part`, который теперь владеет fd и `.part` целиком — ушёл
+  двойной `os.close` того же номера. ФС без hardlink (FAT/exFAT, сетевые
+  шары) получили fallback: свежая проверка существования + rename вместо
+  отказа после полного трансфера. Гонка отмены на `to_thread(_open_part)`
+  закрыта регистрацией пары fd/`.part` в самом воркер-треде под локом.

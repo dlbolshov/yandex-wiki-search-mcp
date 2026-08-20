@@ -1,11 +1,13 @@
 import asyncio
 import contextlib
+import errno
 import json
 import logging
 import os
 import random
 import secrets
 import stat
+import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -239,12 +241,80 @@ def _open_part(target: Path, *, overwrite: bool) -> tuple[int, Path]:
             raise WikiLocalFileError(
                 f"Cannot write beside {target}", cause=exc
             ) from exc
-        if inherited is not None:
+        if inherited is not None and os.name == "posix":
+            # POSIX-only twice over: os.fchmod exists on Windows only since
+            # 3.13, and chmod there toggles nothing but the read-only
+            # attribute — there is no mode worth inheriting.
             os.fchmod(fd, inherited)
         return fd, candidate
     raise WikiLocalFileError(  # pragma: no cover - 8 random bytes, four tries
         f"Could not create a temporary file beside {target}"
     )
+
+
+# link(2) failures that mean "this filesystem cannot hardlink at all"
+# (FAT/exFAT sticks, some SMB/NFS mounts), as opposed to a real problem with
+# these specific paths. EACCES is included deliberately: were it a genuine
+# permission problem, the replace fallback fails with the same errno — now
+# wrapped with the target's name instead of escaping bare.
+_HARDLINK_UNSUPPORTED_ERRNOS = frozenset(
+    {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS, errno.EXDEV, errno.EINVAL, errno.EACCES}
+)
+
+
+def _refuse_existing(target: Path, cause: OSError) -> WikiLocalFileError:
+    """The one wording for "the name is taken", shared with _probe_target."""
+    return WikiLocalFileError(
+        f"File already exists: {target}. Pass overwrite=true to replace it.",
+        cause=cause,
+    )
+
+
+def _fsync_directory(path: Path) -> None:
+    """Make a completed rename durable — where that is possible at all.
+
+    POSIX-only by necessity, not caution: on Windows `os.open` cannot open a
+    directory (the CRT answers EACCES for any directory), and FlushFileBuffers
+    does not accept directory handles anyway, so there is no equivalent to
+    reach for — NTFS journals the rename on its own schedule.
+    """
+    if os.name != "posix":
+        return
+    dir_fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _place_part(part: Path, target: Path, *, overwrite: bool) -> None:
+    """Put the finished `.part` under the final name.
+
+    Without ``overwrite`` the link/unlink pair replaces ``os.replace``: `link`
+    fails with EEXIST if the name was taken while the transfer ran, so the
+    refusal is the kernel's, at the instant of creation. `os.replace` would
+    clobber whatever appeared during those minutes despite ``overwrite=false``.
+
+    Filesystems that cannot hardlink fall back to a fresh existence check plus
+    rename: a narrow race window reopens there, but the alternative is failing
+    every non-overwrite download to a FAT stick or a network mount after the
+    whole transfer already ran.
+    """
+    if overwrite:
+        part.replace(target)
+        return
+    try:
+        os.link(part, target)
+    except FileExistsError as exc:
+        raise _refuse_existing(target, exc) from exc
+    except OSError as exc:
+        if exc.errno not in _HARDLINK_UNSUPPORTED_ERRNOS:
+            raise
+        if target.exists():
+            raise _refuse_existing(target, exc) from exc
+        part.replace(target)
+        return
+    part.unlink()
 
 
 def _commit_part(fd: int, part: Path, target: Path, *, overwrite: bool) -> None:
@@ -255,27 +325,31 @@ def _commit_part(fd: int, part: Path, target: Path, *, overwrite: bool) -> None:
     crash can leave the rename committed while the data blocks are not — a
     full-length file of zeros under the final name, which is precisely the
     "crashed download masquerading as a finished one" this is supposed to
-    prevent. The directory fsync afterwards makes the rename itself durable.
+    prevent. fsync is also where a full disk actually reports itself: with
+    delayed allocation ENOSPC arrives here, not at write().
 
-    Without `overwrite` the link/unlink pair replaces `os.replace`: `link`
-    fails with EEXIST if the name was taken while the transfer ran, so the
-    refusal is the kernel's, at the instant of creation. `os.replace` would
-    clobber whatever appeared during those minutes despite `overwrite=false`.
+    Owns the fd and the `.part` from the moment it is entered: every failure
+    is cleaned up and wrapped *here*, and the caller must not touch either
+    again — a second os.close on the same number could tear down an fd the
+    pool has already handed to someone else.
     """
-    os.fsync(fd)
-    os.close(fd)
-    if overwrite:
-        part.replace(target)
-    else:
-        try:
-            os.link(part, target)
-        finally:
-            part.unlink()
-    dir_fd = os.open(target.parent, os.O_RDONLY)
     try:
-        os.fsync(dir_fd)
-    finally:
-        os.close(dir_fd)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        _place_part(part, target, overwrite=overwrite)
+        _fsync_directory(target.parent)
+    except WikiLocalFileError:
+        with contextlib.suppress(OSError):
+            part.unlink()
+        raise
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            part.unlink()
+        raise WikiLocalFileError(
+            f"Cannot finish writing {target}", cause=exc
+        ) from exc
 
 
 def _discard_part(fd: int, part: Path) -> None:
@@ -635,7 +709,6 @@ class WikiClient(WikiProtocol):
             "unreachable: request loop exited without a result"
         )
 
-    @staticmethod
     @staticmethod
     async def _drain(response: ClientResponse, limit: int) -> bytes:
         """Read at most ``limit`` bytes off the body, stopping at EOF.
@@ -1486,19 +1559,42 @@ class WikiClient(WikiProtocol):
         # authoritative — this pair only buys the early exit.
         await asyncio.to_thread(_probe_target, target, overwrite=overwrite)
 
-        opened: tuple[int, Path] | None = None
+        # Ownership of the open `.part` lives in `parts`, and every hand-off
+        # happens under `guard` *inside the worker thread*: to_thread cannot
+        # be cancelled once running, so a CancelledError at the await discards
+        # the call's result while the thread finishes anyway — registering the
+        # pair via a return value would leak the fd and the file exactly then.
+        parts: list[tuple[int, Path]] = []
+        guard = threading.Lock()
+        abandoned = False
         size = 0
         head = b""
 
+        def open_part_tracked() -> None:
+            pair = _open_part(target, overwrite=overwrite)
+            with guard:
+                if abandoned:
+                    _discard_part(*pair)
+                else:
+                    parts.append(pair)
+
+        def commit_tracked() -> None:
+            with guard:
+                if not parts:
+                    return  # cleanup won the race; nothing left to commit
+                fd, part = parts.pop()
+            # _commit_part owns the fd and the file from here on — it cleans
+            # up its own failures, so cleanup below never sees this pair again
+            # (a second os.close could hit an fd number already reused).
+            _commit_part(fd, part, target, overwrite=overwrite)
+
         async def sink(chunk: bytes) -> None:
-            nonlocal opened, size, head
+            nonlocal size, head
             if len(head) < IMAGE_MAGIC_PREFIX_BYTES:
                 head = (head + chunk)[:IMAGE_MAGIC_PREFIX_BYTES]
-            if opened is None:
-                opened = await asyncio.to_thread(
-                    _open_part, target, overwrite=overwrite
-                )
-            fd = opened[0]
+            if not parts:
+                await asyncio.to_thread(open_part_tracked)
+            fd = parts[0][0]
             size += len(chunk)
             try:
                 await asyncio.to_thread(_write_all, fd, chunk)
@@ -1517,23 +1613,24 @@ class WikiClient(WikiProtocol):
                 body_sink=sink,
                 timeout=DOWNLOAD_STALL_TIMEOUT,
             )
-            if opened is None:
+            if not parts:
                 # An empty attachment: no chunk ever arrived, so the file still
                 # has to be created before it can be committed.
-                opened = await asyncio.to_thread(
-                    _open_part, target, overwrite=overwrite
-                )
-            await asyncio.to_thread(
-                _commit_part, opened[0], opened[1], target, overwrite=overwrite
-            )
+                await asyncio.to_thread(open_part_tracked)
+            await asyncio.to_thread(commit_tracked)
         except BaseException:
             # BaseException on purpose: asyncio.CancelledError is not an
             # Exception, and a cancelled transfer must not leak its .part file
-            # either. _discard_part is await-free so a second cancellation
-            # cannot land between closing and unlinking. Always re-raised —
-            # this is cleanup, not handling.
-            if opened is not None:
-                _discard_part(*opened)
+            # either. The lock closes the race with a still-running worker:
+            # whichever side takes the pair second finds `parts` empty (or
+            # `abandoned` set) and stands down. _discard_part itself is
+            # await-free, so a second cancellation cannot land mid-cleanup.
+            # Always re-raised — this is cleanup, not handling.
+            with guard:
+                abandoned = True
+                leftover = parts.pop() if parts else None
+            if leftover is not None:
+                _discard_part(*leftover)
             raise
         resolved = await asyncio.to_thread(target.resolve)
         return AttachmentDownloadResult(

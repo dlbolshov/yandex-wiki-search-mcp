@@ -8,6 +8,7 @@ forks.
 """
 
 import asyncio
+import errno
 import os
 import re
 import stat
@@ -548,6 +549,10 @@ def _dir_names(path: Path) -> list[str]:
     return [p.name for p in path.iterdir()]
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX mode semantics: chmod on Windows only toggles read-only",
+)
 class TestDownloadFilePermissions:
     async def test_a_new_file_gets_the_umask_default_not_0600(
         self, wiki_client: WikiClient, tmp_path: Path
@@ -706,6 +711,103 @@ class TestDownloadTargetErrors:
                 )
 
         assert _dir_names(tmp_path) == []
+
+
+class TestDownloadCommitFailures:
+    async def test_a_full_disk_at_fsync_is_a_wiki_error(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # With delayed allocation ENOSPC surfaces at fsync, after every
+        # write() succeeded. It must arrive wrapped in the WikiError
+        # hierarchy, and the .part must not survive the failure.
+        def full_disk(fd: int) -> None:
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.fsync", full_disk)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="No space left"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "big.bin")
+                )
+
+        assert _dir_names(tmp_path) == []
+
+    async def test_a_name_taken_mid_transfer_is_refused_with_the_remedy(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The kernel's EEXIST at link time is the overwrite=false contract
+        # holding under a race — but the caller must still get the usual
+        # "already exists" WikiError, not a bare FileExistsError.
+        def taken(src: object, dst: object, **kwargs: object) -> None:
+            raise FileExistsError(errno.EEXIST, "File exists")
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.link", taken)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="already exists"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "raced.bin")
+                )
+
+        assert _dir_names(tmp_path) == []
+
+    async def test_a_filesystem_without_hardlinks_still_delivers(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # FAT/exFAT sticks and some network mounts cannot link(2) at all;
+        # the fallback re-checks existence and renames instead of failing
+        # the download after the whole transfer already ran.
+        def no_links(src: object, dst: object, **kwargs: object) -> None:
+            raise OSError(errno.EPERM, "Operation not permitted")
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.link", no_links)
+        target = tmp_path / "fat32.bin"
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            result = await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(target)
+            )
+
+        assert target.read_bytes() == b"payload"
+        assert result.size_bytes == 7
+        assert _dir_names(tmp_path) == [target.name]
+
+    async def test_the_fallback_still_refuses_an_existing_target(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # No hardlinks AND the name got taken mid-transfer: the fallback's
+        # existence re-check must refuse rather than clobber. The squatter is
+        # planted by the link stub itself — the only deterministic way to make
+        # the file appear after the probe and the open but before the commit.
+        target = tmp_path / "squatted.bin"
+
+        def no_links(src: object, dst: object, **kwargs: object) -> None:
+            target.write_bytes(b"squatter")
+            raise OSError(errno.EPERM, "Operation not permitted")
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.link", no_links)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="already exists"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(target)
+                )
+
+        assert target.read_bytes() == b"squatter"
+        assert _dir_names(tmp_path) == [target.name]
 
 
 class TestPageDownloadAttachmentToPath:

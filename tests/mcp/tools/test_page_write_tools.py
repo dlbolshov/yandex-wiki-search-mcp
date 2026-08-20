@@ -892,7 +892,7 @@ class TestPageWriteTools:
             "file_id": 5,
             "path": "/home/user/report.pdf",
             "size_bytes": 2048,
-            "mime_type": "application/pdf",
+            "mimetype": "application/pdf",
         }
 
         result = await client.call_tool(
@@ -903,6 +903,7 @@ class TestPageWriteTools:
         content = get_tool_result_content(result)
         assert content["path"] == "/home/user/report.pdf"
         assert content["size_bytes"] == 2048
+        assert content["mimetype"] == "application/pdf"
         args = mock_wiki_protocol.page_download_attachment.await_args
         assert args.args[0] == 10
         assert args.kwargs["file_id"] == 5
