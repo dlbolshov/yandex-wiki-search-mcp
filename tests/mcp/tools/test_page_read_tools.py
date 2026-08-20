@@ -1036,7 +1036,7 @@ class TestPageReadAttachment:
 
         assert result.is_error is True
         text = get_tool_result_text(result)
-        assert "page_read_attachment_bytes" in text
+        assert "page_download_attachment" in text
         assert "download_url" in text
 
 

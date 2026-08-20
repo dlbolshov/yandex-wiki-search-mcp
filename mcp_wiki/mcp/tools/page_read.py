@@ -41,6 +41,11 @@ from mcp_wiki.mcp.utils import (
     resolve_page_locator,
 )
 from mcp_wiki.wiki.custom.errors import WikiError
+from mcp_wiki.wiki.custom.mimes import (
+    RENDERABLE_IMAGE_MIMES,
+    UNINFORMATIVE_MIMES,
+    image_mime,
+)
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
     CommentsResponse,
@@ -86,38 +91,11 @@ MAX_INLINE_ATTACHMENT_BYTES = 131_072
 # refused. Still well under the API's hard 10 MB base64 per image.
 MAX_INLINE_IMAGE_BYTES = 2_097_152
 
-# The only formats the vision APIs decode. This is not a style preference:
-# an ImageContent block whose mime is outside this set makes the host's next
-# model call fail with `invalid_request_error: Could not process image`, and
-# hosts retry the same tool call — anthropics/claude-code#28279 documents an
-# SVG doing exactly that and killing the session. Anything else, image/* or
-# not, is therefore better off as text or as an opaque blob.
-_RENDERABLE_IMAGE_MIMES = frozenset(
-    {"image/png", "image/jpeg", "image/gif", "image/webp"}
-)
-
-# When the wire says nothing useful the bytes have to decide, so the read gets
-# the image budget and the type is settled afterwards. A known non-image mime
-# keeps the small ceiling, so a large text file is still refused before it is
-# transferred rather than after.
-_UNINFORMATIVE_MIMES = frozenset(
-    {"", "application/octet-stream", "binary/octet-stream"}
-)
-
-# Magic numbers for the same four formats, for when the wire does not name
-# them. Checked against the bytes, not a filename — there is no filename.
-_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
-    (b"\x89PNG\r\n\x1a\n", "image/png"),
-    (b"\xff\xd8\xff", "image/jpeg"),
-    (b"GIF87a", "image/gif"),
-    (b"GIF89a", "image/gif"),
-)
-
 
 def _oversize_remedy(include_local_downloads: bool) -> str:
     """Where to send a caller whose attachment did not fit.
 
-    Conditional because `page_read_attachment_bytes` is registered only outside
+    Conditional because `page_download_attachment` is registered only outside
     WIKI_READ_ONLY and only when local filesystem access is on: naming it
     unconditionally would send agents to a tool that does not exist, which is
     the very thing build_instructions() is dynamic to avoid. `download_url`
@@ -125,7 +103,7 @@ def _oversize_remedy(include_local_downloads: bool) -> str:
     """
     if include_local_downloads:
         return (
-            "Use page_read_attachment_bytes to save it locally, or fetch the "
+            "Use page_download_attachment to save it locally, or fetch the "
             "attachment's download_url from page_get_attachments yourself."
         )
     return "Fetch the attachment's download_url from page_get_attachments yourself."
@@ -144,31 +122,9 @@ def _inline_ceiling(content_type: str | None) -> int:
     over 128 KiB — precisely the files the fallback exists for.
     """
     base = content_type or ""
-    if base in _RENDERABLE_IMAGE_MIMES or base in _UNINFORMATIVE_MIMES:
+    if base in RENDERABLE_IMAGE_MIMES or base in UNINFORMATIVE_MIMES:
         return MAX_INLINE_IMAGE_BYTES
     return MAX_INLINE_ATTACHMENT_BYTES
-
-
-def _image_mime(raw: bytes) -> str | None:
-    """The mime an image should travel under, or None to send it as text/blob.
-
-    The bytes decide, not the header. All four renderable formats carry a
-    reliable magic number, so the header adds nothing a correct file needs —
-    while trusting it means a mislabelled or empty attachment becomes an
-    ImageContent block the vision API cannot decode, which fails the host's
-    next model call and, because hosts retry the same tool call, takes the
-    session with it (anthropics/claude-code#28279). The header still picks the
-    read ceiling, where it is the only signal available before the body.
-
-    An `image/svg+xml` attachment therefore arrives as text — SVG is XML, so
-    that is both safe and more useful than an image block nothing can render.
-    """
-    for magic, mime in _IMAGE_MAGIC:
-        if raw.startswith(magic):
-            return mime
-    if raw.startswith(b"RIFF") and raw[8:12] == b"WEBP":
-        return "image/webp"
-    return None
 
 
 EnvelopeT = TypeVar("EnvelopeT", bound=CursorEnvelope)
@@ -710,8 +666,8 @@ def register_page_read_tools(
             max_bytes=_inline_ceiling,
             auth=get_yandex_auth(ctx),
         )
-        image_mime = _image_mime(raw)
-        if image_mime is None and len(raw) > MAX_INLINE_ATTACHMENT_BYTES:
+        detected = image_mime(raw)
+        if detected is None and len(raw) > MAX_INLINE_ATTACHMENT_BYTES:
             # Only reachable when the wire mime was uninformative, so the read
             # got the image budget and the bytes then turned out not to be a
             # renderable image. Shaped here rather than in the client because
@@ -722,13 +678,13 @@ def register_page_read_tools(
                 f"content ({MAX_INLINE_IMAGE_BYTES} for images). "
                 + _oversize_remedy(include_local_downloads)
             )
-        if image_mime is not None:
+        if detected is not None:
             # A native image block, not an embedded blob: this is the one
             # shape clients render inline and vision models actually see.
             return ImageContent(
                 type="image",
                 data=base64.b64encode(raw).decode("ascii"),
-                mime_type=image_mime,
+                mime_type=detected,
             )
         uri = f"wiki-mcp://pages/{resolved_page_id}/attachments/{file_id}"
         text = _as_text(raw)

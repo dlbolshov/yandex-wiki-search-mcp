@@ -314,6 +314,11 @@ wheel, MCPB-бандл и Docker-образ, затем публикует (PyPI
 - **Семантика `page_search.content`**: описание поля в
   `wiki/proto/types/pages.py`, описание тулзы в `page_read.py` и
   `build_instructions()` — три копии, одна истина.
+- **Капы на вложения**: `MAX_INLINE_ATTACHMENT_BYTES` и
+  `MAX_INLINE_IMAGE_BYTES` в `mcp/tools/page_read.py` — источник истины;
+  описание тулзы подставляет их f-строкой, но оба README, оба `api-notes` и
+  `manifest.json` пересказывают числа прозой. Понизишь константу — четыре
+  документа продолжат рекламировать лимит, которого больше нет.
 - **Описание сервера**: в рантайме берётся из метаданных пакета, но
   `manifest.json` и `server.json` несут собственные копии.
 - **Двуязычные пары**: `README.md` ↔ `README_ru.md`, `api-notes.md` ↔

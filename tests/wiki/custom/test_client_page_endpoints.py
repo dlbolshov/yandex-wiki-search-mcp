@@ -599,6 +599,41 @@ class TestDownloadFilePermissions:
         assert stat.S_IMODE(target.stat().st_mode) == 0o640
 
 
+class TestDownloadMimeAgreement:
+    async def test_the_saved_mime_is_sniffed_not_taken_from_the_header(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # The same PNG read inline reports image/png (magic bytes decide), so
+        # saving it must not report application/octet-stream — one file, one
+        # answer, whichever tool the caller reached for.
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+        target = tmp_path / "shot.png"
+        with aioresponses() as mocked:
+            mocked.get(
+                DOWNLOAD_URL,
+                body=png,
+                headers={"Content-Type": "application/octet-stream"},
+            )
+            result = await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(target)
+            )
+
+        assert result.mimetype == "image/png"
+
+    async def test_the_header_still_answers_for_what_magic_cannot_see(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.get(
+                DOWNLOAD_URL, body=b"id,name\n", headers={"Content-Type": "text/csv"}
+            )
+            result = await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(tmp_path / "rows.csv")
+            )
+
+        assert result.mimetype == "text/csv"
+
+
 class TestDownloadTargetErrors:
     async def test_a_directory_target_is_refused_before_any_transfer(
         self, wiki_client: WikiClient, tmp_path: Path
@@ -761,7 +796,13 @@ class TestPageDownloadAttachmentToPath:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        # HOME is what posixpath.expanduser reads; ntpath reads USERPROFILE and
+        # ignores HOME entirely, so setting only the first passes on Linux and
+        # macOS while the Windows CI job writes into the runner's real profile
+        # directory and then fails the assert. Both, and the test is honest on
+        # every leg of the matrix.
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         with aioresponses() as mocked:
             mocked.get(DOWNLOAD_URL, body=b"x")
             result = await wiki_client.page_download_attachment(

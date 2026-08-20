@@ -304,6 +304,11 @@ by hand:
 - **`page_search.content` semantics**: field description in
   `wiki/proto/types/pages.py`, the tool description in `page_read.py`, and
   `build_instructions()` — three copies, one truth.
+- **Attachment byte ceilings**: `MAX_INLINE_ATTACHMENT_BYTES` and
+  `MAX_INLINE_IMAGE_BYTES` in `mcp/tools/page_read.py` are the truth; the tool
+  description f-strings them, but both READMEs, both `api-notes` and
+  `manifest.json` restate them as prose. Lower a constant and four documents
+  start advertising a limit the server no longer enforces.
 - **Server description**: single-sourced from package metadata at runtime,
   but `manifest.json` and `server.json` carry their own copies.
 - **Bilingual pairs**: `README.md` ↔ `README_ru.md`, `api-notes.md` ↔

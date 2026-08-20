@@ -38,6 +38,7 @@ from mcp_wiki.wiki.custom.errors import (
     WikiTransportError,
     build_api_error,
 )
+from mcp_wiki.wiki.custom.mimes import IMAGE_MAGIC_PREFIX_BYTES, image_mime
 from mcp_wiki.wiki.custom.slugs import normalize_slug
 from mcp_wiki.wiki.proto.common import YandexAuth, select_org
 from mcp_wiki.wiki.proto.pages import WikiProtocol, validate_page_update_args
@@ -635,49 +636,54 @@ class WikiClient(WikiProtocol):
         )
 
     @staticmethod
+    @staticmethod
+    async def _drain(response: ClientResponse, limit: int) -> bytes:
+        """Read at most ``limit`` bytes off the body, stopping at EOF.
+
+        The one place bytes are pulled from a response. `iter_chunked` is what
+        makes that safe: `StreamReader.read(n)` returns whatever happens to be
+        buffered, up to `n` — not `n` bytes — so the hand-rolled loops this
+        replaces each had to re-derive the same "keep going until EOF" rule,
+        and differed by an off-by-one nobody could see was deliberate.
+
+        Returning `limit + 1` bytes is the signal that the body was longer;
+        callers decide whether that is an error or just a place to stop.
+        """
+        body = bytearray()
+        async for chunk in response.content.iter_chunked(DOWNLOAD_CHUNK_SIZE):
+            body.extend(chunk)
+            if len(body) > limit:
+                del body[limit + 1 :]
+                break
+        return bytes(body)
+
+    @classmethod
     async def _read_capped(
-        response: ClientResponse, method: str, path: str, max_bytes: int
+        cls, response: ClientResponse, method: str, path: str, max_bytes: int
     ) -> bytes:
         """Read a body, refusing to materialize more than ``max_bytes``.
 
         ``Content-Length`` settles it without reading a byte when the server
-        sends one. Otherwise read up to one byte past the cap and stop.
-        The loop is load-bearing: aiohttp's ``StreamReader.read(n)`` returns
-        whatever is already buffered, up to ``n`` — not ``n`` bytes — so a
-        single call would silently truncate a body that arrives in several
-        network chunks. Overflow raises inside the caller's ``async with``,
-        which leaves the response undrained, so aiohttp closes the connection
-        instead of pulling the rest down.
+        sends one. Otherwise the stream itself decides: overflow raises inside
+        the caller's ``async with``, which leaves the response undrained, so
+        aiohttp closes the connection instead of pulling the rest down.
         """
         declared = response.content_length
         if declared is not None and declared > max_bytes:
             raise ResponseTooLarge(method, path, declared, max_bytes)
-        body = bytearray()
-        while len(body) <= max_bytes:
-            chunk = await response.content.read(max_bytes + 1 - len(body))
-            if not chunk:
-                break
-            body.extend(chunk)
+        body = await cls._drain(response, max_bytes)
         if len(body) > max_bytes:
             raise ResponseTooLarge(method, path, None, max_bytes)
-        return bytes(body)
+        return body
 
-    @staticmethod
-    async def _read_truncated(response: ClientResponse, limit: int) -> bytes:
+    @classmethod
+    async def _read_truncated(cls, response: ClientResponse, limit: int) -> bytes:
         """Read at most ``limit`` bytes, stopping quietly rather than raising.
 
-        Same drain loop as ``_read_capped`` and for the same reason (``read(n)``
-        is a partial read), but overflow is not an error here: the caller wants
-        whatever the body says, and a body this large is malformed rather than
-        forbidden.
+        Overflow is not an error here: the caller wants whatever the body says,
+        and a body this large is malformed rather than forbidden.
         """
-        body = bytearray()
-        while len(body) < limit:
-            chunk = await response.content.read(limit - len(body))
-            if not chunk:
-                break
-            body.extend(chunk)
-        return bytes(body)
+        return (await cls._drain(response, limit))[:limit]
 
     @staticmethod
     def _json_or_empty(payload: bytes) -> Any:
@@ -1482,9 +1488,12 @@ class WikiClient(WikiProtocol):
 
         opened: tuple[int, Path] | None = None
         size = 0
+        head = b""
 
         async def sink(chunk: bytes) -> None:
-            nonlocal opened, size
+            nonlocal opened, size, head
+            if len(head) < IMAGE_MAGIC_PREFIX_BYTES:
+                head = (head + chunk)[:IMAGE_MAGIC_PREFIX_BYTES]
             if opened is None:
                 opened = await asyncio.to_thread(
                     _open_part, target, overwrite=overwrite
@@ -1532,7 +1541,12 @@ class WikiClient(WikiProtocol):
             file_id=file_id,
             path=str(resolved),
             size_bytes=size,
-            mimetype=mime_type,
+            # The sniffed type wins over the header for the same reason the
+            # inline read trusts bytes over claims — and so that one file does
+            # not report image/png when read and application/octet-stream when
+            # saved. The header remains the answer for everything the magic
+            # table does not cover.
+            mimetype=image_mime(head) or mime_type,
         )
 
     async def page_delete_attachment(
