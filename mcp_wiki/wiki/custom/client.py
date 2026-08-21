@@ -101,8 +101,9 @@ ERROR_BODY_MAX_BYTES = 65_536
 # bounds how much of the body is resident between two file writes. 1 MiB
 # because every chunk costs one thread-pool hop (~87 us measured) against a
 # ~19 us write — at 64 KiB that was 1600 hops and ~2x the wall time for a
-# 100 MB file, and worse under concurrency, since the hops queue on the one
-# executor shared with uploads.
+# 100 MB file. (The hops now run on a per-call worker rather than the
+# shared default executor, so they no longer queue behind uploads; the
+# per-hop cost is what still argues for the larger chunk.)
 DOWNLOAD_CHUNK_SIZE = 1_048_576
 
 # A streamed download has no total timeout: it is the one call whose duration
@@ -219,10 +220,12 @@ def _part_path(target: Path) -> Path:
     if os.name == "nt":
         # Windows also caps the whole path at MAX_PATH (260) unless the machine
         # opted into long paths, and the suffix pushes a target Windows itself
-        # accepts over the line. Shrink the prefix by whatever the parent
-        # already spends; a name too short to keep is replaced wholesale.
+        # accepts over the line. Shrink the prefix by whatever the parent, the
+        # separator and the suffix spend; a name too short to keep is replaced
+        # wholesale.
         budget = min(  # pragma: no cover - the other half of the matrix
-            budget, _WINDOWS_MAX_PATH - len(str(target.parent)) - 1
+            budget,
+            _WINDOWS_MAX_PATH - len(str(target.parent)) - 1 - _PART_SUFFIX_BUDGET,
         )
     stem = target.name.encode()[: max(budget, 0)]
     prefix = stem.decode(errors="ignore") or "download"
@@ -1625,32 +1628,35 @@ class WikiClient(WikiProtocol):
         a directory tree and a temp file for a body that never arrives.
         """
         target = local_path(save_to)
-        # Refused before the request, so a bad path costs no transfer. The
-        # same checks run again inside _open_part, which is where they are
-        # authoritative — this pair only buys the early exit.
-        await asyncio.to_thread(_probe_target, target, overwrite=overwrite)
 
         # Every filesystem operation for this download runs on ONE dedicated
         # worker, in submission order. That is what makes the fd safe: it is
         # never touched from the event loop, and a cancelled `await` cannot
         # close a descriptor another thread is still writing to — the write and
         # the cleanup are queued on the same worker, so cleanup simply runs
-        # after the write is done with it. The pool's own shutdown waits for
-        # whatever is still in flight, which is what a lock plus an `abandoned`
-        # flag were hand-rolling before.
+        # after the write is done with it — replacing the lock plus the
+        # `abandoned` flag that were hand-rolling that ordering before.
+        #
+        # Shut down with wait=False, and never via `with`: the context
+        # manager's exit calls shutdown(wait=True) on the event loop thread,
+        # so a cancellation with a write in flight froze the whole server
+        # until that write returned — measured at 951 ms against a 1 s stub,
+        # and unbounded on a hung mount. wait=False still drains the queue
+        # (already-submitted work always runs), so the cleanup happens; it
+        # just stops happening on the loop.
         loop = asyncio.get_running_loop()
-        # `holder` is touched ONLY by the worker, never by the event loop, so
-        # it needs no lock: the single worker gives the ordering a lock was
-        # previously faking. A cancelled `await` cannot stop the open that is
+        # `holder` is mutated ONLY by the worker; the event loop reads it, but
+        # always after awaiting the hand-off that filled it, so it needs no
+        # lock: the single worker gives the ordering a lock was previously
+        # faking. A cancelled `await` cannot stop the open that is
         # already running, but the cleanup submitted afterwards is queued
         # behind it and therefore sees whatever it produced.
         holder: list[tuple[int, Path]] = []
         size = 0
         head = b""
 
-        with ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="wiki-download"
-        ) as pool:
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="wiki-download")
+        try:
 
             def run(fn: Callable[[], _T]) -> Awaitable[_T]:
                 return loop.run_in_executor(pool, fn)
@@ -1715,6 +1721,8 @@ class WikiClient(WikiProtocol):
                 pool.submit(discard_leftover)
                 raise
             resolved = await run(target.resolve)
+        finally:
+            pool.shutdown(wait=False)
         return AttachmentDownloadResult(
             page_id=page_id,
             file_id=file_id,

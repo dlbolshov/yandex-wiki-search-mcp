@@ -545,6 +545,23 @@ class TestDownloadCeiling:
 DOWNLOAD_URL = "https://api.wiki.yandex.net/v1/pages/42/attachments/5/download"
 
 
+async def _eventually_empty(path: Path, deadline_seconds: float = 5.0) -> None:
+    """Wait for `path` to hold nothing, then assert it.
+
+    Cleanup after a cancelled or failed download is queued on that call's
+    worker and the pool is shut down with `wait=False`, deliberately: waiting
+    would block the event loop for the duration of an in-flight write. So the
+    `.part` disappears a moment after the call returns, and a test has to wait
+    for it rather than assume the loop was held hostage until it was gone.
+    """
+    deadline = time.monotonic() + deadline_seconds
+    while time.monotonic() < deadline:
+        if not _dir_names(path):
+            return
+        await asyncio.sleep(0.01)
+    assert _dir_names(path) == []
+
+
 def _dir_names(path: Path) -> list[str]:
     # Sync on purpose: pathlib inside an async function trips ASYNC240,
     # while os.listdir trips PTH208 — a sync helper satisfies both.
@@ -854,7 +871,7 @@ class TestDownloadCancellation:
             with pytest.raises(asyncio.CancelledError):
                 await task
 
-        assert _dir_names(tmp_path) == []
+        await _eventually_empty(tmp_path)
 
     async def test_a_cancel_while_the_part_is_being_created_leaves_nothing(
         self, wiki_client: WikiClient, tmp_path: Path
@@ -886,7 +903,7 @@ class TestDownloadCancellation:
             with pytest.raises(asyncio.CancelledError):
                 await task
 
-        assert _dir_names(tmp_path) == []
+        await _eventually_empty(tmp_path)
 
 
 class TestDownloadChunking:
@@ -936,7 +953,7 @@ class TestDownloadChunking:
                     42, file_id=5, save_to=str(tmp_path / "half.bin")
                 )
 
-        assert _dir_names(tmp_path) == []
+        await _eventually_empty(tmp_path)
 
 
 class TestDownloadPlacementFailures:
