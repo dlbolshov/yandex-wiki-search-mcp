@@ -11,7 +11,7 @@ import pytest
 from aioresponses import aioresponses
 
 from mcp_wiki.wiki.custom.client import WikiClient, _build_trace_config
-from mcp_wiki.wiki.custom.errors import WikiApiError
+from mcp_wiki.wiki.custom.errors import WikiApiError, WikiLocalFileError
 from tests.aioresponses_utils import RequestCapture
 
 UPLOAD_PART_URL = re.compile(
@@ -121,7 +121,7 @@ class TestUploadAttachment:
                 "https://api.wiki.yandex.net/v1/upload_sessions",
                 exception=AssertionError("no request may be made"),
             )
-            with pytest.raises(FileNotFoundError, match=r"nope\.txt"):
+            with pytest.raises(WikiLocalFileError, match=r"nope\.txt"):
                 await wiki_client.page_upload_attachment(10, file_path="/nope.txt")
 
     async def test_append_markup_writes_a_file_macro_to_the_page(

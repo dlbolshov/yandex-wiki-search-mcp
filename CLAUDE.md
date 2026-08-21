@@ -13,7 +13,7 @@ Main capabilities:
 - full-text search across the whole Wiki, with server-side filters (section, type, author, date interval) and optional `<em>` highlighting
 - read pages by `page_id` or `slug`
 - fetch descendants for page trees
-- read comments, resources, and attachments, and download an attachment's content inline
+- read comments, resources, and attachments; read an attachment into the conversation (`page_read_attachment` — images as a native image block, everything else as text or a base64 blob) or stream it to a local file (`page_download_attachment`)
 - look up the calling user (`/users/me`): username, personal-section slug, identity ids
 - create and update pages, including setting and clearing redirects
 - edit page content by exact-text replacements, without resending the whole page
@@ -108,6 +108,7 @@ Write tools:
 - `page_delete`
 - `page_recover`
 - `page_upload_attachment`
+- `page_download_attachment`
 - `page_delete_attachment`
 - `grid_create`
 - `grid_update`
@@ -199,6 +200,19 @@ When adding a new MCP tool:
    - `docs/architecture.md` + `docs/architecture_ru.md` (if the change touches anything they describe)
 6. Add tests in the matching `tests/mcp/...` or `tests/wiki/...` location.
 
+## Versioning And Release Flow
+
+**Never bump the version in a feature branch.** Feature work lands under
+`## [Unreleased]` in `CHANGELOG.md`; version numbers are assigned by a
+dedicated release commit on `main` (`Release vX.Y.Z`) that updates everything
+at once: `pyproject.toml`, `uv.lock` (via `uv lock`, never by hand),
+`manifest.json`, `server.json` (both `version` fields **and** the OCI image
+tag), promotes `[Unreleased]` to `[X.Y.Z] - date`, and appends the ROADMAP
+log entry. `scripts/check_versions.py` verifies the sync (except the OCI
+tag). Full procedure: `docs/architecture.md` → "Release process". Do not
+reference the future version number from docs, ROADMAP entries, or code
+comments before that commit exists — the number is not decided until release.
+
 ## Configuration Notes
 
 Authentication:
@@ -224,6 +238,9 @@ Constraints:
 - `GET /pages/descendants?slug=` **empty means the whole organization** — a real contract, not bad input (an unresolvable slug 404s). `page_get_descendants(from_root=true)` is the only caller that sends it; do not add an "empty slug" guard to `WikiClient.page_get_descendants` or to the params model, and note that omitting the parameter entirely is a `400`. `resolve_page_locator` still rejects the empty slug for every other tool, where the API genuinely needs a page
 - `page_search` results carry a ~510-character excerpt in `content`, cut from wherever the match sits — not the page and not a summary. Matches inside it are wrapped in `<em>` tags only when the call passed `highlight=true`; otherwise the excerpt is unmarked. Its `\n`/`\t` are the source page's layout, not fragment separators. This is documented in four places that must stay in sync: the field description in `wiki/proto/types/pages.py`, the tool description, `build_instructions()`, and this bullet
 - `page_search`'s `slug_prefix` reaches the API as `filters.cluster`, which is the strictest slug on the wire: it matches the stored slug **literally**, so mixed case, a leading slash or a trailing slash each answer 200 with zero results — indistinguishable from an empty section. `GET /pages?slug=` resolves all three spellings happily, so the two endpoints disagree. `WikiClient.page_search` therefore normalizes and lowercases `cluster` itself, like every other slug-shaped client argument; the tool layer only rejects a prefix that normalizes to empty. Verified live 2026-08-18, along with the two guarantees the tool description promises: the filter matches on path segments (`a/b` does not pull in `a/bc`) and includes the cluster page itself
+
+- `page_read_attachment` decides "is this an image?" by **magic bytes only** — PNG/JPEG/GIF/WebP. Never by the response's `Content-Type`: an `ImageContent` block the vision API cannot decode fails the host's next model call with `Could not process image`, and hosts retry the same tool call, so the session dies rather than degrading (anthropics/claude-code#28279). SVG therefore travels as text. The header is still what picks the read ceiling — it is the only signal before the body, since the download endpoint sends no `Content-Length` — and an uninformative header (`octet-stream`, or none) gets the image budget so the magic check can run on files above the text ceiling
+- `page_download_attachment` writes to the caller's disk, so it is gated with `page_upload_attachment` behind `include_local_uploads`, and `page_read_attachment`'s description only points at it when it is actually registered. The write is `.part` → fsync → rename; without `overwrite` it prefers `link`+`unlink` so the refusal is the kernel's, falling back to an existence check plus rename on filesystems with no hardlinks. Permissions are `0666 & ~umask` for a new file or the replaced file's own mode — never `tempfile`'s 0600, which the rename would carry onto the delivered file — and the `.part` is opened with `O_BINARY`, without which Windows rewrites every `\n` in the body. The directory fsync and the mode inheritance are POSIX-only. Every filesystem step runs on one per-call worker thread, which is what keeps a cancelled await from closing a descriptor another thread is still writing to
 
 Per-request organization override:
 - a client may append `?orgId=` or `?cloudOrgId=` to the server endpoint, and those replace the configured organization for that request

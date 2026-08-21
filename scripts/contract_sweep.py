@@ -43,6 +43,16 @@ from mcp_wiki.wiki.proto.types.pages import (
 REPORT: list[tuple[str, str, str]] = []
 
 
+def broken(name: str, detail: str) -> None:
+    """Record a contract that held on the wire but produced the wrong result.
+
+    A plain REPORT.append with the status spelled out every time invited a typo or
+    a two-element tuple, which fails at print time — at the end of a live
+    sweep that has already mutated the wiki.
+    """
+    REPORT.append((name, "BROKEN", detail))
+
+
 # Identity payloads ride along on every user reference, where WikiUser
 # deliberately drops them (v0.8.0, docs/api-notes.md) — without this the sweep
 # would cry drift on every comment and attachment, every run.
@@ -352,19 +362,19 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         await asyncio.to_thread(tmp_path.unlink, True)
     attachment_id = None
     if uploaded is None or not uploaded.attachments:
-        REPORT.append(
-            (
-                "page_download_attachment",
-                "SKIP",
-                "upload produced no attachment to download",
-            )
+        # A SKIP row each, not one row for both: the final gate only looks at
+        # rows that exist, so a tool with no row at all leaves the sweep green
+        # having never touched it.
+        REPORT.extend(
+            (name, "SKIP", "upload produced no attachment")
+            for name in ("page_read_attachment_bytes", "page_download_attachment")
         )
     else:
         attachment_id = uploaded.attachments[0].id
         downloaded = await check(
-            "page_download_attachment",
-            lambda: wiki.page_download_attachment(root.id, file_id=attachment_id),
-            note_from_result=lambda b: f"{len(b)} bytes",
+            "page_read_attachment_bytes",
+            lambda: wiki.page_read_attachment_bytes(root.id, file_id=attachment_id),
+            note_from_result=lambda r: f"{len(r.content)} bytes, mime={r.mimetype}",
         )
         # The round-trip verdict has to be a REPORT row, not a note: check()
         # only escalates status for BaseModel/list results, so bytes are always
@@ -372,14 +382,45 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         # the sweep. Comparing raw bytes also keeps a non-UTF-8 body from
         # raising inside the note, which check() evaluates outside its
         # try/except and would turn into a traceback instead of a verdict.
-        if downloaded is not None and downloaded != ATTACHMENT_PAYLOAD.encode():
-            REPORT.append(
-                (
-                    "page_download_attachment round-trip",
-                    "BROKEN",
-                    f"wrote {ATTACHMENT_PAYLOAD!r}, read back {downloaded[:120]!r}",
-                )
+        if downloaded is not None and downloaded.content != ATTACHMENT_PAYLOAD.encode():
+            broken(
+                "page_read_attachment_bytes round-trip",
+                f"wrote {ATTACHMENT_PAYLOAD!r}, read back {downloaded.content[:120]!r}",
             )
+        with tempfile.TemporaryDirectory(prefix="sweep-dl-") as download_dir:
+            save_to = Path(download_dir) / "sweep-attachment.txt"
+            saved = await check(
+                "page_download_attachment",
+                lambda: wiki.page_download_attachment(
+                    root.id, file_id=attachment_id, save_to=str(save_to)
+                ),
+                note_from_result=lambda r: f"{r.size_bytes} bytes -> {r.path}",
+            )
+            if saved is not None:
+                if downloaded is not None and saved.mimetype != downloaded.mimetype:
+                    # The invariant this branch introduced: one file must not
+                    # report one type when read into the conversation and
+                    # another when saved to disk. Checked as agreement rather
+                    # than against a literal, so it needs no assumption about
+                    # what the API sends — and as a REPORT row, because a note
+                    # could never fail the sweep (see above).
+                    broken(
+                        "page_download_attachment mimetype",
+                        f"read says {downloaded.mimetype}, "
+                        f"download says {saved.mimetype}",
+                    )
+                on_disk = save_to.read_bytes()
+                if on_disk != ATTACHMENT_PAYLOAD.encode():
+                    broken(
+                        "page_download_attachment round-trip",
+                        f"wrote {ATTACHMENT_PAYLOAD!r}, file holds {on_disk[:120]!r}",
+                    )
+                leftovers = [p.name for p in save_to.parent.iterdir() if p != save_to]
+                if leftovers:
+                    broken(
+                        "page_download_attachment round-trip",
+                        f"leftover files beside the target: {leftovers}",
+                    )
 
     print(f"\n=== redirect cycle (on {base}/p-00) ===")
     if children:
@@ -421,12 +462,9 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
                 note_from_result=lambda r: f"round-trips: {r.content == edited}",
             )
             if reread is not None and reread.content != edited:
-                REPORT.append(
-                    (
-                        "page_edit round-trip",
-                        "BROKEN",
-                        f"wrote {edited!r}, read back {reread.content!r}",
-                    )
+                broken(
+                    "page_edit round-trip",
+                    f"wrote {edited!r}, read back {reread.content!r}",
                 )
 
     print(f"\n=== grids (host page {base}/grid-host) ===")
@@ -632,12 +670,9 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
             and not item.slug.startswith(prefix + "/")
         ]
         if leaked:
-            REPORT.append(
-                (
-                    "page_search (cluster boundary)",
-                    "BROKEN",
-                    f"cluster={prefix!r} returned slugs outside the subtree: {leaked[:5]}",
-                )
+            broken(
+                "page_search (cluster boundary)",
+                f"cluster={prefix!r} returned slugs outside the subtree: {leaked[:5]}",
             )
 
     print("\n=== attachment deletion ===")
@@ -675,9 +710,7 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
             note_from_result=lambda r: f"copy landed at {r.slug} (id={r.id})",
         )
         if copy is not None and copy.id == original.id:
-            REPORT.append(
-                ("page_clone (copy has a new id)", "BROKEN", "copy kept the same id")
-            )
+            broken("page_clone (copy has a new id)", "copy kept the same id")
         await check(
             "page_get_by_slug (original stays)",
             lambda: wiki.page_get_by_slug(f"{base}/clone-src"),

@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from pydantic import (
     BaseModel,
@@ -490,6 +490,39 @@ class AttachmentDeleteResponse(BaseWikiModel):
     page_id: int
     file_id: int
     deleted: bool
+
+
+class AttachmentContent(NamedTuple):
+    """An attachment body with the Content-Type the wire sent alongside it.
+
+    A plain tuple, not a pydantic model: this never crosses the MCP boundary —
+    it carries bytes from the client to the tool that decides how they travel
+    (text, image, or blob), and the decision needs the wire's mime claim.
+    The download endpoint sends a precise Content-Type per file (image/png,
+    text/plain — probed 2026-08-19), so the header is signal, not boilerplate.
+    Spelled `mimetype` to match `WikiAttachment.mimetype`, which the attachment
+    listing has always returned: one attribute name for one concept across the
+    tool surface.
+    """
+
+    content: bytes
+    mimetype: str | None
+
+
+class AttachmentDownloadResult(BaseWikiModel):
+    """Acknowledgment for a download-to-disk: where the bytes landed.
+
+    Built client-side: the endpoint streams the file body and sends no JSON
+    to merge. `size_bytes` is counted off the stream — the wire declares no
+    Content-Length (chunked, probed 2026-08-19), so the count is the only
+    source of truth.
+    """
+
+    page_id: int
+    file_id: int
+    path: str
+    size_bytes: int
+    mimetype: str | None = None
 
 
 class UserOrg(BaseWikiModel):

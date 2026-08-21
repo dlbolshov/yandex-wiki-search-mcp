@@ -78,12 +78,15 @@ class Settings(BaseSettings):
 
     @property
     def include_local_uploads(self) -> bool:
-        """Whether page_upload_attachment may be offered at all.
+        """Whether the local-filesystem attachment tools may be offered at all.
 
-        The tool reads file_path from the filesystem of the machine running
-        this server, which only matches the caller's files outside multi-user
-        OAuth deployments — so under OAuth both the tool registration and its
-        mention in the server instructions are dropped.
+        Both page_upload_attachment and page_download_attachment name paths on
+        the filesystem of the machine running this server, which only matches
+        the caller's own files outside multi-user OAuth deployments — upload
+        would read the server's files, download would write to its disk. So
+        under OAuth their registration, their mention in the server
+        instructions, and the pointer to download in page_read_attachment's
+        description are all dropped together.
         """
         return not self.oauth_enabled
 

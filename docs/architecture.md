@@ -18,7 +18,7 @@ change lands. It complements, not replaces:
 ## The system at a glance
 
 `yandex-wiki-search-mcp` is an MCP server in front of the public Yandex Wiki
-HTTP API: 32 tools (10 read, 22 write), 2 resources, three transports (stdio,
+HTTP API: 33 tools (10 read, 23 write), 2 resources, three transports (stdio,
 streamable HTTP, SSE), one optional OAuth layer for multi-user HTTP
 deployments.
 
@@ -87,8 +87,9 @@ precedent).
   - The model validator enforces the invariants: exactly one of
     `WIKI_ORG_ID`/`WIKI_CLOUD_ORG_ID`, a token unless OAuth is on, the OAuth
     triple when it is. `include_local_uploads` is a property, not a field:
-    `page_upload_attachment` reads the *server's* filesystem, so it is only
-    offered outside multi-user OAuth deployments.
+    `page_upload_attachment` and `page_download_attachment` read and write
+    the *server's* filesystem, so they are only offered outside multi-user
+    OAuth deployments.
 
 ### MCP layer
 
@@ -129,8 +130,9 @@ precedent).
   it can never report a combination no request carries) and
   `wiki-mcp://yfm-cheatsheet`.
 - **`mcp_wiki/mcp/tools/`** — `page_read.py` (10 read tools), `page_write.py`
-  (22 write tools; registered only when `WIKI_READ_ONLY=false`, and
-  `page_upload_attachment` only when OAuth is off), `common.py` (locator
+  (23 write tools; registered only when `WIKI_READ_ONLY=false`, and the
+  local-filesystem pair — `page_upload_attachment`,
+  `page_download_attachment` — only when OAuth is off), `common.py` (locator
   resolution against the live API when a slug must become an id or vice
   versa). Write tools attach non-blocking `yfm_warnings` from `mcp_wiki/yfm.py`.
 - **`mcp_wiki/yfm.py`** — dependency-free YFM lint (warnings only, never
@@ -182,20 +184,35 @@ client → /token ──► our code → Yandex access/refresh token pair, store
   fields at serialization (token diet for LLM output) and strips `title` noise
   from generated JSON schemas; `DynamicWikiModel` additionally keeps unknown
   keys through round-trips. Grid cell/row/column shapes live here too.
-- **`custom/client.py`** — `aiohttp` client. One `_request()` funnel applies
+- **`custom/client.py`** — `aiohttp` client. One `_request_raw()` funnel applies
   auth headers (`OAuth`/`Bearer` scheme, IAM, or per-request token),
   organization headers via `select_org()`, retries idempotent failures
   (exponential backoff with equal jitter, `Retry-After` honored up to a cap,
   grid `409 CONFLICTING_OPERATION` retried as a lock rather than an error),
-  and maps failures to the error taxonomy. Also owns the multi-step flows:
-  upload sessions (create → parts → finish → attach) and `page_clone`'s
-  deferred-operation polling.
+  and maps failures to the error taxonomy. It also carries a per-response
+  byte ceiling (resolved from the reply's Content-Type, since the download
+  endpoint declares no Content-Length) and a `body_sink` that streams a
+  response straight to a caller-supplied consumer instead of memory;
+  `_request()` is the thin bytes-only wrapper the other endpoints use.
+  Also owns the multi-step flows: upload sessions (create → parts → finish
+  → attach), `page_clone`'s deferred-operation polling, and the atomic
+  download-to-disk (`.part` file → fsync → link/replace). That last one
+  runs every filesystem step on one per-call worker thread: the descriptor
+  is never touched from the event loop, so a cancelled `await` cannot close
+  it while another thread is still writing, and the cleanup queued behind
+  an in-flight open sees the finished state rather than racing it.
 - **`custom/errors.py`** — the taxonomy. `WikiError` → `WikiApiError`
   (HTTP-level, `build_api_error()` picks the subclass; `GridConflict` for the
   grid lock) plus `PageNotFound`/`GridNotFound`, `WikiOperationError` (a
   deferred operation failed *after* every HTTP exchange succeeded),
   `WikiTransportError` (timeouts and connection failures, with a non-empty
   message even for `TimeoutError`), `WikiConfigError` (bad server setup).
+- **`custom/mimes.py`** — `image_mime()`: the four formats a vision API will
+  decode (PNG/JPEG/GIF/WebP), recognized by magic bytes and never by the
+  wire's `Content-Type`. Lives in the Wiki layer because both attachment
+  paths need it — the inline read to decide whether bytes may travel as an
+  image block, the download-to-disk to report a `mimetype` that agrees with
+  it — and the MCP layer may not be imported from here.
 - **`custom/slugs.py`** — `normalize_slug()`: full Wiki URL or slug → bare
   slug. Lives here because the client needs it on every page call (see the
   layering rule).
@@ -231,9 +248,9 @@ helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
 Protocol model fields are snake_case (`structured_content`, `input_schema`);
 camelCase works as a constructor kwarg but not for attribute access.
 
-**Coverage is gated at 100%, statements and branches** (`--cov-branch
---cov-fail-under=100`, enforced in CI). The policy that keeps this honest
-rather than performative:
+**Coverage is gated at 100%, statements and branches** (`--cov-branch`; CI
+enforces the threshold on ubuntu — see [CI](#ci) for why not everywhere).
+The policy that keeps this honest rather than performative:
 
 - A genuinely unreachable line carries `# pragma: no cover` **with the reason
   in the comment** (type-narrowing after `resolve_page_locator`, serializer
@@ -263,8 +280,16 @@ findings belong in [api-notes.md](api-notes.md).
   because everything else installs from `uv.lock`, so the version ranges in
   `pyproject.toml` were once exercised nowhere — and 1.0.0 shipped
   uninstallable the day its SDK released a major version.
-- **test** — pytest with the 100% gate across the OS × Python matrix
-  (3.11–3.13); coverage uploaded to Codecov from one cell.
+- **test** — pytest across the OS × Python matrix (3.11–3.13); coverage
+  uploaded to Codecov from one matrix entry. The **100% coverage gate is
+  enforced on ubuntu only**, as a separate `coverage report --fail-under=100`
+  step. Windows and macOS run every test they can, but a few tests — and the
+  code paths only they exercise — are POSIX-only (mode bits, `fchmod`,
+  fsyncing a directory descriptor). Those lines are unreachable on Windows,
+  so a gate there could only be satisfied by excluding them from measurement
+  on every OS, hiding real regressions in the process. The gate lives where
+  all of the code is reachable, and `# pragma: no cover` stays reserved for
+  genuinely platform-specific branches.
 
 `release.yml` triggers on a version tag: validates metadata, builds the wheel,
 the MCPB bundle and the Docker image, then publishes (PyPI, GitHub release,
@@ -293,10 +318,15 @@ Things that are asserted nowhere (or only partially) and must be kept in sync
 by hand:
 
 - **Tool list**: `manifest.json` ↔ registered surface — test-pinned; README
-  tool tables and the "32 tools" claims in both READMEs are not.
+  tool tables and the "33 tools" claims in both READMEs are not.
 - **`page_search.content` semantics**: field description in
   `wiki/proto/types/pages.py`, the tool description in `page_read.py`, and
   `build_instructions()` — three copies, one truth.
+- **Attachment byte ceilings**: `MAX_INLINE_ATTACHMENT_BYTES` and
+  `MAX_INLINE_IMAGE_BYTES` in `mcp/tools/page_read.py` are the truth; the tool
+  description f-strings them, but both READMEs, both `api-notes` and
+  `manifest.json` restate them as prose. Lower a constant and five documents
+  start advertising a limit the server no longer enforces.
 - **Server description**: single-sourced from package metadata at runtime,
   but `manifest.json` and `server.json` carry their own copies.
 - **Bilingual pairs**: `README.md` ↔ `README_ru.md`, `api-notes.md` ↔

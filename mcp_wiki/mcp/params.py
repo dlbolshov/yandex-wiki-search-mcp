@@ -251,9 +251,10 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
 
     Static instructions would send agents to tools that do not exist: the
     write capabilities and their usage notes survive only outside
-    WIKI_READ_ONLY, and the comments line offers local-filesystem uploads
-    only when page_upload_attachment is actually registered (it is not
-    under OAuth, see Settings.include_local_uploads).
+    WIKI_READ_ONLY, and the comments line offers local-filesystem transfers
+    only when page_upload_attachment and page_download_attachment are
+    actually registered (they are not under OAuth, see
+    Settings.include_local_uploads).
     """
     capabilities = [
         "- Discover pages across the whole Wiki with page_search, then open a result by its slug with page_get.",
@@ -267,7 +268,7 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
         capabilities += [
             "- Create, update, copy, and delete dynamic tables; add, move, and delete grid rows and columns; update cells",
             "- Create, update, append to, clone, delete, and recover pages; point a page at another with a redirect; edit page content by exact-text replacements with page_edit instead of resending the whole page",
-            "- Add and delete comments, delete attachments, and upload attachments from the local filesystem"
+            "- Add and delete comments, delete attachments, and upload attachments from the local filesystem or download them to it with page_download_attachment"
             if include_local_uploads
             else "- Add and delete comments, and delete attachments",
         ]

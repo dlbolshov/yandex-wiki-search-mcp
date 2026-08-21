@@ -30,6 +30,7 @@ from mcp_wiki.mcp.utils import get_yandex_auth, resolve_page_locator
 from mcp_wiki.wiki.proto.pages import validate_page_update_args
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentDeleteResponse,
+    AttachmentDownloadResult,
     BaseWikiModel,
     ClonedPageRef,
     DeleteCommentResponse,
@@ -1025,11 +1026,12 @@ def register_page_write_tools(
         )
 
     if not include_local_uploads:
-        # file_path is read from the filesystem of the machine running THIS
-        # server. In a multi-user OAuth deployment that is the shared server
-        # host, not the caller's machine: the tool would be useless for its
-        # purpose and would let any authenticated user exfiltrate
-        # server-local files (.env, secrets) into their own wiki.
+        # file_path/save_to name paths on the filesystem of the machine
+        # running THIS server. In a multi-user OAuth deployment that is the
+        # shared server host, not the caller's machine: the tools would be
+        # useless for their purpose, upload would let any authenticated user
+        # exfiltrate server-local files (.env, secrets) into their own wiki,
+        # and download would let them write onto the server's disk.
         return
 
     @mcp.tool(
@@ -1066,5 +1068,57 @@ def register_page_write_tools(
             file_path=file_path,
             append_markup=append_markup,
             append_location=append_location,
+            auth=get_yandex_auth(ctx),
+        )
+
+    @mcp.tool(
+        title="Download Page Attachment",
+        description=(
+            "Download a Yandex Wiki page attachment to a local file: the "
+            "bytes stream to disk without a size cap and never enter the "
+            "conversation — the counterpart to page_read_attachment, for "
+            "getting the artifact itself (a PDF, an archive, a large "
+            "export). Writes atomically; refuses to replace an existing "
+            "file unless overwrite is true. File ids come from "
+            "page_get_attachments."
+        ),
+        # NON_IDEMPOTENT_WRITE, not ADDITIVE: with overwrite=true this
+        # replaces a local file, and destructive_hint=False would promise
+        # it cannot. The write is to the local disk, not the Wiki — which
+        # is exactly why it sits behind the same gate as upload.
+        annotations=NON_IDEMPOTENT_WRITE,
+    )
+    async def page_download_attachment(
+        ctx: ToolContext,
+        file_id: AttachmentID,
+        save_to: Annotated[
+            str,
+            Field(
+                description=(
+                    "Local filesystem path (a file, not a directory) to save "
+                    "the attachment to. Missing parent directories are "
+                    "created; '~' expands to the home directory."
+                )
+            ),
+        ],
+        page_id: OptionalPageID = None,
+        slug: OptionalPageSlug = None,
+        overwrite: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Whether an existing file at save_to may be replaced. "
+                    "When false (default), the call fails instead of "
+                    "overwriting."
+                )
+            ),
+        ] = False,
+    ) -> AttachmentDownloadResult:
+        resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
+        return await get_wiki(ctx).page_download_attachment(
+            resolved_page_id,
+            file_id=file_id,
+            save_to=save_to,
+            overwrite=overwrite,
             auth=get_yandex_auth(ctx),
         )

@@ -1,11 +1,17 @@
 import asyncio
+import contextlib
+import errno
 import json
 import logging
+import os
 import random
-from collections.abc import Callable
+import secrets
+import stat
+from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, BinaryIO, Literal
+from typing import Any, BinaryIO, Literal, TypeVar
 
 from aiohttp import (
     ClientConnectionError,
@@ -29,15 +35,19 @@ from mcp_wiki.wiki.custom.errors import (
     WikiApiError,
     WikiConfigError,
     WikiError,
+    WikiLocalFileError,
     WikiOperationError,
     WikiTransportError,
     build_api_error,
 )
+from mcp_wiki.wiki.custom.mimes import IMAGE_MAGIC_PREFIX_BYTES, image_mime
 from mcp_wiki.wiki.custom.slugs import normalize_slug
 from mcp_wiki.wiki.proto.common import YandexAuth, select_org
 from mcp_wiki.wiki.proto.pages import WikiProtocol, validate_page_update_args
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentContent,
     AttachmentDeleteResponse,
+    AttachmentDownloadResult,
     AttachmentListResponse,
     AttachmentResultsResponse,
     ClonedPageRef,
@@ -81,16 +91,384 @@ RETRY_STATUSES = frozenset({429, 502, 503, 504})
 RETRY_BASE_DELAY = 0.3
 RETRY_AFTER_MAX = 3.0
 
-# Ceiling for an error body on a request that set max_bytes. Generous for a
-# JSON error envelope, and unlike the success ceiling it truncates instead of
-# raising — the point is to keep the API's own message, not to police it.
+# Ceiling for an error body on a request that set max_bytes or a sink. Generous
+# for a JSON error envelope, and unlike the success ceiling it truncates instead
+# of raising — the point is to keep the API's own message, not to police it.
 ERROR_BODY_MAX_BYTES = 65_536
 
+# Chunk size for streaming a download to disk. Deliberately not CHUNK_SIZE
+# (the 5 MiB upload part size, which the upload API dictates): this one only
+# bounds how much of the body is resident between two file writes. 1 MiB
+# because every chunk costs one thread-pool hop (~87 us measured) against a
+# ~19 us write — at 64 KiB that was 1600 hops and ~2x the wall time for a
+# 100 MB file. (The hops now run on a per-call worker rather than the
+# shared default executor, so they no longer queue behind uploads; the
+# per-hop cost is what still argues for the larger chunk.)
+DOWNLOAD_CHUNK_SIZE = 1_048_576
+
+# A streamed download has no total timeout: it is the one call whose duration
+# is the file's size divided by the link speed, and a 30 s session-wide total
+# (which aiohttp applies to the body read, not just the handshake) made every
+# large attachment permanently unfetchable. A stall detector is the right
+# shape instead — it fires when the peer stops sending, never because the file
+# is big.
+DOWNLOAD_STALL_TIMEOUT = ClientTimeout(sock_connect=30, sock_read=60)
+
+
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 def _open_binary(path: Path) -> BinaryIO:
     return path.open("rb")
+
+
+# `.part` name budget: the random tag plus the two dots plus the suffix.
+_PART_SUFFIX_BUDGET = len(".") + 8 + len(".part")
+_NAME_MAX = 255
+_PART_ATTEMPTS = 4
+_WINDOWS_MAX_PATH = 260
+
+
+def local_path(path: str) -> Path:
+    """Normalize a caller-supplied local path.
+
+    Shared by both filesystem tools so `~/report.pdf` means the same thing to
+    upload and to download; it used to expand on one side only.
+
+    Sync on purpose: expanduser only reads environment state, but pathlib
+    methods inside an async function trip ASYNC240 — and the rule is right
+    in general, so it is not silenced there.
+    """
+    return Path(path).expanduser()
+
+
+def _parent_is_not_a_directory(target: Path) -> bool:
+    """Is some existing ancestor of `target` a non-directory?
+
+    Only the nearest existing ancestor matters: everything below it is what
+    `mkdir(parents=True)` would create, and it can only create under a real
+    directory.
+    """
+    for parent in target.parents:
+        try:
+            st = parent.stat()
+        except OSError:
+            continue
+        return not stat.S_ISDIR(st.st_mode)
+    return False  # pragma: no cover - the root always exists and is a directory
+
+
+def _probe_target(target: Path, *, overwrite: bool) -> None:
+    """Reject an unusable target before a byte is transferred.
+
+    Advisory only: the same conditions are re-checked in `_open_part`, where
+    the file is actually created and the answer is authoritative. This exists
+    so that "you pointed at a directory" costs nothing instead of arriving
+    after a multi-megabyte download.
+    """
+    try:
+        existing = target.stat()
+    except FileNotFoundError:
+        # Windows reports a regular file in the middle of a path as
+        # ERROR_PATH_NOT_FOUND, which CPython maps to ENOENT rather than
+        # ENOTDIR — so "missing" and "blocked by a file" arrive identically
+        # there and the parent has to be asked directly.
+        if _parent_is_not_a_directory(target):  # pragma: no cover - Windows only
+            # POSIX raises NotADirectoryError below instead, so this arm is
+            # the other half of the matrix.
+            raise WikiLocalFileError(
+                f"Cannot use {target}: a parent path component is a file"
+            ) from None
+        return
+    except NotADirectoryError as exc:
+        # POSIX says so outright; no transfer can ever land here.
+        raise WikiLocalFileError(
+            f"Cannot use {target}: a parent path component is a file", cause=exc
+        ) from exc
+    except OSError:
+        return  # _open_part will produce the real diagnosis
+    if stat.S_ISDIR(existing.st_mode):
+        raise WikiLocalFileError(
+            f"{target} is a directory, not a file. Give save_to a full file "
+            "path, including the file name."
+        )
+    if not overwrite:
+        raise WikiLocalFileError(
+            f"File already exists: {target}. Pass overwrite=true to replace it."
+        )
+
+
+def _write_all(fd: int, chunk: bytes) -> None:
+    """os.write may write less than asked; loop until the chunk is out."""
+    view = memoryview(chunk)
+    while view:
+        view = view[os.write(fd, view) :]
+
+
+def _part_path(target: Path) -> Path:
+    """A sibling `<name>.<tag>.part` that still fits in NAME_MAX.
+
+    The whole target name would be the natural prefix, but it can already be
+    close to the 255-byte limit, and the tag plus suffix add 14 more — an
+    attachment's own filename is the obvious thing for a caller to reuse, so
+    this is reachable with a perfectly legal target name. Truncation is on a
+    UTF-8 character boundary, since names are bytes to the kernel but text here.
+    """
+    budget = _NAME_MAX - _PART_SUFFIX_BUDGET
+    if os.name == "nt":
+        # Windows also caps the whole path at MAX_PATH (260) unless the machine
+        # opted into long paths, and the suffix pushes a target Windows itself
+        # accepts over the line. Shrink the prefix by whatever the parent, the
+        # separator and the suffix spend; a parent that leaves nothing for the
+        # prefix is refused below, once the fallback name is known.
+        budget = min(
+            budget,
+            # MAX_PATH counts the terminating NUL, so 259 is the longest path
+            # CreateFileW accepts without the `\\?\` prefix — spending all
+            # 260 produced a name Windows rejects with ERROR_PATH_NOT_FOUND.
+            _WINDOWS_MAX_PATH - 1 - len(str(target.parent)) - 1 - _PART_SUFFIX_BUDGET,
+        )
+    stem = target.name.encode()[: max(budget, 0)]
+    prefix = stem.decode(errors="ignore") or "download"
+    part = target.with_name(f"{prefix}.{secrets.token_hex(4)}.part")
+    if os.name == "nt" and len(str(part)) >= _WINDOWS_MAX_PATH:
+        # The `or "download"` fallback knows nothing about the budget, so a
+        # parent long enough to leave no room for a stem still overflows.
+        # Refuse here, where the reason can be said, rather than at os.open.
+        raise WikiLocalFileError(
+            f"Cannot write beside {target}: the path is too long for this system"
+        )
+    return part
+
+
+def _open_part(target: Path, *, overwrite: bool) -> tuple[int, Path]:
+    """Create the `.part` file beside `target` and return its fd.
+
+    Deliberately not `tempfile.mkstemp`: that hardcodes mode 0600 in defiance
+    of the umask, and `os.replace` moves the inode, so those permissions would
+    become the delivered file's — every download owner-only, and an overwrite
+    silently discarding the replaced file's mode and group. `os.open` with
+    0o666 lets the kernel apply the umask instead, which is exactly what a
+    plain `open(path, "wb")` (or curl, or wget) produces: 0644 under the usual
+    umask, and never executable, since 0o666 carries no execute bit. When a
+    file is being replaced its own mode wins, because writing over a file does
+    not change its permissions.
+    """
+    inherited: int | None = None
+    try:
+        existing = target.stat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise WikiLocalFileError(f"Cannot inspect {target}", cause=exc) from exc
+    else:
+        if stat.S_ISDIR(existing.st_mode):
+            raise WikiLocalFileError(
+                f"{target} is a directory, not a file. Give save_to a full "
+                "file path, including the file name."
+            )
+        if not overwrite:
+            raise WikiLocalFileError(
+                f"File already exists: {target}. Pass overwrite=true to replace it."
+            )
+        inherited = stat.S_IMODE(existing.st_mode)
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise WikiLocalFileError(
+            f"Cannot create the directory for {target}", cause=exc
+        ) from exc
+
+    for _ in range(_PART_ATTEMPTS):
+        candidate = _part_path(target)
+        try:
+            # O_BINARY or Windows opens this in the CRT's text mode, where
+            # every \n written becomes \r\n and the return value of write()
+            # does not say so — silently corrupting every binary attachment.
+            # The stdlib treats the flag as mandatory for raw os.open byte
+            # I/O (_pyio, tempfile, tarfile, fileinput all OR it in); the
+            # tempfile this replaced included it via _bin_openflags.
+            fd = os.open(
+                candidate,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0),
+                0o666,
+            )
+        except FileExistsError:  # pragma: no cover - 8 random bytes collided
+            continue
+        except OSError as exc:
+            raise WikiLocalFileError(
+                f"Cannot write beside {target}", cause=exc
+            ) from exc
+        if inherited is not None and os.name == "posix":  # pragma: no branch
+            # POSIX-only twice over: os.fchmod exists on Windows only since
+            # 3.13, and chmod there toggles nothing but the read-only
+            # attribute — there is no mode worth inheriting.
+            try:
+                os.fchmod(fd, inherited)
+            except OSError as exc:
+                # vfat/exFAT and many FUSE and SMB mounts answer EPERM here —
+                # the same filesystems _place_part's fallback exists for. The
+                # fd and the file are already ours, so clean up rather than
+                # letting a raw OSError escape past the ownership handshake.
+                _discard_part(fd, candidate)
+                raise WikiLocalFileError(
+                    f"Cannot set permissions on {target}", cause=exc
+                ) from exc
+        return fd, candidate
+    raise WikiLocalFileError(  # pragma: no cover - 8 random bytes, four tries
+        f"Could not create a temporary file beside {target}"
+    )
+
+
+# link(2) failures that mean "this filesystem cannot hardlink at all"
+# (FAT/exFAT sticks, some SMB/NFS mounts), as opposed to a real problem with
+# these specific paths. EACCES is included deliberately: were it a genuine
+# permission problem, the replace fallback fails with the same errno — now
+# wrapped with the target's name instead of escaping bare.
+# ENODEV and ENOTSUP cover the Windows half. The set was pure POSIX, yet the
+# filesystems it names are reached from Windows too, where CPython maps Win32
+# ERROR_NOT_SUPPORTED to ENODEV — an errno link(2) never produces, so nothing
+# here would have let it through. Added rather than probed: the cost is one
+# errno in a set, and the cost of guessing wrong is every non-overwrite
+# download to such a volume failing after the whole transfer already ran.
+_HARDLINK_UNSUPPORTED_ERRNOS = frozenset(
+    {
+        errno.EPERM,
+        errno.EOPNOTSUPP,
+        errno.ENOTSUP,
+        errno.ENOSYS,
+        errno.ENODEV,
+        errno.EXDEV,
+        errno.EINVAL,
+        errno.EACCES,
+    }
+)
+
+
+def _refuse_existing(target: Path, cause: OSError) -> WikiLocalFileError:
+    """The one wording for "the name is taken", shared with _probe_target."""
+    return WikiLocalFileError(
+        f"File already exists: {target}. Pass overwrite=true to replace it.",
+        cause=cause,
+    )
+
+
+def _fsync_directory(path: Path) -> None:
+    """Make a completed rename durable — where that is possible at all.
+
+    POSIX-only by necessity, not caution: on Windows `os.open` cannot open a
+    directory (the CRT answers EACCES for any directory), and FlushFileBuffers
+    does not accept directory handles anyway, so there is no equivalent to
+    reach for — NTFS journals the rename on its own schedule.
+
+    Only the early return is excluded, never the body: whole-function coverage
+    exclusion here once hid the fact that no test asserted the fsync happens
+    at all, so replacing this body with `return` kept the suite at 100%.
+    `test_a_finished_download_flushes_the_directory_entry` is the guard.
+    """
+    if os.name != "posix":  # pragma: no cover - the other half of the matrix
+        return
+    dir_fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _place_part(part: Path, target: Path, *, overwrite: bool) -> None:
+    """Put the finished `.part` under the final name.
+
+    Without ``overwrite`` the link/unlink pair replaces ``os.replace``: `link`
+    fails with EEXIST if the name was taken while the transfer ran, so the
+    refusal is the kernel's, at the instant of creation. `os.replace` would
+    clobber whatever appeared during those minutes despite ``overwrite=false``.
+
+    Filesystems that cannot hardlink fall back to a fresh existence check plus
+    rename: a narrow race window reopens there, but the alternative is failing
+    every non-overwrite download to a FAT stick or a network mount after the
+    whole transfer already ran.
+    """
+    if overwrite:
+        part.replace(target)
+        return
+    try:
+        os.link(part, target)
+    except FileExistsError as exc:
+        raise _refuse_existing(target, exc) from exc
+    except OSError as exc:
+        if exc.errno not in _HARDLINK_UNSUPPORTED_ERRNOS:
+            raise
+        if target.exists():
+            raise _refuse_existing(target, exc) from exc
+        part.replace(target)
+        return
+    # Same rule as the directory fsync in _commit_part: past the link the file
+    # is in place and correct, so a `.part` that will not go away is a stray
+    # file, not a failed download. Raising here told the caller to retry a
+    # transfer that had already delivered — and sent them into an `overwrite`
+    # they never needed, because the retry then found their own new file.
+    try:
+        part.unlink()
+    except OSError as exc:
+        logger.warning("%s is in place but %s was not removed: %s", target, part, exc)
+
+
+def _commit_part(fd: int, part: Path, target: Path, *, overwrite: bool) -> None:
+    """Flush the `.part` to storage and put it in place under the final name.
+
+    fsync before the rename is the half that makes the write durable, not just
+    atomic: `close()` only hands the buffers to the page cache, so without it a
+    crash can leave the rename committed while the data blocks are not — a
+    full-length file of zeros under the final name, which is precisely the
+    "crashed download masquerading as a finished one" this is supposed to
+    prevent. fsync is also where a full disk actually reports itself: with
+    delayed allocation ENOSPC arrives here, not at write().
+
+    Owns the fd and the `.part` from the moment it is entered: every failure
+    is cleaned up and wrapped *here*, and the caller must not touch either
+    again — a second os.close on the same number could tear down an fd the
+    pool has already handed to someone else.
+    """
+    try:
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        _place_part(part, target, overwrite=overwrite)
+    except WikiLocalFileError:
+        with contextlib.suppress(OSError):
+            part.unlink()
+        raise
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            part.unlink()
+        raise WikiLocalFileError(f"Cannot finish writing {target}", cause=exc) from exc
+    # Past the rename the bytes are durable in the file and the entry exists;
+    # only the entry's own durability is still in question. Raising here would
+    # tell the caller to retry a download that is already complete and correct
+    # — and, with overwrite, one that has already replaced their file.
+    try:
+        _fsync_directory(target.parent)
+    except OSError as exc:
+        logger.warning(
+            "%s is in place but its directory entry was not flushed: %s", target, exc
+        )
+
+
+def _discard_part(fd: int, part: Path) -> None:
+    """Drop a failed transfer's `.part`, tolerating a half-torn-down state.
+
+    Deliberately free of awaits: this runs from an `except BaseException`, so a
+    second cancellation delivered at an await here would skip the unlink and
+    leave the partial file in the caller's directory.
+    """
+    with contextlib.suppress(OSError):
+        os.close(fd)
+    with contextlib.suppress(OSError):
+        part.unlink()
 
 
 def _backoff_delay(attempt: int) -> float:
@@ -267,9 +645,44 @@ class WikiClient(WikiProtocol):
         not_found: Callable[[], WikiError] | None = None,
         timeout: ClientTimeout | None = None,  # noqa: ASYNC109
         retryable: bool | None = None,
-        max_bytes: int | None = None,
     ) -> bytes:
-        """Perform a Wiki API request.
+        """Perform a Wiki API request and return the response body.
+
+        The thin common case of `_request_raw`, for the callers — all but the
+        attachment endpoints — that have no use for the Content-Type header,
+        the per-response ceiling or the streaming sink.
+        """
+        reply = await self._request_raw(
+            method,
+            path,
+            auth=auth,
+            params=params,
+            json_body=json_body,
+            data=data,
+            content_type=content_type,
+            not_found=not_found,
+            timeout=timeout,
+            retryable=retryable,
+        )
+        return reply.content
+
+    async def _request_raw(
+        self,
+        method: str,
+        path: str,
+        *,
+        auth: YandexAuth | None = None,
+        params: dict[str, Any] | None = None,
+        json_body: Any = None,
+        data: Any = None,
+        content_type: str | None = None,
+        not_found: Callable[[], WikiError] | None = None,
+        timeout: ClientTimeout | None = None,  # noqa: ASYNC109
+        retryable: bool | None = None,
+        max_bytes: Callable[[str | None], int] | None = None,
+        body_sink: Callable[[bytes], Awaitable[None]] | None = None,
+    ) -> AttachmentContent:
+        """Perform a Wiki API request; the body travels with its Content-Type.
 
         ``retryable`` marks the call as safe to repeat; it defaults to GET. Only such
         calls are retried, because a 5xx may well arrive after the write has been
@@ -281,7 +694,16 @@ class WikiClient(WikiProtocol):
         time a caller can measure ``len(payload)`` the bytes are already resident,
         which on a shared OAuth deployment is a per-caller memory hole. Enforced
         twice — against ``Content-Length`` before reading anything, and against the
-        stream itself for a chunked response that declares no length.
+        stream itself for a chunked response that declares no length. A callable
+        picks the ceiling per response, from its Content-Type: the download
+        endpoint serves images and text through one URL, and which ceiling is
+        right is only known once the header arrives (always before the body).
+
+        ``body_sink`` diverts a success body out of memory: chunks go to the
+        sink as they arrive and the returned body is empty. Error bodies still
+        materialize (truncated) — they are diagnostics, not payload. A sink
+        call must not be retried: chunks already delivered cannot be unsent,
+        so a second attempt would duplicate them.
         """
         headers = self._build_headers(auth)
         if content_type:
@@ -297,7 +719,11 @@ class WikiClient(WikiProtocol):
         if timeout is not None:
             kwargs["timeout"] = timeout
 
+        # One predicate instead of three restatements below.
+        diverted = max_bytes is not None or body_sink is not None
         can_retry = method == "GET" if retryable is None else retryable
+        if body_sink is not None and can_retry:
+            raise ValueError("body_sink requires retryable=False")
         attempts = self._max_retries + 1 if can_retry else 1
 
         for attempt in range(1, attempts + 1):
@@ -305,22 +731,41 @@ class WikiClient(WikiProtocol):
                 async with self._http.request(method, path, **kwargs) as response:
                     status = response.status
                     retry_after = response.headers.get("Retry-After")
-                    if max_bytes is None:
-                        payload = await response.read()
-                    elif status < 400:
-                        payload = await self._read_capped(
-                            response, method, path, max_bytes
-                        )
-                    else:
+                    # aiohttp already parsed the header (params stripped,
+                    # lowercased); re-splitting it in the tool layer only
+                    # invited the two copies to drift. The explicit None
+                    # preserves "the server said nothing", which aiohttp
+                    # otherwise reports as application/octet-stream.
+                    reply_type = (
+                        response.content_type
+                        if response.headers.get("Content-Type")
+                        else None
+                    )
+                    if status >= 400:
                         # An error body is a diagnostic, not the payload the
-                        # caller asked for, so it is truncated rather than
-                        # refused: raising ResponseTooLarge here would replace
-                        # the API's own explanation of what went wrong with a
+                        # caller asked for, so on a capped or sunk request it
+                        # is truncated rather than refused or diverted:
+                        # raising ResponseTooLarge here would replace the
+                        # API's own explanation of what went wrong with a
                         # complaint about its size. build_api_error already
                         # degrades to a bare status when the JSON does not
                         # parse, which is what a truncated envelope looks like.
-                        payload = await self._read_truncated(
-                            response, ERROR_BODY_MAX_BYTES
+                        payload = (
+                            await self._read_truncated(response, ERROR_BODY_MAX_BYTES)
+                            if diverted
+                            else await response.read()
+                        )
+                    elif body_sink is not None:
+                        async for chunk in response.content.iter_chunked(
+                            DOWNLOAD_CHUNK_SIZE
+                        ):
+                            await body_sink(chunk)
+                        payload = b""
+                    elif max_bytes is None:
+                        payload = await response.read()
+                    else:
+                        payload = await self._read_capped(
+                            response, method, path, max_bytes(reply_type)
                         )
             except (ClientError, TimeoutError) as exc:
                 # A plain total timeout raises bare TimeoutError, which is not a
@@ -362,7 +807,7 @@ class WikiClient(WikiProtocol):
                     continue
             if status >= 400:
                 raise build_api_error(status, payload)
-            return payload
+            return AttachmentContent(payload, reply_type)
 
         # The loop always returns or raises; this only keeps the function's
         # return type honest if that ever stops being true.
@@ -371,49 +816,58 @@ class WikiClient(WikiProtocol):
         )
 
     @staticmethod
+    async def _drain(response: ClientResponse, limit: int) -> bytes:
+        """Read at most ``limit`` bytes off the body, stopping at EOF.
+
+        The one place bytes are pulled from a response. `iter_chunked` is what
+        makes that safe: `StreamReader.read(n)` returns whatever happens to be
+        buffered, up to `n` — not `n` bytes — so the hand-rolled loops this
+        replaces each had to re-derive the same "keep going until EOF" rule,
+        and differed by an off-by-one nobody could see was deliberate.
+
+        Returning `limit + 1` bytes is the signal that the body was longer;
+        callers decide whether that is an error or just a place to stop.
+        """
+        body = bytearray()
+        # Never more than the ceiling plus the one byte that proves overflow:
+        # asking for a flat DOWNLOAD_CHUNK_SIZE let a 64 KiB cap materialize a
+        # whole chunk before the check below could fire.
+        async for chunk in response.content.iter_chunked(
+            min(limit + 1, DOWNLOAD_CHUNK_SIZE)
+        ):
+            body.extend(chunk)
+            if len(body) > limit:
+                del body[limit + 1 :]
+                break
+        return bytes(body)
+
+    @classmethod
     async def _read_capped(
-        response: ClientResponse, method: str, path: str, max_bytes: int
+        cls, response: ClientResponse, method: str, path: str, max_bytes: int
     ) -> bytes:
         """Read a body, refusing to materialize more than ``max_bytes``.
 
         ``Content-Length`` settles it without reading a byte when the server
-        sends one. Otherwise read up to one byte past the cap and stop.
-        The loop is load-bearing: aiohttp's ``StreamReader.read(n)`` returns
-        whatever is already buffered, up to ``n`` — not ``n`` bytes — so a
-        single call would silently truncate a body that arrives in several
-        network chunks. Overflow raises inside the caller's ``async with``,
-        which leaves the response undrained, so aiohttp closes the connection
-        instead of pulling the rest down.
+        sends one. Otherwise the stream itself decides: overflow raises inside
+        the caller's ``async with``, which leaves the response undrained, so
+        aiohttp closes the connection instead of pulling the rest down.
         """
         declared = response.content_length
         if declared is not None and declared > max_bytes:
             raise ResponseTooLarge(method, path, declared, max_bytes)
-        body = bytearray()
-        while len(body) <= max_bytes:
-            chunk = await response.content.read(max_bytes + 1 - len(body))
-            if not chunk:
-                break
-            body.extend(chunk)
+        body = await cls._drain(response, max_bytes)
         if len(body) > max_bytes:
             raise ResponseTooLarge(method, path, None, max_bytes)
-        return bytes(body)
+        return body
 
-    @staticmethod
-    async def _read_truncated(response: ClientResponse, limit: int) -> bytes:
+    @classmethod
+    async def _read_truncated(cls, response: ClientResponse, limit: int) -> bytes:
         """Read at most ``limit`` bytes, stopping quietly rather than raising.
 
-        Same drain loop as ``_read_capped`` and for the same reason (``read(n)``
-        is a partial read), but overflow is not an error here: the caller wants
-        whatever the body says, and a body this large is malformed rather than
-        forbidden.
+        Overflow is not an error here: the caller wants whatever the body says,
+        and a body this large is malformed rather than forbidden.
         """
-        body = bytearray()
-        while len(body) < limit:
-            chunk = await response.content.read(limit - len(body))
-            if not chunk:
-                break
-            body.extend(chunk)
-        return bytes(body)
+        return (await cls._drain(response, limit))[:limit]
 
     @staticmethod
     def _json_or_empty(payload: bytes) -> Any:
@@ -1161,14 +1615,14 @@ class WikiClient(WikiProtocol):
             {**body, "page_id": page_id, "comment_id": comment_id, "deleted": True}
         )
 
-    async def page_download_attachment(
+    async def page_read_attachment_bytes(
         self,
         page_id: int,
         *,
         file_id: int,
-        max_bytes: int | None = None,
+        max_bytes: Callable[[str | None], int] | None = None,
         auth: YandexAuth | None = None,
-    ) -> bytes:
+    ) -> AttachmentContent:
         # not_found IS mapped here, unlike the deletes: this endpoint
         # answers a miss with a placeholder GIF body instead of the JSON
         # error envelope (probed 2026-08-11), which build_api_error would
@@ -1178,13 +1632,155 @@ class WikiClient(WikiProtocol):
         # small JSON body where a repeat costs nothing, while here a repeat
         # re-transfers the whole file. The caller wants one attempt and a
         # clear error, not three transfers of the same blob.
-        return await self._request(
+        body, mime_type = await self._request_raw(
             "GET",
             f"v1/pages/{page_id}/attachments/{file_id}/download",
             auth=auth,
             not_found=lambda: AttachmentNotFound(page_id, file_id),
             retryable=False,
             max_bytes=max_bytes,
+        )
+        return AttachmentContent(body, mime_type)
+
+    async def page_download_attachment(
+        self,
+        page_id: int,
+        *,
+        file_id: int,
+        save_to: str,
+        overwrite: bool = False,
+        auth: YandexAuth | None = None,
+    ) -> AttachmentDownloadResult:
+        """Stream an attachment to a local file, never holding it in memory.
+
+        The inline reader above exists to bring content into the conversation
+        and is capped accordingly; this is the uncapped counterpart for getting
+        the artifact itself. Chunks go from the socket to a `.part` file in the
+        target directory, fsynced and put in place under the final name only on
+        success, so an interrupted transfer never leaves a half-written file
+        there and a pre-existing file survives any failure intact.
+
+        The `.part` is created on the first chunk, not up front: a 404 or a
+        403 then leaves the caller's filesystem untouched instead of creating
+        a directory tree and a temp file for a body that never arrives.
+        """
+        target = local_path(save_to)
+
+        # Every filesystem operation for this download runs on ONE dedicated
+        # worker, in submission order. That is what makes the fd safe: it is
+        # never touched from the event loop, and a cancelled `await` cannot
+        # close a descriptor another thread is still writing to — the write and
+        # the cleanup are queued on the same worker, so cleanup simply runs
+        # after the write is done with it — replacing the lock plus the
+        # `abandoned` flag that were hand-rolling that ordering before.
+        #
+        # Shut down with wait=False, and never via `with`: the context
+        # manager's exit calls shutdown(wait=True) on the event loop thread,
+        # so a cancellation with a write in flight froze the whole server
+        # until that write returned — measured at 951 ms against a 1 s stub,
+        # and unbounded on a hung mount. wait=False still drains the queue
+        # (already-submitted work always runs), so the cleanup happens; it
+        # just stops happening on the loop.
+        loop = asyncio.get_running_loop()
+        # `holder` is mutated ONLY by the worker; the event loop reads it, but
+        # always after awaiting the hand-off that filled it, so it needs no
+        # lock: the single worker gives the ordering a lock was previously
+        # faking. A cancelled `await` cannot stop the open that is
+        # already running, but the cleanup submitted afterwards is queued
+        # behind it and therefore sees whatever it produced.
+        holder: list[tuple[int, Path]] = []
+        size = 0
+        head = b""
+
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="wiki-download")
+        try:
+
+            def run(fn: Callable[[], _T]) -> Awaitable[_T]:
+                return loop.run_in_executor(pool, fn)
+
+            # Refused before the request, so a bad path costs no transfer. The
+            # same checks run again inside _open_part, which is where they are
+            # authoritative — this pair only buys the early exit.
+            await run(lambda: _probe_target(target, overwrite=overwrite))
+
+            def open_part() -> None:
+                holder.append(_open_part(target, overwrite=overwrite))
+
+            def commit() -> None:
+                # Pops before committing: _commit_part owns the fd and the file
+                # from here, cleans up its own failures, and the cleanup task
+                # must therefore never see this pair again.
+                fd, part = holder.pop()
+                _commit_part(fd, part, target, overwrite=overwrite)
+
+            def discard_leftover() -> None:
+                if holder:
+                    _discard_part(*holder.pop())
+
+            async def sink(chunk: bytes) -> None:
+                nonlocal size, head
+                if len(head) < IMAGE_MAGIC_PREFIX_BYTES:
+                    head = (head + chunk)[:IMAGE_MAGIC_PREFIX_BYTES]
+                if not holder:
+                    # Created on the first chunk, not up front, so a 404 or a
+                    # 403 leaves the caller's filesystem untouched.
+                    await run(open_part)
+                fd = holder[0][0]
+                size += len(chunk)
+                try:
+                    await run(lambda: _write_all(fd, chunk))
+                except OSError as exc:
+                    raise WikiLocalFileError(
+                        f"Cannot write to {target}", cause=exc
+                    ) from exc
+
+            try:
+                _, wire_mime = await self._request_raw(
+                    "GET",
+                    f"v1/pages/{page_id}/attachments/{file_id}/download",
+                    auth=auth,
+                    not_found=lambda: AttachmentNotFound(page_id, file_id),
+                    retryable=False,
+                    body_sink=sink,
+                    timeout=DOWNLOAD_STALL_TIMEOUT,
+                )
+                if not holder:
+                    # An empty attachment: no chunk ever arrived, so the file
+                    # still has to be created before it can be committed.
+                    await run(open_part)
+                await run(commit)
+            except BaseException:
+                # BaseException on purpose: CancelledError is not an Exception,
+                # and a cancelled transfer must not leak its `.part` either.
+                # Submitted rather than awaited — the await would just be
+                # cancelled again — and queued behind any open or write still
+                # running, so it sees the finished state rather than racing it.
+                try:
+                    pool.submit(discard_leftover)
+                except RuntimeError as exc:
+                    # The pool takes no more work — interpreter teardown, or a
+                    # thread that could not be created. Logged, not run here:
+                    # a synchronous _discard_part would close the descriptor
+                    # from the event loop while the worker may still be
+                    # writing to it, which is the exact race this whole design
+                    # exists to prevent. Losing the original exception to a
+                    # RuntimeError would be worse than a stray `.part`.
+                    logger.warning("could not schedule cleanup for %s: %s", target, exc)
+                raise
+            resolved = await run(target.resolve)
+        finally:
+            pool.shutdown(wait=False)
+        return AttachmentDownloadResult(
+            page_id=page_id,
+            file_id=file_id,
+            path=str(resolved),
+            size_bytes=size,
+            # The sniffed type wins over the header for the same reason the
+            # inline read trusts bytes over claims — and so that one file does
+            # not report image/png when read and application/octet-stream when
+            # saved. The header remains the answer for everything the magic
+            # table does not cover.
+            mimetype=image_mime(head) or wire_mime,
         )
 
     async def page_delete_attachment(
@@ -1320,9 +1916,14 @@ class WikiClient(WikiProtocol):
         append_location: UploadLocation = "bottom",
         auth: YandexAuth | None = None,
     ) -> UploadAttachmentResult:
-        path = Path(file_path)
+        # local_path, not Path: `~/report.pdf` has to mean the same thing here
+        # as it does to page_download_attachment's save_to. WikiLocalFileError
+        # rather than the builtin FileNotFoundError so both filesystem tools
+        # fail inside the WikiError hierarchy every caller above already
+        # handles.
+        path = local_path(file_path)
         if not await asyncio.to_thread(path.is_file):
-            raise FileNotFoundError(f"File not found: {file_path}")
+            raise WikiLocalFileError(f"File not found: {path}")
 
         stat_result = await asyncio.to_thread(path.stat)
         upload_session = await self.upload_session_create(

@@ -221,9 +221,20 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   documented and live** (probed 2026-08-11): `GET /pages/{id}/attachments/{fid}/download`
   streams the bytes, `GET /pages/attachments/download_by_url?url=<slug>/.files/<name>`
   works too, `DELETE /pages/{id}/attachments/{fid}` answers 204. Exposed as
-  `page_read_attachment` (an embedded resource: text inline, otherwise a
-  base64 blob, 128 KiB cap enforced from `Content-Length` before the body is
-  read) and `page_delete_attachment`.
+  `page_read_attachment` (a content block: images as a native image block,
+  text inline, otherwise a base64 blob — capped at 128 KiB for text/binary
+  and 2 MiB for images; the four renderable formats are recognized by magic
+  bytes, never by the header, because an image block the vision API cannot
+  decode fails the host's next model call), `page_download_attachment` (streams to a local
+  file, uncapped) and `page_delete_attachment`.
+- **The download endpoint declares a precise per-file `Content-Type`
+  (`image/png`, `text/markdown; charset=UTF-8`, …) but no `Content-Length`
+  and no `Content-Disposition`** — the transfer is chunked, whatever the
+  file size (probed 2026-08-19 with PNG/MD/BIN fixtures). So the mime header
+  is trustworthy enough to pick the inline cap before the body arrives, but
+  size enforcement can only happen by counting bytes on the capped stream
+  read, and the filename must come from the attachment listing, never the
+  response headers.
 - **A missing attachment on the download endpoint is a 404 with a placeholder GIF
   body**, not the JSON error envelope (found 2026-08-17, during implementation) —
   the client maps it to `AttachmentNotFound` itself. The delete endpoints answer misses with the normal

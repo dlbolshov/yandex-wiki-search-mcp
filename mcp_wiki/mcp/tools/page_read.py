@@ -8,6 +8,7 @@ from mcp.server import MCPServer
 from mcp.types import (
     BlobResourceContents,
     EmbeddedResource,
+    ImageContent,
     TextResourceContents,
     ToolAnnotations,
 )
@@ -39,7 +40,12 @@ from mcp_wiki.mcp.utils import (
     normalize_slug,
     resolve_page_locator,
 )
-from mcp_wiki.wiki.custom.errors import WikiError
+from mcp_wiki.wiki.custom.errors import ResponseTooLarge, WikiError
+from mcp_wiki.wiki.custom.mimes import (
+    RENDERABLE_IMAGE_MIMES,
+    UNINFORMATIVE_MIMES,
+    image_mime,
+)
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentListResponse,
     CommentsResponse,
@@ -61,9 +67,11 @@ FETCH_ALL_MAX_ITEMS = 500
 FETCH_ALL_BUDGET_SECONDS = 25.0
 _FETCH_ALL_MAX_REQUESTS = 50
 
-# Inline ceiling for page_read_attachment, enforced by the client BEFORE
-# the body is read (Content-Length, else a capped stream read), so an oversized
-# attachment never lands in this process at all.
+# Inline ceiling for page_read_attachment, enforced by the client on the
+# stream. It is the ceiling for content the wire names as something other than
+# a renderable image; an uninformative mime gets the image budget instead (see
+# _inline_ceiling), so up to MAX_INLINE_IMAGE_BYTES can be read before the
+# bytes reveal themselves as a non-image and this limit refuses them.
 #
 # 128 KiB, not the megabyte it started as: this guards the conversation, and a
 # megabyte of base64 is ~1.4M characters — several hundred thousand tokens,
@@ -71,6 +79,56 @@ _FETCH_ALL_MAX_REQUESTS = 50
 # refuse. At 128 KiB the base64 worst case is ~175k characters, which is large
 # but survivable. Bigger files stay reachable via the attachment's download_url.
 MAX_INLINE_ATTACHMENT_BYTES = 131_072
+
+# Images get their own, higher ceiling: an ImageContent block goes to the
+# model's vision input, where cost is counted in visual tokens — ceil(w/28) *
+# ceil(h/28), capped at 4784 on the current top tier — not in base64
+# characters. A megabyte of PNG is at most a few thousand tokens that way
+# against several hundred thousand as text, so the argument behind
+# MAX_INLINE_ATTACHMENT_BYTES above simply does not apply.
+#
+# 2 MiB rather than 1: past roughly 2576 px on the long edge the vision API
+# downscales anyway, so extra bytes buy nothing, and the sizes that matter
+# below that line are 4K PNG screenshots, which run 1-3 MB and were being
+# refused. Still well under the API's hard 10 MB base64 per image.
+MAX_INLINE_IMAGE_BYTES = 2_097_152
+
+
+def _oversize_remedy(include_local_downloads: bool) -> str:
+    """Where to send a caller whose attachment did not fit.
+
+    Conditional because `page_download_attachment` is registered only outside
+    WIKI_READ_ONLY and only when local filesystem access is on: naming it
+    unconditionally would send agents to a tool that does not exist, which is
+    the very thing build_instructions() is dynamic to avoid. `download_url`
+    always works, so it is the fallback.
+    """
+    if include_local_downloads:
+        return (
+            "Use page_download_attachment to save it locally, or fetch the "
+            "attachment's download_url from page_get_attachments yourself."
+        )
+    return "Fetch the attachment's download_url from page_get_attachments yourself."
+
+
+def _inline_ceiling(content_type: str | None) -> int:
+    """Byte ceiling for an inline read, picked from the wire's Content-Type.
+
+    Called by the client between headers and body — the download endpoint
+    declares no Content-Length (chunked, probed 2026-08-19), so the header is
+    the only pre-body signal there is.
+
+    An uninformative mime gets the image budget on purpose: `image_mime` in
+    `wiki/custom/mimes.py` can only judge bytes that were actually read, so
+    deciding the ceiling from the header alone would refuse every
+    octet-stream image over the text ceiling — precisely the files that
+    magic-byte check exists for.
+    """
+    base = content_type or ""
+    if base in RENDERABLE_IMAGE_MIMES or base in UNINFORMATIVE_MIMES:
+        return MAX_INLINE_IMAGE_BYTES
+    return MAX_INLINE_ATTACHMENT_BYTES
+
 
 EnvelopeT = TypeVar("EnvelopeT", bound=CursorEnvelope)
 
@@ -162,7 +220,11 @@ async def _paginate(
     return response
 
 
-def register_page_read_tools(mcp: MCPServer[Any]) -> None:
+def register_page_read_tools(
+    mcp: MCPServer[Any],
+    *,
+    include_local_downloads: bool = True,
+) -> None:
     @mcp.tool(
         title="Search Wiki",
         description=(
@@ -576,13 +638,15 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         title="Read Page Attachment",
         description=(
             "Read a Yandex Wiki page attachment's content into the "
-            "conversation as an embedded resource (nothing is saved "
-            "anywhere): text files arrive as text, anything else "
-            "base64-encoded. Meant for text attachments — configs, CSVs, "
-            "logs. Refuses files over 128 KiB without transferring them — "
-            "fetch those yourself via the attachment's download_url from "
-            "page_get_attachments. That listing is also where file ids "
-            "come from."
+            "conversation (nothing is saved anywhere): PNG/JPEG/GIF/WebP "
+            "images arrive as a native image block — vision-capable clients "
+            "render and see them — text files (SVG included, it is XML) as "
+            "text, anything else base64-encoded. Meant for images and text "
+            "attachments — diagrams, screenshots, configs, CSVs, logs. "
+            f"Refuses non-image content over {MAX_INLINE_ATTACHMENT_BYTES // 1024} "
+            f"KiB and images over {MAX_INLINE_IMAGE_BYTES // 1024 // 1024} MiB. "
+            + _oversize_remedy(include_local_downloads)
+            + " page_get_attachments is also where file ids come from."
         ),
         annotations=READ_ONLY,
         # An embedded resource is a real content block, so the SDK ships it
@@ -597,14 +661,48 @@ def register_page_read_tools(mcp: MCPServer[Any]) -> None:
         file_id: AttachmentID,
         page_id: OptionalPageID = None,
         slug: OptionalPageSlug = None,
-    ) -> EmbeddedResource:
+    ) -> EmbeddedResource | ImageContent:
         resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        raw = await get_wiki(ctx).page_download_attachment(
-            resolved_page_id,
-            file_id=file_id,
-            max_bytes=MAX_INLINE_ATTACHMENT_BYTES,
-            auth=get_yandex_auth(ctx),
-        )
+        try:
+            raw, _ = await get_wiki(ctx).page_read_attachment_bytes(
+                resolved_page_id,
+                file_id=file_id,
+                max_bytes=_inline_ceiling,
+                auth=get_yandex_auth(ctx),
+            )
+        except ResponseTooLarge as exc:
+            # The client refuses on the stream and can only report bytes; the
+            # remedy lives here, because this is the layer that knows which
+            # sibling tools exist. Without this the common case — an image past
+            # the image budget — reached the agent as a bare transport string
+            # quoting a limit the tool description never mentions.
+            raise ValueError(
+                f"Attachment is larger than the "
+                f"{exc.max_bytes}-byte inline limit for its type "
+                f"({MAX_INLINE_ATTACHMENT_BYTES} for text and other binaries, "
+                f"{MAX_INLINE_IMAGE_BYTES} for images). "
+                + _oversize_remedy(include_local_downloads)
+            ) from exc
+        detected = image_mime(raw)
+        if detected is None and len(raw) > MAX_INLINE_ATTACHMENT_BYTES:
+            # Reached whenever the read got the image budget — an uninformative
+            # mime, or a header claiming a renderable image — and the bytes then
+            # turned out not to be one. The client cannot make this call: only
+            # the body settles it.
+            raise ValueError(
+                f"Attachment is {len(raw)} bytes, over the "
+                f"{MAX_INLINE_ATTACHMENT_BYTES}-byte limit for non-image "
+                f"content ({MAX_INLINE_IMAGE_BYTES} for images). "
+                + _oversize_remedy(include_local_downloads)
+            )
+        if detected is not None:
+            # A native image block, not an embedded blob: this is the one
+            # shape clients render inline and vision models actually see.
+            return ImageContent(
+                type="image",
+                data=base64.b64encode(raw).decode("ascii"),
+                mime_type=detected,
+            )
         uri = f"wiki-mcp://pages/{resolved_page_id}/attachments/{file_id}"
         text = _as_text(raw)
         if text is not None:
