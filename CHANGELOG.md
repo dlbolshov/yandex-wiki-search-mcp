@@ -2,10 +2,10 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.4.0] - 2026-08-21
 
 Attachments in both directions: pictures into the conversation, files onto the
-disk. Tool surface grows to 33 (a minor bump when released).
+disk. Tool surface grows to 33.
 
 ### Added
 - `page_read_attachment` returns **images as a native MCP image block** — vision-capable clients render them and models see them, where a base64 blob was opaque to both, and the price is right: a vision block costs `ceil(w/28) * ceil(h/28)` visual tokens, capped in the low thousands, against several hundred thousand for the same bytes as base64 text. Whether an attachment *is* an image is decided by its **magic bytes**, never by the wire's `Content-Type`: only PNG/JPEG/GIF/WebP become image blocks, because an `ImageContent` the vision API cannot decode does not degrade to "the model sees nothing" — the host's next model call fails with `Could not process image` and, since hosts retry the same tool call, the session dies (anthropics/claude-code#28279). So an SVG arrives as text, which is what it is anyway, and a mislabelled or empty file cannot masquerade as a picture. Images get a 2 MiB ceiling against the base 128 KiB, sized so a 4K PNG screenshot fits while staying far under the API's hard 10 MB-of-base64 limit; past roughly 2576 px on the long edge the API downscales, so more bytes buy nothing. The header still picks the ceiling — it is the only signal before the body, since the endpoint sends no `Content-Length` — and an uninformative one (`octet-stream`, or none) gets the image budget so the magic-byte check can actually run on files above 128 KiB
