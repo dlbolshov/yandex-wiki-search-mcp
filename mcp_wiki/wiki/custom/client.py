@@ -182,8 +182,10 @@ def _probe_target(target: Path, *, overwrite: bool) -> None:
                 f"Cannot use {target}: a parent path component is a file"
             ) from None
         return
-    except NotADirectoryError as exc:
-        # POSIX says so outright; no transfer can ever land here.
+    except NotADirectoryError as exc:  # pragma: no cover - the POSIX half
+        # POSIX says so outright; no transfer can ever land here. Windows
+        # never raises this for the scenario — it lands in the ENOENT arm
+        # above — so this arm is excluded the same way that one is.
         raise WikiLocalFileError(
             f"Cannot use {target}: a parent path component is a file", cause=exc
         ) from exc
@@ -291,10 +293,12 @@ def _open_part(target: Path, *, overwrite: bool) -> tuple[int, Path]:
             raise WikiLocalFileError(
                 f"Cannot write beside {target}", cause=exc
             ) from exc
-        if inherited is not None and os.name == "posix":  # pragma: no branch
+        if inherited is not None and os.name == "posix":  # pragma: no cover
             # POSIX-only twice over: os.fchmod exists on Windows only since
             # 3.13, and chmod there toggles nothing but the read-only
-            # attribute — there is no mode worth inheriting.
+            # attribute — there is no mode worth inheriting. Excluded from
+            # coverage, not just no-branch'd: the body is unreachable on
+            # Windows and its tests skip there, which failed that leg's gate.
             try:
                 os.fchmod(fd, inherited)
             except OSError as exc:
@@ -337,15 +341,19 @@ def _refuse_existing(target: Path, cause: OSError) -> WikiLocalFileError:
     )
 
 
-def _fsync_directory(path: Path) -> None:
+def _fsync_directory(path: Path) -> None:  # pragma: no cover
     """Make a completed rename durable — where that is possible at all.
 
     POSIX-only by necessity, not caution: on Windows `os.open` cannot open a
     directory (the CRT answers EACCES for any directory), and FlushFileBuffers
     does not accept directory handles anyway, so there is no equivalent to
     reach for — NTFS journals the rename on its own schedule.
+
+    Excluded from coverage whole: each OS leg can only ever execute its own
+    half, so no single leg reaches 100% of this function. The POSIX behavior
+    is still pinned by TestDownloadErrorArms.
     """
-    if os.name != "posix":  # pragma: no cover - the other half of the matrix
+    if os.name != "posix":
         return
     dir_fd = os.open(path, os.O_RDONLY)
     try:
@@ -420,7 +428,8 @@ def _commit_part(fd: int, part: Path, target: Path, *, overwrite: bool) -> None:
     # — and, with overwrite, one that has already replaced their file.
     try:
         _fsync_directory(target.parent)
-    except OSError as exc:
+    except OSError as exc:  # pragma: no cover - only reachable on POSIX
+        # _fsync_directory is the sole raiser here and is a no-op off POSIX.
         logger.warning(
             "%s is in place but its directory entry was not flushed: %s", target, exc
         )
