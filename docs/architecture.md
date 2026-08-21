@@ -248,9 +248,9 @@ helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
 Protocol model fields are snake_case (`structured_content`, `input_schema`);
 camelCase works as a constructor kwarg but not for attribute access.
 
-**Coverage is gated at 100%, statements and branches** (`--cov-branch
---cov-fail-under=100`, enforced in CI). The policy that keeps this honest
-rather than performative:
+**Coverage is gated at 100%, statements and branches** (`--cov-branch`; CI
+enforces the threshold on ubuntu — see [CI](#ci) for why not everywhere).
+The policy that keeps this honest rather than performative:
 
 - A genuinely unreachable line carries `# pragma: no cover` **with the reason
   in the comment** (type-narrowing after `resolve_page_locator`, serializer
@@ -281,15 +281,15 @@ findings belong in [api-notes.md](api-notes.md).
   `pyproject.toml` were once exercised nowhere — and 1.0.0 shipped
   uninstallable the day its SDK released a major version.
 - **test** — pytest across the OS × Python matrix (3.11–3.13); coverage
-  uploaded to Codecov from one cell. The **100% gate runs on the ubuntu leg
-  only**, as a separate `coverage report --fail-under=100` step. Every leg
-  still runs every test it can, but a handful are POSIX-only (mode bits,
-  `fchmod`, fsyncing a directory descriptor) and so are the arms they cover.
-  Demanding 100% on all nine cells could only ever be met by excluding those
-  arms from measurement *everywhere* — which is exactly what happened, and a
-  whole-function exclusion on `_fsync_directory` then hid that no test
-  asserted the directory fsync happens at all. Gate where the code is fully
-  reachable; keep the exclusions for genuine platform splits.
+  uploaded to Codecov from one matrix entry. The **100% coverage gate is
+  enforced on ubuntu only**, as a separate `coverage report --fail-under=100`
+  step. Windows and macOS run every test they can, but a few tests — and the
+  code paths only they exercise — are POSIX-only (mode bits, `fchmod`,
+  fsyncing a directory descriptor). Those lines are unreachable on Windows,
+  so a gate there could only be satisfied by excluding them from measurement
+  on every OS, hiding real regressions in the process. The gate lives where
+  all of the code is reachable, and `# pragma: no cover` stays reserved for
+  genuinely platform-specific branches.
 
 `release.yml` triggers on a version tag: validates metadata, builds the wheel,
 the MCPB bundle and the Docker image, then publishes (PyPI, GitHub release,
