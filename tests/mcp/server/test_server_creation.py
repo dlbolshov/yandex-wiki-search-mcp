@@ -162,6 +162,43 @@ class TestOAuthUploadGating:
         assert server.instructions is not None
         assert "upload attachments" not in server.instructions
         assert "- Add and delete comments" in server.instructions
+        # nor may the always-registered read tool point at it: its oversize
+        # refusal names page_download_attachment only when that tool exists
+        read_tool = next(
+            t for t in await server.list_tools() if t.name == "page_read_attachment"
+        )
+        assert read_tool.description is not None
+        assert "page_download_attachment" not in read_tool.description
+        assert "download_url" in read_tool.description
+
+    async def test_the_read_tool_points_at_the_download_tool_when_it_exists(
+        self,
+    ) -> None:
+        server = create_mcp_server(
+            settings=create_test_settings(),
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        read_tool = next(
+            t for t in await server.list_tools() if t.name == "page_read_attachment"
+        )
+        assert read_tool.description is not None
+        assert "page_download_attachment" in read_tool.description
+
+    async def test_the_read_tool_drops_the_pointer_under_read_only(self) -> None:
+        # WIKI_READ_ONLY also removes the download tool, so the pointer has to
+        # go with it — the read tool itself stays registered either way.
+        server = create_mcp_server(
+            settings=create_test_settings(read_only=True),
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        read_tool = next(
+            t for t in await server.list_tools() if t.name == "page_read_attachment"
+        )
+        assert read_tool.description is not None
+        assert "page_download_attachment" not in read_tool.description
+        assert "download_url" in read_tool.description
 
     async def test_local_upload_tool_is_offered_without_oauth(self) -> None:
         server = create_mcp_server(

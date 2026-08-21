@@ -196,13 +196,23 @@ client → /token ──► our code → Yandex access/refresh token pair, store
   `_request()` is the thin bytes-only wrapper the other endpoints use.
   Also owns the multi-step flows: upload sessions (create → parts → finish
   → attach), `page_clone`'s deferred-operation polling, and the atomic
-  download-to-disk (`.part` file → fsync → link/replace).
+  download-to-disk (`.part` file → fsync → link/replace). That last one
+  runs every filesystem step on one per-call worker thread: the descriptor
+  is never touched from the event loop, so a cancelled `await` cannot close
+  it while another thread is still writing, and the cleanup queued behind
+  an in-flight open sees the finished state rather than racing it.
 - **`custom/errors.py`** — the taxonomy. `WikiError` → `WikiApiError`
   (HTTP-level, `build_api_error()` picks the subclass; `GridConflict` for the
   grid lock) plus `PageNotFound`/`GridNotFound`, `WikiOperationError` (a
   deferred operation failed *after* every HTTP exchange succeeded),
   `WikiTransportError` (timeouts and connection failures, with a non-empty
   message even for `TimeoutError`), `WikiConfigError` (bad server setup).
+- **`custom/mimes.py`** — `image_mime()`: the four formats a vision API will
+  decode (PNG/JPEG/GIF/WebP), recognized by magic bytes and never by the
+  wire's `Content-Type`. Lives in the Wiki layer because both attachment
+  paths need it — the inline read to decide whether bytes may travel as an
+  image block, the download-to-disk to report a `mimetype` that agrees with
+  it — and the MCP layer may not be imported from here.
 - **`custom/slugs.py`** — `normalize_slug()`: full Wiki URL or slug → bare
   slug. Lives here because the client needs it on every page call (see the
   layering rule).

@@ -875,14 +875,16 @@ class TestPageReadAttachment:
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        # The refusal now happens in the client, before the body is read, so
-        # the tool surfaces the client's error rather than measuring bytes it
-        # already holds.
+        # The client refuses on the stream and can only speak in bytes; the
+        # tool reshapes that into something the agent can act on. Without the
+        # reshaping this was the COMMON path — any image past the image budget
+        # — and it reached the agent as a bare transport string quoting a limit
+        # the tool description never mentions.
         mock_wiki_protocol.page_read_attachment_bytes.side_effect = ResponseTooLarge(
             "GET",
             "v1/pages/10/attachments/5/download",
             9_000_000,
-            MAX_INLINE_ATTACHMENT_BYTES,
+            MAX_INLINE_IMAGE_BYTES,
         )
 
         result = await client.call_tool(
@@ -891,7 +893,11 @@ class TestPageReadAttachment:
         )
 
         assert result.is_error is True
-        assert "ceiling" in get_tool_result_text(result)
+        text = get_tool_result_text(result)
+        assert str(MAX_INLINE_IMAGE_BYTES) in text
+        assert str(MAX_INLINE_ATTACHMENT_BYTES) in text
+        assert "page_download_attachment" in text
+        assert "download_url" in text
 
     async def test_an_image_arrives_as_an_image_block(
         self,

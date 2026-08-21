@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 from mcp import Client
 
 from mcp_wiki.wiki.proto.types.pages import (
+    AttachmentDownloadResult,
     ClonedPageRef,
     DeleteCommentResponse,
     GridDeleteResponse,
@@ -887,13 +888,19 @@ class TestPageWriteTools:
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_download_attachment.return_value = {
-            "page_id": 10,
-            "file_id": 5,
-            "path": "/home/user/report.pdf",
-            "size_bytes": 2048,
-            "mimetype": "application/pdf",
-        }
+        # The real model, not a bare dict: a dict lets a renamed or dropped
+        # optional field pass silently (that is how `mime_type` survived a
+        # whole commit here), while constructing the model makes it a
+        # validation error at the seam.
+        mock_wiki_protocol.page_download_attachment.return_value = (
+            AttachmentDownloadResult(
+                page_id=10,
+                file_id=5,
+                path="/home/user/report.pdf",
+                size_bytes=2048,
+                mimetype="application/pdf",
+            )
+        )
 
         result = await client.call_tool(
             "page_download_attachment",

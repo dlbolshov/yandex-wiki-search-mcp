@@ -12,6 +12,7 @@ import errno
 import os
 import re
 import stat
+import time
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,6 +26,7 @@ from aiohttp.streams import StreamReader
 from aioresponses import aioresponses
 from pydantic import BaseModel
 
+from mcp_wiki.wiki.custom import client as client_module
 from mcp_wiki.wiki.custom.client import WikiClient
 from mcp_wiki.wiki.custom.errors import (
     AttachmentNotFound,
@@ -314,7 +316,7 @@ class TestPageDeleteComment:
                 await wiki_client.page_delete_comment(42, comment_id=999)
 
 
-class TestPageDownloadAttachment:
+class TestReadAttachmentBytes:
     async def test_returns_the_body_with_its_content_type(
         self, wiki_client: WikiClient
     ) -> None:
@@ -723,7 +725,18 @@ class TestDownloadCommitFailures:
         # With delayed allocation ENOSPC surfaces at fsync, after every
         # write() succeeded. It must arrive wrapped in the WikiError
         # hierarchy, and the .part must not survive the failure.
+        # Only the DATA fsync may satisfy this test: stubbing os.fsync
+        # wholesale would also cover _fsync_directory, and the assertion would
+        # then pass even if the data fsync were deleted outright — leaving the
+        # durability guarantee unpinned. The .part fd is a regular file; the
+        # directory fsync gets a directory fd, and is let through.
+        synced: list[str] = []
+
         def full_disk(fd: int) -> None:
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                synced.append("dir")
+                return
+            synced.append("data")
             raise OSError(errno.ENOSPC, "No space left on device")
 
         monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.fsync", full_disk)
@@ -734,6 +747,7 @@ class TestDownloadCommitFailures:
                     42, file_id=5, save_to=str(tmp_path / "big.bin")
                 )
 
+        assert synced == ["data"], "the refusal must come from the data fsync"
         assert _dir_names(tmp_path) == []
 
     async def test_a_name_taken_mid_transfer_is_refused_with_the_remedy(
@@ -810,7 +824,314 @@ class TestDownloadCommitFailures:
         assert _dir_names(tmp_path) == [target.name]
 
 
-class TestPageDownloadAttachmentToPath:
+class TestDownloadCancellation:
+    async def test_a_cancel_mid_transfer_leaves_nothing_behind(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # The reason every filesystem step runs on one dedicated worker: a
+        # cancelled await must not close a descriptor another thread is still
+        # writing to, and the `.part` must not survive the cancellation.
+        wrote = asyncio.Event()
+        real_write_all = client_module._write_all
+
+        def slow_write(fd: int, chunk: bytes) -> None:
+            wrote.set()
+            time.sleep(0.15)
+            real_write_all(fd, chunk)
+
+        with (
+            mock.patch.object(client_module, "_write_all", slow_write),
+            aioresponses() as mocked,
+        ):
+            mocked.get(DOWNLOAD_URL, body=b"x" * 4096)
+            task = asyncio.create_task(
+                wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "cancelled.bin")
+                )
+            )
+            await wrote.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert _dir_names(tmp_path) == []
+
+    async def test_a_cancel_while_the_part_is_being_created_leaves_nothing(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # The other side of the same race: the cancel lands while the worker is
+        # still inside _open_part, so the awaiting side never learns the pair
+        # exists. The cleanup task is queued behind the open on the same
+        # worker, which is what makes it see the finished state.
+        opening = asyncio.Event()
+        real_open_part = client_module._open_part
+
+        def slow_open(target: Path, *, overwrite: bool) -> tuple[int, Path]:
+            opening.set()
+            time.sleep(0.15)
+            return real_open_part(target, overwrite=overwrite)
+
+        with (
+            mock.patch.object(client_module, "_open_part", slow_open),
+            aioresponses() as mocked,
+        ):
+            mocked.get(DOWNLOAD_URL, body=b"x" * 4096)
+            task = asyncio.create_task(
+                wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "cancelled.bin")
+                )
+            )
+            await opening.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert _dir_names(tmp_path) == []
+
+
+class TestDownloadChunking:
+    async def test_a_body_arriving_in_several_chunks_is_assembled(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # Everything about the streaming path only happens from the second
+        # chunk onwards: reuse of the already-open descriptor, `head`
+        # accumulation across the boundary, and `size` summation.
+        target = tmp_path / "multi.png"
+        # A PNG signature split so the magic bytes straddle two chunks.
+        chunks = [b"\x89PNG\r", b"\n\x1a\n" + b"\x00" * 32, b"\xff" * 16]
+        with (
+            mock.patch.object(client_module, "DOWNLOAD_CHUNK_SIZE", 8),
+            aioresponses() as mocked,
+        ):
+            mocked.get(DOWNLOAD_URL, body=b"".join(chunks))
+            result = await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(target)
+            )
+
+        assert target.read_bytes() == b"".join(chunks)
+        assert result.size_bytes == len(b"".join(chunks))
+        # head was assembled across the boundary, so the sniff still works
+        assert result.mimetype == "image/png"
+
+    async def test_a_write_failure_mid_transfer_leaves_no_part(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        real_write_all = client_module._write_all
+        calls = {"n": 0}
+
+        def fail_on_second(fd: int, chunk: bytes) -> None:
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise OSError(errno.ENOSPC, "No space left on device")
+            real_write_all(fd, chunk)
+
+        with (
+            mock.patch.object(client_module, "DOWNLOAD_CHUNK_SIZE", 8),
+            mock.patch.object(client_module, "_write_all", fail_on_second),
+            aioresponses() as mocked,
+        ):
+            mocked.get(DOWNLOAD_URL, body=b"x" * 64)
+            with pytest.raises(WikiLocalFileError, match="Cannot write to"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "half.bin")
+                )
+
+        assert _dir_names(tmp_path) == []
+
+
+class TestDownloadPlacementFailures:
+    async def test_a_link_failure_outside_the_fallback_set_is_re_raised(
+        self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # EIO is a real failure, not "this filesystem cannot hardlink". Widening
+        # the errno set into a blanket `except OSError` would turn every link
+        # failure into the racy exists()-then-replace path; this pins that it
+        # does not.
+        def broken_disk(src: object, dst: object, **kwargs: object) -> None:
+            raise OSError(errno.EIO, "Input/output error")
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.link", broken_disk)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="Cannot finish writing"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "eio.bin")
+                )
+
+        assert _dir_names(tmp_path) == []
+
+    @pytest.mark.skipif(
+        os.name != "posix",
+        reason="fchmod is only called on POSIX; Windows chmod toggles read-only",
+    )
+    async def test_a_chmod_failure_is_a_wiki_error_and_leaves_nothing(
+        self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # vfat/exFAT and many FUSE and SMB mounts answer EPERM to fchmod, and
+        # `inherited` is only set on the overwrite path. It used to escape as a
+        # bare PermissionError with the fd leaked and the .part orphaned.
+        target = tmp_path / "pre.bin"
+        target.write_bytes(b"old")
+
+        def refuse(fd: int, mode: int) -> None:
+            raise OSError(errno.EPERM, "Operation not permitted")
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.fchmod", refuse)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"new")
+            with pytest.raises(WikiLocalFileError, match="Cannot set permissions"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(target), overwrite=True
+                )
+
+        assert _dir_names(tmp_path) == [target.name]
+        assert target.read_bytes() == b"old"
+
+
+class TestDownloadErrorArms:
+    async def test_an_empty_attachment_still_produces_a_file(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # No chunk ever reaches the sink, so the `.part` has to be created
+        # after the request instead of during it.
+        target = tmp_path / "empty.bin"
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"")
+            result = await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(target)
+            )
+
+        assert target.read_bytes() == b""
+        assert result.size_bytes == 0
+
+    async def test_an_unflushable_directory_still_reports_success(
+        self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Past the rename the file is in place and correct; a directory fsync
+        # that fails puts only the entry's durability in doubt, so it is
+        # logged rather than raised — reporting failure would send the caller
+        # to re-download something already complete.
+        real_fsync = os.fsync
+
+        def fail_on_dir(fd: int) -> None:
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EIO, "Input/output error")
+            real_fsync(fd)
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.fsync", fail_on_dir)
+        target = tmp_path / "kept.bin"
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            result = await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(target)
+            )
+
+        assert target.read_bytes() == b"payload"
+        assert result.size_bytes == 7
+
+    async def test_an_unstattable_target_defers_to_open_part(
+        self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The probe is advisory: an OSError it cannot interpret must not fail
+        # the call, because _open_part produces the real diagnosis.
+        real_stat = Path.stat
+        target = tmp_path / "odd.bin"
+
+        def flaky(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+            if self == target:
+                raise OSError(errno.EIO, "Input/output error")
+            return real_stat(self, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(Path, "stat", flaky)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            # The probe swallows it and defers; _open_part re-stats and is the
+            # one that names the problem.
+            with pytest.raises(WikiLocalFileError, match="Cannot inspect"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(target)
+                )
+
+    async def test_an_uncreatable_part_is_a_wiki_error(
+        self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(*args: object, **kwargs: object) -> int:
+            raise OSError(errno.EROFS, "Read-only file system")
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.open", refuse)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="Cannot write beside"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "ro.bin")
+                )
+
+    async def test_an_uncreatable_parent_directory_is_a_wiki_error(
+        self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_mkdir = Path.mkdir
+
+        def refuse(
+            self: Path,
+            mode: int = 0o777,
+            parents: bool = False,
+            exist_ok: bool = False,
+        ) -> None:
+            if self != tmp_path:
+                raise OSError(errno.EACCES, "Permission denied")
+            real_mkdir(self, mode, parents, exist_ok)
+
+        monkeypatch.setattr(Path, "mkdir", refuse)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="Cannot create the directory"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "sub" / "x.bin")
+                )
+
+
+class TestOpenPartRechecks:
+    """`_open_part` re-checks what `_probe_target` already rejected.
+
+    The probe is an early exit, not the authority: a target that appears
+    between the probe and the open must still be caught, and these drive that
+    window by neutralizing the probe.
+    """
+
+    async def test_a_target_that_appears_after_the_probe_is_refused(
+        self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = tmp_path / "raced.bin"
+        target.write_bytes(b"appeared after the probe")
+        monkeypatch.setattr(
+            "mcp_wiki.wiki.custom.client._probe_target", lambda *a, **k: None
+        )
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="already exists"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(target)
+                )
+
+        assert target.read_bytes() == b"appeared after the probe"
+
+    async def test_a_directory_that_appears_after_the_probe_is_refused(
+        self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = tmp_path / "raced_dir"
+        target.mkdir()
+        monkeypatch.setattr(
+            "mcp_wiki.wiki.custom.client._probe_target", lambda *a, **k: None
+        )
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with pytest.raises(WikiLocalFileError, match="is a directory"):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(target), overwrite=True
+                )
+
+
+class TestDownloadAttachmentToDisk:
     async def test_streams_the_body_to_the_target_file(
         self, wiki_client: WikiClient, tmp_path: Path
     ) -> None:
@@ -913,7 +1234,7 @@ class TestPageDownloadAttachmentToPath:
         assert (tmp_path / "tilde.bin").read_bytes() == b"x"
         assert result.path == str((tmp_path / "tilde.bin").resolve())
 
-    async def test_a_download_to_path_is_not_retried(
+    async def test_a_disk_download_is_not_retried(
         self, wiki_client: WikiClient, tmp_path: Path
     ) -> None:
         # Same argument as the inline download, plus one more: a retried

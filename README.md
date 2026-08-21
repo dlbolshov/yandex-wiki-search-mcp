@@ -159,7 +159,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 | `page_delete` | Delete a page and receive a recovery token |
 | `page_recover` | Recover a deleted page by recovery token |
 | `page_upload_attachment` | Upload a local file in chunks and attach it to a page — not registered under `OAUTH_ENABLED=true`, where "local" would mean the shared server's filesystem |
-| `page_download_attachment` | Download an attachment to a local file — streamed to disk with no size cap, nothing enters the conversation. Written atomically (`.part` → fsync → rename), refuses to overwrite unless asked, and lands with the permissions a normal write would give (`0666 & ~umask`, never executable); replacing a file keeps that file's own mode. Gated the same way as `page_upload_attachment` under OAuth |
+| `page_download_attachment` | Download an attachment to a local file — streamed to disk with no size cap, nothing enters the conversation. Written atomically (`.part` → fsync → rename), refuses to overwrite unless asked, and lands with the permissions a normal write would give (`0666 & ~umask`, never executable); replacing a file keeps that file's own mode. The directory fsync that makes the rename itself crash-durable, and the mode inheritance, are POSIX-only. Gated the same way as `page_upload_attachment` under OAuth |
 
 ### Grids: write (11)
 

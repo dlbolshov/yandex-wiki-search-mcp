@@ -40,7 +40,7 @@ from mcp_wiki.mcp.utils import (
     normalize_slug,
     resolve_page_locator,
 )
-from mcp_wiki.wiki.custom.errors import WikiError
+from mcp_wiki.wiki.custom.errors import ResponseTooLarge, WikiError
 from mcp_wiki.wiki.custom.mimes import (
     RENDERABLE_IMAGE_MIMES,
     UNINFORMATIVE_MIMES,
@@ -67,9 +67,11 @@ FETCH_ALL_MAX_ITEMS = 500
 FETCH_ALL_BUDGET_SECONDS = 25.0
 _FETCH_ALL_MAX_REQUESTS = 50
 
-# Inline ceiling for page_read_attachment, enforced by the client BEFORE
-# the body is read (Content-Length, else a capped stream read), so an oversized
-# attachment never lands in this process at all.
+# Inline ceiling for page_read_attachment, enforced by the client on the
+# stream. It is the ceiling for content the wire names as something other than
+# a renderable image; an uninformative mime gets the image budget instead (see
+# _inline_ceiling), so up to MAX_INLINE_IMAGE_BYTES can be read before the
+# bytes reveal themselves as a non-image and this limit refuses them.
 #
 # 128 KiB, not the megabyte it started as: this guards the conversation, and a
 # megabyte of base64 is ~1.4M characters — several hundred thousand tokens,
@@ -82,8 +84,8 @@ MAX_INLINE_ATTACHMENT_BYTES = 131_072
 # model's vision input, where cost is counted in visual tokens — ceil(w/28) *
 # ceil(h/28), capped at 4784 on the current top tier — not in base64
 # characters. A megabyte of PNG is at most a few thousand tokens that way
-# against several hundred thousand as text, so the 128 KiB argument below
-# simply does not apply.
+# against several hundred thousand as text, so the argument behind
+# MAX_INLINE_ATTACHMENT_BYTES above simply does not apply.
 #
 # 2 MiB rather than 1: past roughly 2576 px on the long edge the vision API
 # downscales anyway, so extra bytes buy nothing, and the sizes that matter
@@ -116,10 +118,11 @@ def _inline_ceiling(content_type: str | None) -> int:
     declares no Content-Length (chunked, probed 2026-08-19), so the header is
     the only pre-body signal there is.
 
-    An uninformative mime gets the image budget on purpose: the magic-byte
-    fallback below can only run on bytes that were actually read, so deciding
-    the ceiling from the header alone would refuse every octet-stream image
-    over 128 KiB — precisely the files the fallback exists for.
+    An uninformative mime gets the image budget on purpose: `image_mime` in
+    `wiki/custom/mimes.py` can only judge bytes that were actually read, so
+    deciding the ceiling from the header alone would refuse every
+    octet-stream image over the text ceiling — precisely the files that
+    magic-byte check exists for.
     """
     base = content_type or ""
     if base in RENDERABLE_IMAGE_MIMES or base in UNINFORMATIVE_MIMES:
@@ -660,18 +663,32 @@ def register_page_read_tools(
         slug: OptionalPageSlug = None,
     ) -> EmbeddedResource | ImageContent:
         resolved_page_id = await resolve_page_id(ctx, page_id=page_id, slug=slug)
-        raw, _ = await get_wiki(ctx).page_read_attachment_bytes(
-            resolved_page_id,
-            file_id=file_id,
-            max_bytes=_inline_ceiling,
-            auth=get_yandex_auth(ctx),
-        )
+        try:
+            raw, _ = await get_wiki(ctx).page_read_attachment_bytes(
+                resolved_page_id,
+                file_id=file_id,
+                max_bytes=_inline_ceiling,
+                auth=get_yandex_auth(ctx),
+            )
+        except ResponseTooLarge as exc:
+            # The client refuses on the stream and can only report bytes; the
+            # remedy lives here, because this is the layer that knows which
+            # sibling tools exist. Without this the common case — an image past
+            # the image budget — reached the agent as a bare transport string
+            # quoting a limit the tool description never mentions.
+            raise ValueError(
+                f"Attachment is larger than the "
+                f"{exc.max_bytes}-byte inline limit for its type "
+                f"({MAX_INLINE_ATTACHMENT_BYTES} for text and other binaries, "
+                f"{MAX_INLINE_IMAGE_BYTES} for images). "
+                + _oversize_remedy(include_local_downloads)
+            ) from exc
         detected = image_mime(raw)
         if detected is None and len(raw) > MAX_INLINE_ATTACHMENT_BYTES:
-            # Only reachable when the wire mime was uninformative, so the read
-            # got the image budget and the bytes then turned out not to be a
-            # renderable image. Shaped here rather than in the client because
-            # this is the layer that knows what the caller should do instead.
+            # Reached whenever the read got the image budget — an uninformative
+            # mime, or a header claiming a renderable image — and the bytes then
+            # turned out not to be one. The client cannot make this call: only
+            # the body settles it.
             raise ValueError(
                 f"Attachment is {len(raw)} bytes, over the "
                 f"{MAX_INLINE_ATTACHMENT_BYTES}-byte limit for non-image "

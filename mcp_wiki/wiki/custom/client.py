@@ -7,11 +7,11 @@ import os
 import random
 import secrets
 import stat
-import threading
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, BinaryIO, Literal
+from typing import Any, BinaryIO, Literal, TypeVar
 
 from aiohttp import (
     ClientConnectionError,
@@ -116,6 +116,8 @@ DOWNLOAD_STALL_TIMEOUT = ClientTimeout(sock_connect=30, sock_read=60)
 
 logger = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
+
 
 def _open_binary(path: Path) -> BinaryIO:
     return path.open("rb")
@@ -125,6 +127,7 @@ def _open_binary(path: Path) -> BinaryIO:
 _PART_SUFFIX_BUDGET = len(".") + 8 + len(".part")
 _NAME_MAX = 255
 _PART_ATTEMPTS = 4
+_WINDOWS_MAX_PATH = 260
 
 
 def local_path(path: str) -> Path:
@@ -140,6 +143,22 @@ def local_path(path: str) -> Path:
     return Path(path).expanduser()
 
 
+def _parent_is_not_a_directory(target: Path) -> bool:
+    """Is some existing ancestor of `target` a non-directory?
+
+    Only the nearest existing ancestor matters: everything below it is what
+    `mkdir(parents=True)` would create, and it can only create under a real
+    directory.
+    """
+    for parent in target.parents:
+        try:
+            st = parent.stat()
+        except OSError:
+            continue
+        return not stat.S_ISDIR(st.st_mode)
+    return False  # pragma: no cover - the root always exists and is a directory
+
+
 def _probe_target(target: Path, *, overwrite: bool) -> None:
     """Reject an unusable target before a byte is transferred.
 
@@ -151,10 +170,19 @@ def _probe_target(target: Path, *, overwrite: bool) -> None:
     try:
         existing = target.stat()
     except FileNotFoundError:
+        # Windows reports a regular file in the middle of a path as
+        # ERROR_PATH_NOT_FOUND, which CPython maps to ENOENT rather than
+        # ENOTDIR — so "missing" and "blocked by a file" arrive identically
+        # there and the parent has to be asked directly.
+        if _parent_is_not_a_directory(target):  # pragma: no cover - Windows only
+            # POSIX raises NotADirectoryError below instead, so this arm is
+            # the other half of the matrix.
+            raise WikiLocalFileError(
+                f"Cannot use {target}: a parent path component is a file"
+            ) from None
         return
     except NotADirectoryError as exc:
-        # A path component is a regular file — no transfer can ever land here,
-        # so say so now rather than after the download.
+        # POSIX says so outright; no transfer can ever land here.
         raise WikiLocalFileError(
             f"Cannot use {target}: a parent path component is a file", cause=exc
         ) from exc
@@ -187,7 +215,16 @@ def _part_path(target: Path) -> Path:
     this is reachable with a perfectly legal target name. Truncation is on a
     UTF-8 character boundary, since names are bytes to the kernel but text here.
     """
-    stem = target.name.encode()[: _NAME_MAX - _PART_SUFFIX_BUDGET]
+    budget = _NAME_MAX - _PART_SUFFIX_BUDGET
+    if os.name == "nt":
+        # Windows also caps the whole path at MAX_PATH (260) unless the machine
+        # opted into long paths, and the suffix pushes a target Windows itself
+        # accepts over the line. Shrink the prefix by whatever the parent
+        # already spends; a name too short to keep is replaced wholesale.
+        budget = min(  # pragma: no cover - the other half of the matrix
+            budget, _WINDOWS_MAX_PATH - len(str(target.parent)) - 1
+        )
+    stem = target.name.encode()[: max(budget, 0)]
     prefix = stem.decode(errors="ignore") or "download"
     return target.with_name(f"{prefix}.{secrets.token_hex(4)}.part")
 
@@ -234,18 +271,38 @@ def _open_part(target: Path, *, overwrite: bool) -> tuple[int, Path]:
     for _ in range(_PART_ATTEMPTS):
         candidate = _part_path(target)
         try:
-            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
-        except FileExistsError:
+            # O_BINARY or Windows opens this in the CRT's text mode, where
+            # every \n written becomes \r\n and the return value of write()
+            # does not say so — silently corrupting every binary attachment.
+            # The stdlib treats the flag as mandatory for raw os.open byte
+            # I/O (_pyio, tempfile, tarfile, fileinput all OR it in); the
+            # tempfile this replaced included it via _bin_openflags.
+            fd = os.open(
+                candidate,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0),
+                0o666,
+            )
+        except FileExistsError:  # pragma: no cover - 8 random bytes collided
             continue
         except OSError as exc:
             raise WikiLocalFileError(
                 f"Cannot write beside {target}", cause=exc
             ) from exc
-        if inherited is not None and os.name == "posix":
+        if inherited is not None and os.name == "posix":  # pragma: no branch
             # POSIX-only twice over: os.fchmod exists on Windows only since
             # 3.13, and chmod there toggles nothing but the read-only
             # attribute — there is no mode worth inheriting.
-            os.fchmod(fd, inherited)
+            try:
+                os.fchmod(fd, inherited)
+            except OSError as exc:
+                # vfat/exFAT and many FUSE and SMB mounts answer EPERM here —
+                # the same filesystems _place_part's fallback exists for. The
+                # fd and the file are already ours, so clean up rather than
+                # letting a raw OSError escape past the ownership handshake.
+                _discard_part(fd, candidate)
+                raise WikiLocalFileError(
+                    f"Cannot set permissions on {target}", cause=exc
+                ) from exc
         return fd, candidate
     raise WikiLocalFileError(  # pragma: no cover - 8 random bytes, four tries
         f"Could not create a temporary file beside {target}"
@@ -258,7 +315,14 @@ def _open_part(target: Path, *, overwrite: bool) -> tuple[int, Path]:
 # permission problem, the replace fallback fails with the same errno — now
 # wrapped with the target's name instead of escaping bare.
 _HARDLINK_UNSUPPORTED_ERRNOS = frozenset(
-    {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS, errno.EXDEV, errno.EINVAL, errno.EACCES}
+    {
+        errno.EPERM,
+        errno.EOPNOTSUPP,
+        errno.ENOSYS,
+        errno.EXDEV,
+        errno.EINVAL,
+        errno.EACCES,
+    }
 )
 
 
@@ -278,7 +342,7 @@ def _fsync_directory(path: Path) -> None:
     does not accept directory handles anyway, so there is no equivalent to
     reach for — NTFS journals the rename on its own schedule.
     """
-    if os.name != "posix":
+    if os.name != "posix":  # pragma: no cover - the other half of the matrix
         return
     dir_fd = os.open(path, os.O_RDONLY)
     try:
@@ -339,7 +403,6 @@ def _commit_part(fd: int, part: Path, target: Path, *, overwrite: bool) -> None:
         finally:
             os.close(fd)
         _place_part(part, target, overwrite=overwrite)
-        _fsync_directory(target.parent)
     except WikiLocalFileError:
         with contextlib.suppress(OSError):
             part.unlink()
@@ -347,9 +410,17 @@ def _commit_part(fd: int, part: Path, target: Path, *, overwrite: bool) -> None:
     except OSError as exc:
         with contextlib.suppress(OSError):
             part.unlink()
-        raise WikiLocalFileError(
-            f"Cannot finish writing {target}", cause=exc
-        ) from exc
+        raise WikiLocalFileError(f"Cannot finish writing {target}", cause=exc) from exc
+    # Past the rename the bytes are durable in the file and the entry exists;
+    # only the entry's own durability is still in question. Raising here would
+    # tell the caller to retry a download that is already complete and correct
+    # — and, with overwrite, one that has already replaced their file.
+    try:
+        _fsync_directory(target.parent)
+    except OSError as exc:
+        logger.warning(
+            "%s is in place but its directory entry was not flushed: %s", target, exc
+        )
 
 
 def _discard_part(fd: int, part: Path) -> None:
@@ -1559,80 +1630,91 @@ class WikiClient(WikiProtocol):
         # authoritative — this pair only buys the early exit.
         await asyncio.to_thread(_probe_target, target, overwrite=overwrite)
 
-        # Ownership of the open `.part` lives in `parts`, and every hand-off
-        # happens under `guard` *inside the worker thread*: to_thread cannot
-        # be cancelled once running, so a CancelledError at the await discards
-        # the call's result while the thread finishes anyway — registering the
-        # pair via a return value would leak the fd and the file exactly then.
-        parts: list[tuple[int, Path]] = []
-        guard = threading.Lock()
-        abandoned = False
+        # Every filesystem operation for this download runs on ONE dedicated
+        # worker, in submission order. That is what makes the fd safe: it is
+        # never touched from the event loop, and a cancelled `await` cannot
+        # close a descriptor another thread is still writing to — the write and
+        # the cleanup are queued on the same worker, so cleanup simply runs
+        # after the write is done with it. The pool's own shutdown waits for
+        # whatever is still in flight, which is what a lock plus an `abandoned`
+        # flag were hand-rolling before.
+        loop = asyncio.get_running_loop()
+        # `holder` is touched ONLY by the worker, never by the event loop, so
+        # it needs no lock: the single worker gives the ordering a lock was
+        # previously faking. A cancelled `await` cannot stop the open that is
+        # already running, but the cleanup submitted afterwards is queued
+        # behind it and therefore sees whatever it produced.
+        holder: list[tuple[int, Path]] = []
         size = 0
         head = b""
 
-        def open_part_tracked() -> None:
-            pair = _open_part(target, overwrite=overwrite)
-            with guard:
-                if abandoned:
-                    _discard_part(*pair)
-                else:
-                    parts.append(pair)
+        with ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="wiki-download"
+        ) as pool:
 
-        def commit_tracked() -> None:
-            with guard:
-                if not parts:
-                    return  # cleanup won the race; nothing left to commit
-                fd, part = parts.pop()
-            # _commit_part owns the fd and the file from here on — it cleans
-            # up its own failures, so cleanup below never sees this pair again
-            # (a second os.close could hit an fd number already reused).
-            _commit_part(fd, part, target, overwrite=overwrite)
+            def run(fn: Callable[[], _T]) -> Awaitable[_T]:
+                return loop.run_in_executor(pool, fn)
 
-        async def sink(chunk: bytes) -> None:
-            nonlocal size, head
-            if len(head) < IMAGE_MAGIC_PREFIX_BYTES:
-                head = (head + chunk)[:IMAGE_MAGIC_PREFIX_BYTES]
-            if not parts:
-                await asyncio.to_thread(open_part_tracked)
-            fd = parts[0][0]
-            size += len(chunk)
+            # Refused before the request, so a bad path costs no transfer. The
+            # same checks run again inside _open_part, which is where they are
+            # authoritative — this pair only buys the early exit.
+            await run(lambda: _probe_target(target, overwrite=overwrite))
+
+            def open_part() -> None:
+                holder.append(_open_part(target, overwrite=overwrite))
+
+            def commit() -> None:
+                # Pops before committing: _commit_part owns the fd and the file
+                # from here, cleans up its own failures, and the cleanup task
+                # must therefore never see this pair again.
+                fd, part = holder.pop()
+                _commit_part(fd, part, target, overwrite=overwrite)
+
+            def discard_leftover() -> None:
+                if holder:
+                    _discard_part(*holder.pop())
+
+            async def sink(chunk: bytes) -> None:
+                nonlocal size, head
+                if len(head) < IMAGE_MAGIC_PREFIX_BYTES:
+                    head = (head + chunk)[:IMAGE_MAGIC_PREFIX_BYTES]
+                if not holder:
+                    # Created on the first chunk, not up front, so a 404 or a
+                    # 403 leaves the caller's filesystem untouched.
+                    await run(open_part)
+                fd = holder[0][0]
+                size += len(chunk)
+                try:
+                    await run(lambda: _write_all(fd, chunk))
+                except OSError as exc:
+                    raise WikiLocalFileError(
+                        f"Cannot write to {target}", cause=exc
+                    ) from exc
+
             try:
-                await asyncio.to_thread(_write_all, fd, chunk)
-            except OSError as exc:
-                raise WikiLocalFileError(
-                    f"Cannot write to {target}", cause=exc
-                ) from exc
-
-        try:
-            _, mime_type = await self._request_raw(
-                "GET",
-                f"v1/pages/{page_id}/attachments/{file_id}/download",
-                auth=auth,
-                not_found=lambda: AttachmentNotFound(page_id, file_id),
-                retryable=False,
-                body_sink=sink,
-                timeout=DOWNLOAD_STALL_TIMEOUT,
-            )
-            if not parts:
-                # An empty attachment: no chunk ever arrived, so the file still
-                # has to be created before it can be committed.
-                await asyncio.to_thread(open_part_tracked)
-            await asyncio.to_thread(commit_tracked)
-        except BaseException:
-            # BaseException on purpose: asyncio.CancelledError is not an
-            # Exception, and a cancelled transfer must not leak its .part file
-            # either. The lock closes the race with a still-running worker:
-            # whichever side takes the pair second finds `parts` empty (or
-            # `abandoned` set) and stands down. _discard_part itself is
-            # await-free, so a second cancellation cannot land mid-cleanup.
-            # Always re-raised — this is cleanup, not handling.
-            with guard:
-                abandoned = True
-                leftover = parts.pop() if parts else None
-            if leftover is not None:
-                _discard_part(*leftover)
-            raise
-        resolved = await asyncio.to_thread(target.resolve)
+                _, wire_mime = await self._request_raw(
+                    "GET",
+                    f"v1/pages/{page_id}/attachments/{file_id}/download",
+                    auth=auth,
+                    not_found=lambda: AttachmentNotFound(page_id, file_id),
+                    retryable=False,
+                    body_sink=sink,
+                    timeout=DOWNLOAD_STALL_TIMEOUT,
+                )
+                if not holder:
+                    # An empty attachment: no chunk ever arrived, so the file
+                    # still has to be created before it can be committed.
+                    await run(open_part)
+                await run(commit)
+            except BaseException:
+                # BaseException on purpose: CancelledError is not an Exception,
+                # and a cancelled transfer must not leak its `.part` either.
+                # Submitted rather than awaited — the await would just be
+                # cancelled again — and queued behind any open or write still
+                # running, so it sees the finished state rather than racing it.
+                pool.submit(discard_leftover)
+                raise
+            resolved = await run(target.resolve)
         return AttachmentDownloadResult(
             page_id=page_id,
             file_id=file_id,
@@ -1643,7 +1725,7 @@ class WikiClient(WikiProtocol):
             # not report image/png when read and application/octet-stream when
             # saved. The header remains the answer for everything the magic
             # table does not cover.
-            mimetype=image_mime(head) or mime_type,
+            mimetype=image_mime(head) or wire_mime,
         )
 
     async def page_delete_attachment(
@@ -1780,7 +1862,7 @@ class WikiClient(WikiProtocol):
         auth: YandexAuth | None = None,
     ) -> UploadAttachmentResult:
         # local_path, not Path: `~/report.pdf` has to mean the same thing here
-        # as it does to page_read_attachment_bytes's save_to. WikiLocalFileError
+        # as it does to page_download_attachment's save_to. WikiLocalFileError
         # rather than the builtin FileNotFoundError so both filesystem tools
         # fail inside the WikiError hierarchy every caller above already
         # handles.
