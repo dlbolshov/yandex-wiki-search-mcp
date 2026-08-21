@@ -923,12 +923,18 @@ class TestPageWriteTools:
         client: Client,
         mock_wiki_protocol: AsyncMock,
     ) -> None:
-        mock_wiki_protocol.page_download_attachment.return_value = {
-            "page_id": 10,
-            "file_id": 5,
-            "path": "/home/user/report.pdf",
-            "size_bytes": 1,
-        }
+        # The real model here too, for the reason spelled out above: the dict
+        # this replaced had no `mimetype` at all and passed anyway, because
+        # nothing in this test looks at the payload.
+        mock_wiki_protocol.page_download_attachment.return_value = (
+            AttachmentDownloadResult(
+                page_id=10,
+                file_id=5,
+                path="/home/user/report.pdf",
+                size_bytes=1,
+                mimetype="application/pdf",
+            )
+        )
 
         await client.call_tool(
             "page_download_attachment",

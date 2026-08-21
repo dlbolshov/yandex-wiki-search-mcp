@@ -9,15 +9,17 @@ forks.
 
 import asyncio
 import errno
+import logging
 import os
 import re
 import stat
 import time
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, TypeVar, cast
 from unittest import mock
 
 import pytest
@@ -47,6 +49,10 @@ ATTACHMENTS_URL = re.compile(
 DESCENDANTS_URL = re.compile(r"https://api\.wiki\.yandex\.net/v1/pages/descendants.*")
 
 AUTH_HEADERS = {"Authorization": "OAuth test-token", "X-Org-Id": "test-org"}
+
+# Mirrors Executor.submit's own signature, so the stub below overrides it
+# rather than shadowing it with a narrower one.
+_T = TypeVar("_T")
 
 
 class TestPageGetComments:
@@ -475,6 +481,33 @@ class TestDownloadCeiling:
 
         assert body == b"abcdef"
 
+    async def test_the_cap_never_asks_for_more_than_it_will_keep(self) -> None:
+        # _drain is shared with the streaming download, and it used to request
+        # a flat DOWNLOAD_CHUNK_SIZE (1 MiB) whatever the ceiling was — so a
+        # 64 KiB error-body cap could materialize a whole chunk before the
+        # check below it fired, quietly undoing the one guarantee
+        # ResponseTooLarge exists to make.
+        requested: list[int] = []
+        response, feed_the_rest = _live_stream(b"x" * 8, later=b"x" * 8)
+        inner = response.content
+
+        class _Spy:
+            def iter_chunked(self, n: int) -> AsyncIterator[bytes]:
+                requested.append(n)
+                return inner.iter_chunked(n)
+
+        spied = cast(
+            ClientResponse, SimpleNamespace(content=_Spy(), content_length=None)
+        )
+
+        body, _ = await asyncio.gather(
+            WikiClient._drain(spied, 10),
+            feed_the_rest(),
+        )
+
+        assert requested == [11], "the ceiling plus the byte that proves overflow"
+        assert body == b"x" * 11
+
     async def test_a_body_that_crosses_the_cap_late_is_still_refused(self) -> None:
         # The overflow arrives only after the read has begun, so the ceiling has
         # to hold across chunk boundaries rather than on the first buffer alone.
@@ -658,6 +691,50 @@ class TestDownloadMimeAgreement:
         assert result.mimetype == "text/csv"
 
 
+class TestPartPathBudget:
+    """The `.part` name arithmetic, pinned without needing the platform.
+
+    Every download test can only exercise the leg it runs on, and the Windows
+    CI image has long paths enabled — so the MAX_PATH budget was green there
+    for a reason that had nothing to do with the budget being right (it landed
+    on exactly 260, one past what CreateFileW takes). These call `_part_path`
+    directly with `os.name` forced, so both halves are checked everywhere.
+    """
+
+    def test_the_posix_budget_fits_name_max(self) -> None:
+        part = client_module._part_path(Path("/srv/files") / ("x" * 300 + ".bin"))
+
+        assert len(part.name.encode()) <= client_module._NAME_MAX
+
+    def test_the_windows_budget_fits_max_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Built before os.name is forced: pathlib dispatches on it, and a
+        # WindowsPath cannot be instantiated off Windows. Only the separator
+        # count matters to the arithmetic, and that is the same either way.
+        parent = Path("C:/" + "d" * 90)
+        targets = [parent / ("x" * n + ".bin") for n in (4, 30, 200, 245)]
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.name", "nt")
+
+        for target in targets:
+            part = client_module._part_path(target)
+            # MAX_PATH counts the terminating NUL, so 259 is the longest path
+            # CreateFileW accepts without the `\\?\` prefix.
+            assert len(str(part)) < client_module._WINDOWS_MAX_PATH
+
+    def test_a_parent_leaving_no_room_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The `or "download"` fallback knows nothing about the budget, so a
+        # parent this long used to produce a 276-character `.part` path and an
+        # ERROR_PATH_NOT_FOUND with nothing in it the caller could act on.
+        target = Path("C:/" + "d" * 250) / "report.bin"
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.name", "nt")
+
+        with pytest.raises(WikiLocalFileError, match="too long for this system"):
+            client_module._part_path(target)
+
+
 class TestDownloadTargetErrors:
     async def test_a_directory_target_is_refused_before_any_transfer(
         self, wiki_client: WikiClient, tmp_path: Path
@@ -702,6 +779,14 @@ class TestDownloadTargetErrors:
                     42, file_id=5, save_to=str(blocker / "child.bin")
                 )
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason=(
+            "the target path alone runs past MAX_PATH, so this only passes on "
+            "a Windows box with long paths enabled — where it proves nothing. "
+            "TestPartPathBudget pins the Windows arithmetic instead."
+        ),
+    )
     async def test_a_very_long_target_name_still_works(
         self, wiki_client: WikiClient, tmp_path: Path
     ) -> None:
@@ -767,6 +852,35 @@ class TestDownloadCommitFailures:
         assert synced == ["data"], "the refusal must come from the data fsync"
         assert _dir_names(tmp_path) == []
 
+    @pytest.mark.skipif(
+        os.name != "posix", reason="only POSIX can fsync a directory descriptor"
+    )
+    async def test_a_finished_download_flushes_the_directory_entry(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The only test that fails if _fsync_directory stops doing anything.
+        # Every other assertion about it holds just as well when it never
+        # runs, which is how a whole-function `# pragma: no cover` let the
+        # body be replaced with `return` at a still-green 100%.
+        synced: list[str] = []
+        real_fsync = os.fsync
+
+        def spy(fd: int) -> None:
+            synced.append("dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "data")
+            real_fsync(fd)
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.fsync", spy)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            await wiki_client.page_download_attachment(
+                42, file_id=5, save_to=str(tmp_path / "durable.bin")
+            )
+
+        assert synced == ["data", "dir"], "the rename must be flushed too"
+
     async def test_a_name_taken_mid_transfer_is_refused_with_the_remedy(
         self,
         wiki_client: WikiClient,
@@ -789,8 +903,22 @@ class TestDownloadCommitFailures:
 
         assert _dir_names(tmp_path) == []
 
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param(errno.EPERM, id="posix-eperm"),
+            # The Windows half: CPython maps ERROR_NOT_SUPPORTED to ENODEV,
+            # which the errno set used to omit — so the fallback written for
+            # FAT/exFAT and SMB never engaged on the platform that has them,
+            # and every overwrite=false download to such a volume failed
+            # after the whole transfer had already run.
+            pytest.param(errno.ENODEV, id="windows-enodev"),
+            pytest.param(errno.ENOTSUP, id="notsup"),
+        ],
+    )
     async def test_a_filesystem_without_hardlinks_still_delivers(
         self,
+        code: int,
         wiki_client: WikiClient,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -799,7 +927,7 @@ class TestDownloadCommitFailures:
         # the fallback re-checks existence and renames instead of failing
         # the download after the whole transfer already ran.
         def no_links(src: object, dst: object, **kwargs: object) -> None:
-            raise OSError(errno.EPERM, "Operation not permitted")
+            raise OSError(code, os.strerror(code))
 
         monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.link", no_links)
         target = tmp_path / "fat32.bin"
@@ -977,6 +1105,83 @@ class TestDownloadPlacementFailures:
 
         assert _dir_names(tmp_path) == []
 
+    async def test_a_cleanup_failure_after_the_link_still_delivers(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Past the link the file is in place and correct, so a `.part` that
+        # will not go away is a stray file, not a failed download. It used to
+        # be reported as "Cannot finish writing", which sent the caller to
+        # re-fetch something already delivered — and their retry then found
+        # their own new file and demanded overwrite=true.
+        real_unlink = os.unlink
+
+        def refuse(path: object, **kwargs: object) -> None:
+            if str(path).endswith(".part"):
+                raise OSError(errno.EACCES, "Permission denied")
+            real_unlink(path)  # type: ignore[arg-type]
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.unlink", refuse)
+        target = tmp_path / "delivered.bin"
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with caplog.at_level(logging.WARNING, logger="mcp_wiki.wiki.custom.client"):
+                result = await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(target)
+                )
+
+        assert result.size_bytes == 7
+        assert target.read_bytes() == b"payload"
+        assert "was not removed" in caplog.text
+        # Honest about the cost: the stray .part survives, and saying so is
+        # the point — the alternative was calling a finished download failed.
+        assert [n for n in _dir_names(tmp_path) if n.endswith(".part")]
+
+    async def test_a_pool_that_refuses_cleanup_keeps_the_original_error(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # ThreadPoolExecutor.submit raises RuntimeError once the interpreter
+        # is tearing down. Letting that escape would replace the transfer's
+        # own exception — a task swallowing its own cancellation — so it is
+        # logged instead. Deliberately not run inline: _discard_part would
+        # close the descriptor from the event loop while the worker may still
+        # be writing to it, which is the race this design exists to prevent.
+        class RefusingPool(ThreadPoolExecutor):
+            def submit(
+                self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any
+            ) -> "Future[_T]":
+                if getattr(fn, "__name__", "") == "discard_leftover":
+                    raise RuntimeError("cannot schedule new futures")
+                return super().submit(fn, *args, **kwargs)
+
+        monkeypatch.setattr(
+            "mcp_wiki.wiki.custom.client.ThreadPoolExecutor", RefusingPool
+        )
+
+        def full_disk(fd: int, data: object) -> int:
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        monkeypatch.setattr("mcp_wiki.wiki.custom.client.os.write", full_disk)
+        with aioresponses() as mocked:
+            mocked.get(DOWNLOAD_URL, body=b"payload")
+            with (
+                caplog.at_level(logging.WARNING, logger="mcp_wiki.wiki.custom.client"),
+                pytest.raises(WikiLocalFileError, match="Cannot write to"),
+            ):
+                await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(tmp_path / "gone.bin")
+                )
+
+        assert "could not schedule cleanup" in caplog.text
+        assert [n for n in _dir_names(tmp_path) if n.endswith(".part")]
+
     @pytest.mark.skipif(
         os.name != "posix",
         reason="fchmod is only called on POSIX; Windows chmod toggles read-only",
@@ -1021,8 +1226,15 @@ class TestDownloadErrorArms:
         assert target.read_bytes() == b""
         assert result.size_bytes == 0
 
+    @pytest.mark.skipif(
+        os.name != "posix", reason="only POSIX can fsync a directory descriptor"
+    )
     async def test_an_unflushable_directory_still_reports_success(
-        self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         # Past the rename the file is in place and correct; a directory fsync
         # that fails puts only the entry's durability in doubt, so it is
@@ -1039,12 +1251,16 @@ class TestDownloadErrorArms:
         target = tmp_path / "kept.bin"
         with aioresponses() as mocked:
             mocked.get(DOWNLOAD_URL, body=b"payload")
-            result = await wiki_client.page_download_attachment(
-                42, file_id=5, save_to=str(target)
-            )
+            with caplog.at_level(logging.WARNING, logger="mcp_wiki.wiki.custom.client"):
+                result = await wiki_client.page_download_attachment(
+                    42, file_id=5, save_to=str(target)
+                )
 
         assert target.read_bytes() == b"payload"
         assert result.size_bytes == 7
+        # The warning is the whole point: without asserting it, deleting the
+        # log line leaves this test just as green.
+        assert "was not flushed" in caplog.text
 
     async def test_an_unstattable_target_defers_to_open_part(
         self, wiki_client: WikiClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

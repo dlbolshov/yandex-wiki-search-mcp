@@ -280,8 +280,16 @@ findings belong in [api-notes.md](api-notes.md).
   because everything else installs from `uv.lock`, so the version ranges in
   `pyproject.toml` were once exercised nowhere — and 1.0.0 shipped
   uninstallable the day its SDK released a major version.
-- **test** — pytest with the 100% gate across the OS × Python matrix
-  (3.11–3.13); coverage uploaded to Codecov from one cell.
+- **test** — pytest across the OS × Python matrix (3.11–3.13); coverage
+  uploaded to Codecov from one cell. The **100% gate runs on the ubuntu leg
+  only**, as a separate `coverage report --fail-under=100` step. Every leg
+  still runs every test it can, but a handful are POSIX-only (mode bits,
+  `fchmod`, fsyncing a directory descriptor) and so are the arms they cover.
+  Demanding 100% on all nine cells could only ever be met by excluding those
+  arms from measurement *everywhere* — which is exactly what happened, and a
+  whole-function exclusion on `_fsync_directory` then hid that no test
+  asserted the directory fsync happens at all. Gate where the code is fully
+  reachable; keep the exclusions for genuine platform splits.
 
 `release.yml` triggers on a version tag: validates metadata, builds the wheel,
 the MCPB bundle and the Docker image, then publishes (PyPI, GitHub release,
@@ -317,7 +325,7 @@ by hand:
 - **Attachment byte ceilings**: `MAX_INLINE_ATTACHMENT_BYTES` and
   `MAX_INLINE_IMAGE_BYTES` in `mcp/tools/page_read.py` are the truth; the tool
   description f-strings them, but both READMEs, both `api-notes` and
-  `manifest.json` restate them as prose. Lower a constant and four documents
+  `manifest.json` restate them as prose. Lower a constant and five documents
   start advertising a limit the server no longer enforces.
 - **Server description**: single-sourced from package metadata at runtime,
   but `manifest.json` and `server.json` carry their own copies.

@@ -128,7 +128,17 @@ jobs:
       run: uv sync --dev
 
     - name: Run tests
-      run: uv run pytest --cov=mcp_wiki --cov-branch --cov-report=xml --cov-fail-under=100 .
+      run: uv run pytest --cov=mcp_wiki --cov-branch --cov-report=xml .
+
+    # Gated on one leg on purpose. A handful of tests skip on Windows (mode
+    # bits, fchmod, fsyncing a directory descriptor) and so do the arms they
+    # cover, so a 100% gate on every cell can only be met by excluding those
+    # arms from measurement everywhere — which is how the directory fsync
+    # lost its last regression detector. Windows and macOS still run every
+    # test they can; ubuntu keeps the line where the code is fully reachable.
+    - name: Enforce coverage
+      if: matrix.os == 'ubuntu-latest'
+      run: uv run coverage report --fail-under=100
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'

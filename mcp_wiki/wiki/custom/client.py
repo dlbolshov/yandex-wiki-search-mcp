@@ -182,10 +182,8 @@ def _probe_target(target: Path, *, overwrite: bool) -> None:
                 f"Cannot use {target}: a parent path component is a file"
             ) from None
         return
-    except NotADirectoryError as exc:  # pragma: no cover - the POSIX half
-        # POSIX says so outright; no transfer can ever land here. Windows
-        # never raises this for the scenario — it lands in the ENOENT arm
-        # above — so this arm is excluded the same way that one is.
+    except NotADirectoryError as exc:
+        # POSIX says so outright; no transfer can ever land here.
         raise WikiLocalFileError(
             f"Cannot use {target}: a parent path component is a file", cause=exc
         ) from exc
@@ -223,15 +221,26 @@ def _part_path(target: Path) -> Path:
         # Windows also caps the whole path at MAX_PATH (260) unless the machine
         # opted into long paths, and the suffix pushes a target Windows itself
         # accepts over the line. Shrink the prefix by whatever the parent, the
-        # separator and the suffix spend; a name too short to keep is replaced
-        # wholesale.
-        budget = min(  # pragma: no cover - the other half of the matrix
+        # separator and the suffix spend; a parent that leaves nothing for the
+        # prefix is refused below, once the fallback name is known.
+        budget = min(
             budget,
-            _WINDOWS_MAX_PATH - len(str(target.parent)) - 1 - _PART_SUFFIX_BUDGET,
+            # MAX_PATH counts the terminating NUL, so 259 is the longest path
+            # CreateFileW accepts without the `\\?\` prefix — spending all
+            # 260 produced a name Windows rejects with ERROR_PATH_NOT_FOUND.
+            _WINDOWS_MAX_PATH - 1 - len(str(target.parent)) - 1 - _PART_SUFFIX_BUDGET,
         )
     stem = target.name.encode()[: max(budget, 0)]
     prefix = stem.decode(errors="ignore") or "download"
-    return target.with_name(f"{prefix}.{secrets.token_hex(4)}.part")
+    part = target.with_name(f"{prefix}.{secrets.token_hex(4)}.part")
+    if os.name == "nt" and len(str(part)) >= _WINDOWS_MAX_PATH:
+        # The `or "download"` fallback knows nothing about the budget, so a
+        # parent long enough to leave no room for a stem still overflows.
+        # Refuse here, where the reason can be said, rather than at os.open.
+        raise WikiLocalFileError(
+            f"Cannot write beside {target}: the path is too long for this system"
+        )
+    return part
 
 
 def _open_part(target: Path, *, overwrite: bool) -> tuple[int, Path]:
@@ -293,12 +302,10 @@ def _open_part(target: Path, *, overwrite: bool) -> tuple[int, Path]:
             raise WikiLocalFileError(
                 f"Cannot write beside {target}", cause=exc
             ) from exc
-        if inherited is not None and os.name == "posix":  # pragma: no cover
+        if inherited is not None and os.name == "posix":  # pragma: no branch
             # POSIX-only twice over: os.fchmod exists on Windows only since
             # 3.13, and chmod there toggles nothing but the read-only
-            # attribute — there is no mode worth inheriting. Excluded from
-            # coverage, not just no-branch'd: the body is unreachable on
-            # Windows and its tests skip there, which failed that leg's gate.
+            # attribute — there is no mode worth inheriting.
             try:
                 os.fchmod(fd, inherited)
             except OSError as exc:
@@ -321,11 +328,19 @@ def _open_part(target: Path, *, overwrite: bool) -> tuple[int, Path]:
 # these specific paths. EACCES is included deliberately: were it a genuine
 # permission problem, the replace fallback fails with the same errno — now
 # wrapped with the target's name instead of escaping bare.
+# ENODEV and ENOTSUP cover the Windows half. The set was pure POSIX, yet the
+# filesystems it names are reached from Windows too, where CPython maps Win32
+# ERROR_NOT_SUPPORTED to ENODEV — an errno link(2) never produces, so nothing
+# here would have let it through. Added rather than probed: the cost is one
+# errno in a set, and the cost of guessing wrong is every non-overwrite
+# download to such a volume failing after the whole transfer already ran.
 _HARDLINK_UNSUPPORTED_ERRNOS = frozenset(
     {
         errno.EPERM,
         errno.EOPNOTSUPP,
+        errno.ENOTSUP,
         errno.ENOSYS,
+        errno.ENODEV,
         errno.EXDEV,
         errno.EINVAL,
         errno.EACCES,
@@ -341,7 +356,7 @@ def _refuse_existing(target: Path, cause: OSError) -> WikiLocalFileError:
     )
 
 
-def _fsync_directory(path: Path) -> None:  # pragma: no cover
+def _fsync_directory(path: Path) -> None:
     """Make a completed rename durable — where that is possible at all.
 
     POSIX-only by necessity, not caution: on Windows `os.open` cannot open a
@@ -349,11 +364,12 @@ def _fsync_directory(path: Path) -> None:  # pragma: no cover
     does not accept directory handles anyway, so there is no equivalent to
     reach for — NTFS journals the rename on its own schedule.
 
-    Excluded from coverage whole: each OS leg can only ever execute its own
-    half, so no single leg reaches 100% of this function. The POSIX behavior
-    is still pinned by TestDownloadErrorArms.
+    Only the early return is excluded, never the body: whole-function coverage
+    exclusion here once hid the fact that no test asserted the fsync happens
+    at all, so replacing this body with `return` kept the suite at 100%.
+    `test_a_finished_download_flushes_the_directory_entry` is the guard.
     """
-    if os.name != "posix":
+    if os.name != "posix":  # pragma: no cover - the other half of the matrix
         return
     dir_fd = os.open(path, os.O_RDONLY)
     try:
@@ -389,7 +405,15 @@ def _place_part(part: Path, target: Path, *, overwrite: bool) -> None:
             raise _refuse_existing(target, exc) from exc
         part.replace(target)
         return
-    part.unlink()
+    # Same rule as the directory fsync in _commit_part: past the link the file
+    # is in place and correct, so a `.part` that will not go away is a stray
+    # file, not a failed download. Raising here told the caller to retry a
+    # transfer that had already delivered — and sent them into an `overwrite`
+    # they never needed, because the retry then found their own new file.
+    try:
+        part.unlink()
+    except OSError as exc:
+        logger.warning("%s is in place but %s was not removed: %s", target, part, exc)
 
 
 def _commit_part(fd: int, part: Path, target: Path, *, overwrite: bool) -> None:
@@ -428,8 +452,7 @@ def _commit_part(fd: int, part: Path, target: Path, *, overwrite: bool) -> None:
     # — and, with overwrite, one that has already replaced their file.
     try:
         _fsync_directory(target.parent)
-    except OSError as exc:  # pragma: no cover - only reachable on POSIX
-        # _fsync_directory is the sole raiser here and is a no-op off POSIX.
+    except OSError as exc:
         logger.warning(
             "%s is in place but its directory entry was not flushed: %s", target, exc
         )
@@ -806,7 +829,12 @@ class WikiClient(WikiProtocol):
         callers decide whether that is an error or just a place to stop.
         """
         body = bytearray()
-        async for chunk in response.content.iter_chunked(DOWNLOAD_CHUNK_SIZE):
+        # Never more than the ceiling plus the one byte that proves overflow:
+        # asking for a flat DOWNLOAD_CHUNK_SIZE let a 64 KiB cap materialize a
+        # whole chunk before the check below could fire.
+        async for chunk in response.content.iter_chunked(
+            min(limit + 1, DOWNLOAD_CHUNK_SIZE)
+        ):
             body.extend(chunk)
             if len(body) > limit:
                 del body[limit + 1 :]
@@ -1727,7 +1755,17 @@ class WikiClient(WikiProtocol):
                 # Submitted rather than awaited — the await would just be
                 # cancelled again — and queued behind any open or write still
                 # running, so it sees the finished state rather than racing it.
-                pool.submit(discard_leftover)
+                try:
+                    pool.submit(discard_leftover)
+                except RuntimeError as exc:
+                    # The pool takes no more work — interpreter teardown, or a
+                    # thread that could not be created. Logged, not run here:
+                    # a synchronous _discard_part would close the descriptor
+                    # from the event loop while the worker may still be
+                    # writing to it, which is the exact race this whole design
+                    # exists to prevent. Losing the original exception to a
+                    # RuntimeError would be worse than a stray `.part`.
+                    logger.warning("could not schedule cleanup for %s: %s", target, exc)
                 raise
             resolved = await run(target.resolve)
         finally:

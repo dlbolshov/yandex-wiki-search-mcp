@@ -362,12 +362,12 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         await asyncio.to_thread(tmp_path.unlink, True)
     attachment_id = None
     if uploaded is None or not uploaded.attachments:
-        REPORT.append(
-            (
-                "page_read_attachment_bytes",
-                "SKIP",
-                "upload produced no attachment to download",
-            )
+        # A SKIP row each, not one row for both: the final gate only looks at
+        # rows that exist, so a tool with no row at all leaves the sweep green
+        # having never touched it.
+        REPORT.extend(
+            (name, "SKIP", "upload produced no attachment")
+            for name in ("page_read_attachment_bytes", "page_download_attachment")
         )
     else:
         attachment_id = uploaded.attachments[0].id
@@ -397,6 +397,18 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
                 note_from_result=lambda r: f"{r.size_bytes} bytes -> {r.path}",
             )
             if saved is not None:
+                if downloaded is not None and saved.mimetype != downloaded.mimetype:
+                    # The invariant this branch introduced: one file must not
+                    # report one type when read into the conversation and
+                    # another when saved to disk. Checked as agreement rather
+                    # than against a literal, so it needs no assumption about
+                    # what the API sends — and as a REPORT row, because a note
+                    # could never fail the sweep (see above).
+                    broken(
+                        "page_download_attachment mimetype",
+                        f"read says {downloaded.mimetype}, "
+                        f"download says {saved.mimetype}",
+                    )
                 on_disk = save_to.read_bytes()
                 if on_disk != ATTACHMENT_PAYLOAD.encode():
                     broken(
