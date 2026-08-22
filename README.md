@@ -38,11 +38,11 @@ pages, comments, attachments, and dynamic tables ("grids") — **33 tools** with
 [![Add to Cursor](https://img.shields.io/badge/Cursor-Add_MCP_Server-000000?logo=cursor&logoColor=white)](https://cursor.com/install-mcp?name=yandex-wiki-search&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJ5YW5kZXgtd2lraS1zZWFyY2gtbWNwIl0sImVudiI6eyJXSUtJX1RPS0VOIjoiWU9VUl9UT0tFTiIsIldJS0lfT1JHX0lEIjoiWU9VUl9PUkdfSUQiLCJXSUtJX1JFQURfT05MWSI6InRydWUifX0=)
 [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_Server-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=yandex-wiki-search&config=%7B%22name%22%3A%22yandex-wiki-search%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22yandex-wiki-search-mcp%22%5D%2C%22env%22%3A%7B%22WIKI_TOKEN%22%3A%22YOUR_TOKEN%22%2C%22WIKI_ORG_ID%22%3A%22YOUR_ORG_ID%22%2C%22WIKI_READ_ONLY%22%3A%22true%22%7D%7D)
 [![Add to LM Studio](https://img.shields.io/badge/LM_Studio-Add_MCP_Server-4F46E5?logo=lmstudio&logoColor=white)](https://lmstudio.ai/install-mcp?name=yandex-wiki-search&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJ5YW5kZXgtd2lraS1zZWFyY2gtbWNwIl0sImVudiI6eyJXSUtJX1RPS0VOIjoiWU9VUl9UT0tFTiIsIldJS0lfT1JHX0lEIjoiWU9VUl9PUkdfSUQiLCJXSUtJX1JFQURfT05MWSI6InRydWUifX0=)
-[![Install in Claude Desktop](https://img.shields.io/badge/Claude_Desktop-Get_.mcpb-D97757?logo=claude&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/releases/latest)
+[![Install in Claude Desktop](https://img.shields.io/badge/Claude_Desktop-Get_.mcpb-D97757?logo=claude&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/releases/latest/download/yandex-wiki-search-mcp.mcpb)
 
-The Claude Desktop badge leads to the latest release: download the `.mcpb` bundle
-there and double-click it — Claude Desktop installs the server and prompts for the
-token and org ID ([uv](https://docs.astral.sh/uv/) must be installed).
+The Claude Desktop badge downloads the `.mcpb` bundle of the latest release —
+double-click it and Claude Desktop installs the server, prompting for the token
+and org ID ([uv](https://docs.astral.sh/uv/) must be installed).
 
 <details>
 <summary><b>Claude Desktop / Windsurf / any JSON-config client (uvx)</b></summary>
