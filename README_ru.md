@@ -38,6 +38,12 @@
 
 [![Add to Cursor](https://img.shields.io/badge/Cursor-Add_MCP_Server-000000?logo=cursor&logoColor=white)](https://cursor.com/install-mcp?name=yandex-wiki-search&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJ5YW5kZXgtd2lraS1zZWFyY2gtbWNwIl0sImVudiI6eyJXSUtJX1RPS0VOIjoiWU9VUl9UT0tFTiIsIldJS0lfT1JHX0lEIjoiWU9VUl9PUkdfSUQiLCJXSUtJX1JFQURfT05MWSI6InRydWUifX0=)
 [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_Server-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=yandex-wiki-search&config=%7B%22name%22%3A%22yandex-wiki-search%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22yandex-wiki-search-mcp%22%5D%2C%22env%22%3A%7B%22WIKI_TOKEN%22%3A%22YOUR_TOKEN%22%2C%22WIKI_ORG_ID%22%3A%22YOUR_ORG_ID%22%2C%22WIKI_READ_ONLY%22%3A%22true%22%7D%7D)
+[![Add to LM Studio](https://img.shields.io/badge/LM_Studio-Add_MCP_Server-4F46E5?logo=lmstudio&logoColor=white)](https://lmstudio.ai/install-mcp?name=yandex-wiki-search&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJ5YW5kZXgtd2lraS1zZWFyY2gtbWNwIl0sImVudiI6eyJXSUtJX1RPS0VOIjoiWU9VUl9UT0tFTiIsIldJS0lfT1JHX0lEIjoiWU9VUl9PUkdfSUQiLCJXSUtJX1JFQURfT05MWSI6InRydWUifX0=)
+[![Install in Claude Desktop](https://img.shields.io/badge/Claude_Desktop-Get_.mcpb-D97757?logo=claude&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/releases/latest)
+
+Бейдж Claude Desktop ведёт на последний релиз: скачайте оттуда `.mcpb`-бандл и
+откройте его двойным кликом — Claude Desktop установит сервер и спросит токен и
+ID организации (нужен установленный [uv](https://docs.astral.sh/uv/)).
 
 <details>
 <summary><b>Claude Desktop / Windsurf / любой клиент с JSON-конфигом (uvx)</b></summary>
@@ -196,7 +202,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 список тулзов официального хостед-сервера снят живьём с `mcp.wiki.yandex.net`
 (`wiki-mcp-server` 1.28.1, 2026-08-11).
 
-| | **yandex-wiki-search-mcp** | [Официальный MCP Яндекса](https://yandex.ru/support/wiki/ru/mcp) (hosted) | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) |
+| | **yandex-wiki-search-mcp** | [Официальный MCP Яндекса](https://yandex.ru/support/wiki/ru/mcp) (hosted) | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [ya-wiki-mcp](https://github.com/imdeniil/ya-wiki-mcp) |
 |---|---|---|---|---|---|
 | Полнотекстовый поиск | ✅ до 50 результатов, серверные фильтры + подсветка | ❌ поисковой тулзы нет | ❌ | ✅ до 10 результатов | ❌ |
 | Страницы: create / update / append / delete + recover | ✅ всё, плюс частичное редактирование заменами текста (`page_edit`) | частично — нет append / recover; есть частичное редактирование заменами текста | ✅ всё | частично — нет append / recover | частично — нет recover |
@@ -206,7 +212,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 | Серверный read-only режим | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Типизированные output-схемы + аннотации | ✅ | ❌ | ❌ | ❌ | ❌ тулзы возвращают голые строки |
 | YFM-хелперы | ✅ ресурс со шпаргалкой по синтаксису + `yfm_warnings` в write-тулзах | ❌ | ❌ | ❌ | ✅ конвертер Markdown→YFM + кэш дерева страниц, prompt-шаблоны |
-| Docker / PyPI / MCP Registry | ✅ / ✅ / ✅ | — hosted-сервис, закрытый исходник, устанавливать нечего | ✅ / ✅ / ✅ | ❌ ручная установка | только PyPI; репозиторий исходников не указан |
+| Docker / PyPI / MCP Registry | ✅ / ✅ / ✅ | — hosted-сервис, закрытый исходник, устанавливать нечего | ✅ / ✅ / ✅ | ❌ ручная установка | ❌ / ✅ / ❌ |
 | Многопользовательский OAuth для HTTP | ✅ | ❌ токен каждого пользователя вставляется в статичные заголовки, OAuth-флоу нет | ✅ | ❌ | ❌ |
 
 Ещё стоит знать:
@@ -214,6 +220,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 - [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) (Python) — создание / обновление страниц плюс чтение, отдельный `-ro` вариант запуска только на чтение; нет delete / recover, гридов и поиска; только PyPI
 - [brekhov-ilya/yandex-wiki-mcp](https://github.com/brekhov-ilya/yandex-wiki-mcp) (npm) — страницы read / write / move, гриды только на чтение; интерактивное получение токена через PKCE с автообновлением, без поиска
 - [n-r-w/yandex-mcp](https://github.com/n-r-w/yandex-mcp) (Go) — Yandex Tracker + Wiki в одном сервере, принципиально только чтение (5 wiki-тулзов), без поиска; авторизация только IAM-токенами через `yc` CLI — OAuth-токены Яндекса не поддерживаются
+- [bim-ba/ycli](https://github.com/bim-ba/ycli) (Python) — один тулкит на Tracker + Wiki + Forms: CLI, Python SDK, плагин Claude Code и MCP-сервер, у которого Wiki-поверхность — 42 `wiki_*`-тулзы (15 чтение / 27 запись, с аннотациями и флагом `--read-only`); поисковой тулзы нет, а скачивание вложений — только в CLI/SDK
 
 На август 2026 полнотекстовый поиск есть только здесь (до 50 результатов) и у slartus
 (до 10) — собственный хостед-сервер Яндекса поставляется без поисковой тулзы, — а

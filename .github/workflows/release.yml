@@ -73,6 +73,10 @@ jobs:
         run: |
           mcpb validate manifest.json
           mcpb pack . yandex-wiki-search-mcp-${{ github.ref_name }}.mcpb
+          # A second copy under a version-free name, so
+          # releases/latest/download/yandex-wiki-search-mcp.mcpb is a
+          # permanent one-click install URL (the Claude Desktop path).
+          cp yandex-wiki-search-mcp-${{ github.ref_name }}.mcpb yandex-wiki-search-mcp.mcpb
 
       - name: Upload mcpb artifacts
         uses: actions/upload-artifact@v4

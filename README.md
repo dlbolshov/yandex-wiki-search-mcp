@@ -37,6 +37,12 @@ pages, comments, attachments, and dynamic tables ("grids") — **33 tools** with
 
 [![Add to Cursor](https://img.shields.io/badge/Cursor-Add_MCP_Server-000000?logo=cursor&logoColor=white)](https://cursor.com/install-mcp?name=yandex-wiki-search&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJ5YW5kZXgtd2lraS1zZWFyY2gtbWNwIl0sImVudiI6eyJXSUtJX1RPS0VOIjoiWU9VUl9UT0tFTiIsIldJS0lfT1JHX0lEIjoiWU9VUl9PUkdfSUQiLCJXSUtJX1JFQURfT05MWSI6InRydWUifX0=)
 [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_Server-0098FF?logo=githubcopilot&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=yandex-wiki-search&config=%7B%22name%22%3A%22yandex-wiki-search%22%2C%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22yandex-wiki-search-mcp%22%5D%2C%22env%22%3A%7B%22WIKI_TOKEN%22%3A%22YOUR_TOKEN%22%2C%22WIKI_ORG_ID%22%3A%22YOUR_ORG_ID%22%2C%22WIKI_READ_ONLY%22%3A%22true%22%7D%7D)
+[![Add to LM Studio](https://img.shields.io/badge/LM_Studio-Add_MCP_Server-4F46E5?logo=lmstudio&logoColor=white)](https://lmstudio.ai/install-mcp?name=yandex-wiki-search&config=eyJjb21tYW5kIjoidXZ4IiwiYXJncyI6WyJ5YW5kZXgtd2lraS1zZWFyY2gtbWNwIl0sImVudiI6eyJXSUtJX1RPS0VOIjoiWU9VUl9UT0tFTiIsIldJS0lfT1JHX0lEIjoiWU9VUl9PUkdfSUQiLCJXSUtJX1JFQURfT05MWSI6InRydWUifX0=)
+[![Install in Claude Desktop](https://img.shields.io/badge/Claude_Desktop-Get_.mcpb-D97757?logo=claude&logoColor=white)](https://github.com/dlbolshov/yandex-wiki-search-mcp/releases/latest)
+
+The Claude Desktop badge leads to the latest release: download the `.mcpb` bundle
+there and double-click it — Claude Desktop installs the server and prompts for the
+token and org ID ([uv](https://docs.astral.sh/uv/) must be installed).
 
 <details>
 <summary><b>Claude Desktop / Windsurf / any JSON-config client (uvx)</b></summary>
@@ -195,7 +201,7 @@ Facts verified against the alternatives' docs and published code, July–August 
 the official hosted server's tool list captured live from `mcp.wiki.yandex.net`
 (`wiki-mcp-server` 1.28.1, 2026-08-11).
 
-| | **yandex-wiki-search-mcp** | [Yandex's official MCP](https://yandex.ru/support/wiki/en/mcp) (hosted) | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [ya-wiki-mcp](https://pypi.org/project/ya-wiki-mcp/) |
+| | **yandex-wiki-search-mcp** | [Yandex's official MCP](https://yandex.ru/support/wiki/en/mcp) (hosted) | [ya-yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp) | [slartus/mcp-yandex-wiki](https://github.com/slartus/mcp-yandex-wiki) | [ya-wiki-mcp](https://github.com/imdeniil/ya-wiki-mcp) |
 |---|---|---|---|---|---|
 | Full-text search | ✅ up to 50 results, server-side filters + highlighting | ❌ no search tool | ❌ | ✅ up to 10 results | ❌ |
 | Pages: create / update / append / delete + recover | ✅ all, plus partial edits via text replacement (`page_edit`) | partial — no append / recover; has partial edits via text replacement | ✅ all | partial — no append / recover | partial — no recover |
@@ -205,7 +211,7 @@ the official hosted server's tool list captured live from `mcp.wiki.yandex.net`
 | Server-side read-only mode | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Typed output schemas + tool annotations | ✅ | ❌ | ❌ | ❌ | ❌ tools return plain strings |
 | YFM helpers | ✅ syntax cheat sheet resource + `yfm_warnings` in write tools | ❌ | ❌ | ❌ | ✅ Markdown→YFM converter + page-tree cache, prompt templates |
-| Docker / PyPI / MCP Registry | ✅ / ✅ / ✅ | — hosted service, closed source, nothing to install | ✅ / ✅ / ✅ | ❌ manual install | PyPI only; no source repo linked |
+| Docker / PyPI / MCP Registry | ✅ / ✅ / ✅ | — hosted service, closed source, nothing to install | ✅ / ✅ / ✅ | ❌ manual install | ❌ / ✅ / ❌ |
 | Multi-user OAuth for HTTP deployments | ✅ | ❌ per-user token pasted into static headers, no OAuth flow | ✅ | ❌ | ❌ |
 
 Also worth knowing:
@@ -213,6 +219,7 @@ Also worth knowing:
 - [best-doctor/mcp-yandex-wiki](https://github.com/best-doctor/mcp-yandex-wiki) (Python) — page create / update plus reads, with a separate `-ro` read-only entry point; no delete / recover, no grids, no search; PyPI only
 - [brekhov-ilya/yandex-wiki-mcp](https://github.com/brekhov-ilya/yandex-wiki-mcp) (npm) — pages read / write / move, grids read-only; interactive PKCE token flow with auto-refresh, no full-text search
 - [n-r-w/yandex-mcp](https://github.com/n-r-w/yandex-mcp) (Go) — Yandex Tracker + Wiki in one server, read-only by design (5 wiki read tools), no search; auth via IAM tokens from the `yc` CLI only — Yandex OAuth tokens are not supported
+- [bim-ba/ycli](https://github.com/bim-ba/ycli) (Python) — one toolkit for Tracker + Wiki + Forms: a CLI, a Python SDK, a Claude Code plugin, and an MCP server whose Wiki surface is 42 `wiki_*` tools (15 read / 27 write, annotated, with a `--read-only` flag); no full-text search tool, and attachment downloads stay CLI/SDK-only
 
 As of August 2026, full-text search exists only here (up to 50 results) and in slartus
 (up to 10) — Yandex's own hosted server ships without a search tool — and the
