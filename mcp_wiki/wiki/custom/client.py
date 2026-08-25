@@ -927,14 +927,24 @@ class WikiClient(WikiProtocol):
         created_at: SearchDateInterval | None = None,
         modified_at: SearchDateInterval | None = None,
         highlight: bool = False,
+        cursor: int | None = None,
         auth: YandexAuth | None = None,
     ) -> SearchResponse:
         # The search endpoint reads "limit" from the POST body and silently
-        # ignores "page_size" (always returning 10); limit > 50 is a 400.
-        # Verified against the live API 2026-08-02. Named limit rather than
-        # page_size on purpose: there is no pagination behind it — the
-        # endpoint's cursors are always null. The documented "cursor" and
-        # "order_by" are dead on the wire (2026-08-11) and stay unexposed.
+        # ignores "page_size"; limit > 50 is a 400. Verified 2026-08-02.
+        # "highlight" is a mode switch, not decoration (verified 2026-08-25):
+        # without it the endpoint returns the top <=50 hits with cursors
+        # always null and a request "cursor" accepted but ignored — with
+        # highlight=true a different backend answers, hard-capping the page
+        # at 10 results no matter the limit, honoring "cursor" (integer page
+        # number, 1-500) and paging through up to ~100 results. Past the end
+        # of the set it keeps answering empty pages with an ever-growing
+        # next_cursor, so only an empty "results" (or a null next_cursor on
+        # a non-empty page) means the set is over. "order_by" only works in
+        # that mode too and stays unexposed — half a feature is a moving
+        # target. "cursor" is not clamped here on purpose: 0 or 501 is a 400
+        # from the wire, and clamping would silently hand back a different
+        # page than the one asked for.
         # Filters run server-side, before the limit (verified 2026-08-11):
         # "cluster" takes deep slug prefixes, an unknown one is 200 with no
         # results, and the date intervals require both bounds — the model
@@ -944,7 +954,7 @@ class WikiClient(WikiProtocol):
         # it is dropped here rather than sent (verified 2026-08-18).
         # The documented "show_obsolete" is dead on the wire — obsolete
         # pages come back regardless (verified 2026-08-18) — and stays
-        # unexposed alongside "cursor" and "order_by".
+        # unexposed alongside "order_by".
         body: dict[str, Any] = {
             "query": query,
             "limit": max(1, min(limit, SEARCH_LIMIT_MAX)),
@@ -974,6 +984,17 @@ class WikiClient(WikiProtocol):
             body["filters"] = filters
         if highlight:
             body["highlight"] = True
+        if cursor is not None:
+            if not highlight:
+                # Without highlight the wire validates the cursor and then
+                # ignores it, answering page 1 again — a silent lie to the
+                # caller who asked for page N. Refuse loudly instead.
+                raise ValueError(
+                    "cursor requires highlight=true: the search endpoint "
+                    "paginates only in highlight mode and silently ignores "
+                    "the cursor otherwise, returning page 1 again."
+                )
+            body["cursor"] = cursor
         payload = await self._request(
             "POST",
             "v1/search",

@@ -115,12 +115,48 @@ async def probe_search(session: aiohttp.ClientSession, token: str, query: str) -
         moved = slugs(page2) != base_slugs
         live = moved or base.get("next_cursor") is not None
         record(
-            "search cursor pagination",
+            "search cursor pagination (default mode)",
             "LIVE" if live else "DEAD",
             f"page2 differs: {moved}, next_cursor: {base.get('next_cursor')!r}",
         )
     else:
-        record("search cursor pagination", "ERR", f"HTTP {status}: {page2}")
+        record(
+            "search cursor pagination (default mode)", "ERR", f"HTTP {status}: {page2}"
+        )
+
+    # the same walk with highlight=true: a different backend answers there,
+    # and it is the one that actually paginates (mode split found 2026-08-25)
+    status, hl1 = await search(
+        session, token, {"query": query, "limit": 3, "highlight": True}
+    )
+    if status == 200 and hl1.get("results"):
+        hl1_slugs = slugs(hl1)
+        status2, hl2 = await search(
+            session,
+            token,
+            {"query": query, "limit": 3, "highlight": True, "cursor": 2},
+        )
+        if status2 == 200:
+            moved = slugs(hl2) != hl1_slugs
+            live = moved or hl1.get("next_cursor") is not None
+            record(
+                "search cursor pagination (highlight mode)",
+                "LIVE" if live else "DEAD",
+                f"page2 differs: {moved}, next_cursor: {hl1.get('next_cursor')!r}, "
+                f"page cap: asked limit=3, got {len(hl1_slugs)}",
+            )
+        else:
+            record(
+                "search cursor pagination (highlight mode)",
+                "ERR",
+                f"HTTP {status2}: {hl2}",
+            )
+    else:
+        record(
+            "search cursor pagination (highlight mode)",
+            "SKIP" if status == 200 else "ERR",
+            f"HTTP {status}, {len(hl1.get('results', []))} results",
+        )
 
     # page_size must still be ignored (10 default results, not 3)
     status, ps = await search(session, token, {"query": query, "page_size": 3})

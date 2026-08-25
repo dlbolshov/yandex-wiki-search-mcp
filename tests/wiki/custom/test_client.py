@@ -135,6 +135,40 @@ class TestWikiClient:
             }
         )
 
+    async def test_page_search_cursor_rides_with_highlight(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # highlight=true is the only mode where the wire honors a cursor
+        # (verified live 2026-08-25), so the pair travels together and the
+        # string next_cursor the endpoint answers with comes back verbatim.
+        capture = RequestCapture(
+            payload={"results": [], "next_cursor": "4", "prev_cursor": "2"}
+        )
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/search",
+                callback=capture.callback,
+            )
+            result = await wiki_client.page_search("q", highlight=True, cursor=3)
+
+        capture.last_request.assert_json_body(
+            {"query": "q", "limit": 10, "highlight": True, "cursor": 3}
+        )
+        assert result.next_cursor == "4"
+        assert result.prev_cursor == "2"
+
+    async def test_page_search_cursor_without_highlight_is_refused(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # Without highlight the wire validates the cursor and then ignores it,
+        # answering page 1 again (verified live 2026-08-25) — the client
+        # refuses to send that silent lie, before touching the network.
+        with (
+            aioresponses(),
+            pytest.raises(ValueError, match="cursor requires highlight"),
+        ):
+            await wiki_client.page_search("q", cursor=2)
+
     async def test_page_search_normalizes_the_cluster_filter(
         self, wiki_client: WikiClient
     ) -> None:

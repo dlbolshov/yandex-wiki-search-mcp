@@ -139,7 +139,7 @@ pip install "yandex-wiki-search-mcp<1.1"
 
 | Tool | What it does |
 |---|---|
-| `page_search` | Full-text search across the entire Wiki (pages and files), up to 50 ranked results with a text excerpt each; server-side filters and optional `<em>` match highlighting |
+| `page_search` | Full-text search across the entire Wiki (pages and files), ranked results with a text excerpt each; server-side filters, and cursor paging through ~100 results in the `highlight` mode (up to 50 in one call otherwise) |
 | `page_get` | Get a page by `page_id` or `slug` (accepts full Wiki URLs too) |
 | `page_get_descendants` | Traverse a page subtree — one flat list of `{id, slug}` from all nesting levels; `from_root=true` walks the whole Wiki; `fetch_all` drains the cursor in one call |
 | `page_get_comments` | List page comments (`fetch_all` supported) |
@@ -236,7 +236,14 @@ Wiki web search bar, undocumented until Yandex published its
 [API reference](https://yandex.ru/support/wiki/ru/api-ref/search/search__search) in
 August 2026. Search first, then open a result with `page_get` by its `slug`.
 
-- Up to **50** results per call (`limit` is clamped to 1–50; the API rejects anything else).
+- Two wire modes. By default: up to **50** results in one call (`limit` is clamped to
+  1–50; the API rejects anything else) and no pagination — the response cursors are
+  always `null`. With `highlight=true`: pages are hard-capped at **10** results
+  regardless of `limit`, matches come wrapped in `<em>`, and `cursor` (the page number
+  echoed back in `next_cursor`) walks up to **~100** results. The set ends when
+  `results` comes back empty or `next_cursor` is `null` on a non-empty page — past the
+  end `next_cursor` keeps counting up over empty pages, so it alone does not mean
+  "more exists".
 - **Filters run server-side, before the limit** — a filtered search does not lose matches to it: `slug_prefix` (section filter, deep prefixes like `tech-doc/ml` are fine), `result_type` (`page`/`file`), `authors` (page owners by `uid`/`cloud_uid` — `user_get_current` supplies your own, turning "find my pages about X" into two calls), and `created_between`/`modified_between` date intervals (both bounds required — the API rejects open ones).
 - Quoted `"exact phrase"` queries work; `page` results get absolute `https://wiki.yandex.ru/...` links, `file` results get direct download links.
 - `content` is a **~510-character excerpt, not the page and not a summary**: it is cut from wherever the match sits, the query terms need not be inside it, and its line breaks and tabs are the page's own layout (table cells arrive tab-separated) rather than separators between fragments. Pass `highlight=true` to get matches wrapped in `<em>` tags. Read the page with `page_get` before answering from it. Empty for `file` results.

@@ -98,6 +98,7 @@ class WikiProtocol(Protocol):
         created_at: SearchDateInterval | None = None,
         modified_at: SearchDateInterval | None = None,
         highlight: bool = False,
+        cursor: int | None = None,
         auth: YandexAuth | None = None,
     ) -> SearchResponse: ...
 

@@ -228,20 +228,26 @@ def register_page_read_tools(
     @mcp.tool(
         title="Search Wiki",
         description=(
-            "Full-text search across the entire Yandex Wiki. Returns up to 50 results "
+            "Full-text search across the entire Yandex Wiki. Returns results "
             "(pages and files) ranked by relevance, each with a title, slug, url, and a "
-            "text excerpt in `content` (there is no deeper pagination). Use this "
-            "to DISCOVER pages, then call page_get with a result's "
-            "slug to read full content. `content` is an excerpt of at most ~510 "
-            "characters cut from wherever the match sits in the page — not the page "
-            "and not a summary of it, with no guarantee the query terms are even "
-            "inside it — so treat it as a relevance signal and read the page before "
-            "answering from it; highlight=true marks the matches it does contain "
-            "with <em> tags. Wrap multi-word exact phrases in double quotes. All "
-            "filters (slug_prefix, result_type, authors, dates) run in the search "
-            "backend itself, before the result limit, so a filtered search does not "
-            "lose matches to it. To enumerate a section (or the whole Wiki) rather "
-            "than search it, use page_get_descendants."
+            "text excerpt in `content`. Two modes: by default one call returns the top "
+            "`limit` (up to 50) results and that is the whole reachable set — the "
+            "response cursors stay null. With highlight=true the search switches to a "
+            "paginated mode: pages are hard-capped at 10 results no matter the `limit`, "
+            "and `cursor` (the page number echoed back in `next_cursor`) walks up to "
+            "~100 results — deeper than the default mode reaches. The set is over when "
+            "`results` comes back empty or `next_cursor` is null on a non-empty page; "
+            "past the end `next_cursor` keeps incrementing over empty pages, so do not "
+            "treat it alone as 'more exists'. Use this tool to DISCOVER pages, then "
+            "call page_get with a result's slug to read full content. `content` is an "
+            "excerpt of at most ~510 characters cut from wherever the match sits in "
+            "the page — not the page and not a summary of it, with no guarantee the "
+            "query terms are even inside it — so treat it as a relevance signal and "
+            "read the page before answering from it. Wrap multi-word exact phrases in "
+            "double quotes. All filters (slug_prefix, result_type, authors, dates) run "
+            "in the search backend itself, before the result limit, so a filtered "
+            "search does not lose matches to it. To enumerate a section (or the whole "
+            "Wiki) rather than search it, use page_get_descendants."
         ),
         annotations=READ_ONLY,
     )
@@ -296,9 +302,22 @@ def register_page_read_tools(
             bool,
             Field(
                 description="Wrap query matches inside `content` excerpts in "
-                "<em>…</em> tags."
+                "<em>…</em> tags. Also a mode switch, not just markup: it caps "
+                "every page at 10 results regardless of `limit`, and it is the "
+                "only mode where `cursor` pages deeper (up to ~100 results)."
             ),
         ] = False,
+        cursor: Annotated[
+            int | None,
+            Field(
+                ge=1,
+                le=500,
+                description="Page number for paging through results, as echoed "
+                "in `next_cursor` (pages count from 1). Works only together "
+                "with highlight=true — without it the backend ignores the "
+                "cursor, so this tool refuses the combination.",
+            ),
+        ] = None,
     ) -> SearchResponse:
         app_context = ctx.request_context.lifespan_context
         if slug_prefix is not None and not normalize_slug(slug_prefix):
@@ -318,6 +337,7 @@ def register_page_read_tools(
             created_at=created_between,
             modified_at=modified_between,
             highlight=highlight,
+            cursor=cursor,
             auth=get_yandex_auth(ctx),
         )
         web_base_url = app_context.web_base_url.rstrip("/")

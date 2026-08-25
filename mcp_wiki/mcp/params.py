@@ -277,6 +277,7 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
         'In russian Yandex Wiki is called "Яндекс Вики" or "Вики".',
         "If a tool accepts `page_id` and `slug`, provide exactly one of them.",
         "The `content` on a `page_search` result is an excerpt of at most ~510 characters taken from wherever the match sits in the page — not the page and not a summary, sometimes without the query terms in it, highlighted with <em> tags only when highlight=true was passed. Use it to pick a result, then read the page with `page_get` before answering from it.",
+        "`page_search` paginates only with highlight=true: that mode caps every page at 10 results and unlocks `cursor` (~100 results reachable). Without it a single call returns up to 50 results — the top of the ranking — and that is the whole reachable set.",
         "When you need a full list from a cursor-paginated tool, pass `fetch_all=true` — the server follows the cursors for you and returns everything in one call. Only if the reply carries `truncated: true` is the list incomplete: continue from `next_cursor`, or narrow the request. Walk cursors by hand only when a tool has no `fetch_all`.",
     ]
     if read_only:
