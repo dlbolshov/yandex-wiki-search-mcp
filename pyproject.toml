@@ -37,6 +37,11 @@ dependencies = [
 
 [tool.uv]
 package = true
+# One source for every setup-uv step in CI: without it the action warns
+# "Could not determine uv version ... Falling back to latest" on each run.
+# uv itself enforces this locally too, so the floor stays at a version
+# contributors actually have; the ceiling keeps CI off an untested major.
+required-version = ">=0.11,<0.13"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -217,6 +217,7 @@ class TestPageReadTools:
         assert kwargs["created_at"] is None
         assert kwargs["modified_at"] is None
         assert kwargs["highlight"] is False
+        assert kwargs["cursor"] is None
 
     async def test_page_search_forwards_filters_server_side(
         self,
@@ -260,6 +261,65 @@ class TestPageReadTools:
         assert kwargs["created_at"].to == "2026-06-01T00:00:00Z"
         assert kwargs["modified_at"].from_ == "2026-06-01T00:00:00Z"
         assert kwargs["highlight"] is True
+
+    async def test_page_search_forwards_the_cursor(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # Pagination lives in the backend's highlight mode; the tool's job is
+        # to hand the page number over, not to walk pages itself.
+        mock_wiki_protocol.page_search.return_value = SearchResponse.model_construct(
+            results=[], next_cursor="3", prev_cursor="1"
+        )
+
+        result = await client.call_tool(
+            "page_search", {"query": "x", "highlight": True, "cursor": 2}
+        )
+
+        assert result.is_error is False
+        kwargs = mock_wiki_protocol.page_search.await_args.kwargs
+        assert kwargs["highlight"] is True
+        assert kwargs["cursor"] == 2
+        content = get_tool_result_content(result)
+        assert content["next_cursor"] == "3"
+
+    @pytest.mark.parametrize("cursor", [0, 501])
+    async def test_page_search_rejects_a_cursor_out_of_range(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+        cursor: int,
+    ) -> None:
+        # The wire 400s outside 1-500; the schema says so upfront instead.
+        result = await client.call_tool(
+            "page_search",
+            {"query": "x", "highlight": True, "cursor": cursor},
+        )
+
+        assert result.is_error is True
+        mock_wiki_protocol.page_search.assert_not_awaited()
+
+    async def test_page_search_cursor_without_highlight_errors_loudly(
+        self,
+        client: Client,
+        mock_wiki_protocol: AsyncMock,
+    ) -> None:
+        # The refusal itself lives in the client (it guards direct callers
+        # too); here it must surface to the agent as a tool error, not vanish.
+        mock_wiki_protocol.page_search.side_effect = ValueError(
+            "cursor requires highlight=true: the search endpoint paginates "
+            "only in highlight mode and silently ignores the cursor "
+            "otherwise, returning page 1 again."
+        )
+
+        result = await client.call_tool(
+            "page_search",
+            {"query": "x", "cursor": 2},
+        )
+
+        assert result.is_error is True
+        assert "cursor requires highlight=true" in get_tool_result_text(result)
 
     async def test_page_search_rejects_an_open_date_interval(
         self,

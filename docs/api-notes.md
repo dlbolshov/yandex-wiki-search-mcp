@@ -14,10 +14,12 @@ drop and the hosted MCP server, claim by claim).
 **Warning: this API drifts, and the docs trail the wire in both directions.** The search
 endpoint silently changed its wire contract between 2026-07-19 and 2026-08-02 (see below)
 — no versioning, no deprecation — and the full reference Yandex published in August 2026
-documents search pagination and ordering that the wire ignores, while OAuth scopes are
-documented but not enforced. These notes deliberately do not restate what the reference
-already covers; they track where the wire and the docs disagree, and what the docs leave
-out. When something looks off, re-run the probes before trusting either.
+documents search pagination and ordering as if they always worked, while the wire honors
+them only inside the `highlight: true` mode (and ignored both entirely until sometime
+between 2026-08-11 and 2026-08-25), and OAuth scopes are documented but not enforced.
+These notes deliberately do not restate what the reference already covers; they track
+where the wire and the docs disagree, and what the docs leave out. When something looks
+off, re-run the probes before trusting either.
 The [API drift check](../.github/workflows/api-drift.yml) workflow re-runs the contract
 sweep weekly against a live organization when its `DRIFT_*` secrets are configured.
 
@@ -51,13 +53,16 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   `page_size`, `page` and `offset` are accepted but **ignored** (you get the default 10
   results). The tool exposes the same `limit` argument end-to-end (renamed from
   `page_size` in 1.0.0), clamped to 1–50.
-- The envelope is `results` + `next_cursor`/`prev_cursor`. The cursors are **always
-  `null`**, and a request `cursor` is validated (garbage → 400) but never satisfiable —
-  the pagination machinery exists in the schema only. You get the top ≤50 hits, full stop.
-  `total_documents`/`total_pages` are gone. The 2026-08 reference documents `cursor`
-  (integer, 1–500, default 1) and string response cursors — the wire still honors
-  neither (re-probed 2026-08-11: `next_cursor` stays `null`, `cursor: 2` returns page 1
-  again).
+- The envelope is `results` + `next_cursor`/`prev_cursor`, and **which mode you are in
+  decides whether the cursors mean anything**. Without `highlight` they are **always
+  `null`**, and a request `cursor` is validated (an integer 1–500; a string is a 400
+  naming `type_error.integer`) but ignored — `cursor: 2` returns page 1 again, even on
+  a query with a full 50-hit page where a working paginator would have to hand out a
+  cursor (probed 2026-08-02, re-probed 2026-08-11 and 2026-08-25): the top ≤`limit`
+  hits are the whole reachable set. **With `highlight: true` the cursors are real** —
+  the wire grew that mode between 2026-08-11 and 2026-08-25, see the highlight bullet
+  below. `total_documents`/`total_pages` are gone. The 2026-08 reference documents
+  `cursor` for both modes and mentions no mode split at all.
 - Per result: the snippet is in **`content`** (plain text), `modified_at` is an **ISO
   datetime string**. Two result types: **`page`** (relative `url`, normalized by the tool
   to an absolute link based on `WIKI_WEB_BASE_URL`) and **`file`** (absolute
@@ -102,10 +107,11 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   `user_get_current` for "my pages". `filters.show_obsolete` is documented but
   **dead** (probed 2026-08-18): pages that `descendants?actuality=obsolete` itself
   reports as obsolete come back identically with `false`, `true`, and the flag
-  omitted — unexposed, third dead search parameter after `cursor` and `order_by`.
-  `order_by`
-  (`relevancy`/`creation_date`/`modified_date`) is documented but **ignored** — neither
-  value changes the order. Since 1.3.0 the tool forwards `slug_prefix` as
+  omitted — unexposed, and the one search parameter still dead in both modes now that
+  `cursor` and `order_by` woke up inside the highlight mode (2026-08-25). `order_by`
+  (`relevancy`/`creation_date`/`modified_date`) is **ignored in the default mode** —
+  neither value changes the order; in highlight mode it works (see the highlight
+  bullet) and stays unexposed. Since 1.3.0 the tool forwards `slug_prefix` as
   `filters.cluster` and `result_type` as `filters.type`, and exposes the date intervals
   as `created_between`/`modified_between` — nothing is filtered client-side anymore.
 - **`filters.cluster` matches path segments, includes the cluster page itself, and is
@@ -119,9 +125,31 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   `GET /pages?slug=` resolves all three to the same page. A wrong spelling is
   therefore indistinguishable from an empty section, so `WikiClient.page_search`
   normalizes and lowercases `cluster` itself rather than leaving it to callers.
-- **`highlight: true` works**: matches inside `content` arrive wrapped in `<em>`
-  (9/10 snippets changed against the same query without it). Off by default; exposed
-  as the tool's `highlight` argument since 1.3.0.
+- **`highlight: true` is a mode switch, not markup** (probed 2026-08-25; the split did
+  not exist on 2026-08-11). Matches inside `content` arrive wrapped in `<em>` (9/10
+  snippets changed against the same query without it) — and the request is answered by
+  what behaves like a different backend:
+  - **The page hard-caps at 10 results** no matter the `limit` (`limit: 50` still
+    returns 10); `page_size` stays ignored there too.
+  - **`cursor` works**: an integer page number counting from 1 (a numeric string is
+    coerced, `1.5` truncates to 1, 0 and 501 are 400s), every page answers string
+    `next_cursor`/`prev_cursor`, and the walk reaches **up to ~100 results** — a
+    100+-hit query ends exactly at 10 pages × 10 results, a 66-hit one at its natural
+    end — twice as deep as the default mode's 50.
+  - **The end of the set**: the last non-empty page answers `next_cursor: null`, but a
+    cursor pointing past the set answers empty `results` with `next_cursor` still
+    counting up (`cursor: 200` → `next_cursor: "201"`, all the way to the validation
+    ceiling of 500) — so stop on "empty `results` or null `next_cursor`", never on
+    `next_cursor` alone.
+  - **The modes agree on ranking, not always on the set**: every top-50 default-mode
+    hit of a probed query sat inside the highlight mode's 66, in order — but a
+    degenerate one-letter query found 50 in the default mode and 7 in highlight mode
+    (a stop-word list on that backend, most likely), and re-walking the same query can
+    swap neighboring results between runs.
+  - Off by default; exposed as the tool's `highlight` argument since 1.3.0, and
+    `highlight=true` + `cursor` is how the tool pages — `WikiClient.page_search`
+    refuses a `cursor` without `highlight`, because the wire would silently answer
+    page 1 again.
 - Quoted `"exact phrase"` queries work and produce phrase-matched results;
   `-minus` and boolean operators are ignored.
 

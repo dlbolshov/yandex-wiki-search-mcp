@@ -618,10 +618,20 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
             "page_get_resources (grid host)",
             lambda: wiki.page_get_resources(grid_host.id),
         )
-    await check(
+    corpus = await check(
         "page_search (existing corpus)",
         lambda: wiki.page_search("документация", limit=50),
     )
+    if corpus is not None and corpus.next_cursor is not None:
+        # The default mode has no pagination — its cursors are always null
+        # (probed 2026-08-25) and the tool description says so. A cursor
+        # showing up here means the mode split healed and the description
+        # undersells the endpoint.
+        broken(
+            "page_search (default-mode cursors)",
+            f"next_cursor arrived without highlight: {corpus.next_cursor!r} — "
+            "the default mode grew pagination",
+        )
     own_uid = me.identity.uid if me is not None and me.identity is not None else None
     if own_uid is None:
         # A SKIP row, not a silent `if`: this check and user_get_current are the
@@ -674,6 +684,86 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
                 "page_search (cluster boundary)",
                 f"cluster={prefix!r} returned slugs outside the subtree: {leaked[:5]}",
             )
+
+    # highlight=true is a mode switch, not markup (probed 2026-08-25): pages
+    # cap at 10 results, "cursor" walks the set, and next_cursor is a
+    # stringified page number, null only on the last non-empty page. The
+    # tool's cursor argument and the client's cursor guard stand on this;
+    # pin it against the sweep's own fixtures.
+    hl_page1 = await check(
+        "page_search (highlight pagination: page 1)",
+        lambda: wiki.page_search("sweep", limit=1, cluster=base, highlight=True),
+        note_from_result=lambda r: (
+            f"{len(r.results)} hit(s), next_cursor={r.next_cursor!r}"
+        ),
+    )
+    plain = await check(
+        "page_search (same query, default mode)",
+        lambda: wiki.page_search("sweep", limit=50, cluster=base),
+        note_from_result=lambda r: f"{len(r.results)} hits",
+    )
+    if hl_page1 is not None and plain is not None:
+        if not hl_page1.results:
+            REPORT.append(
+                (
+                    "page_search (highlight pagination)",
+                    "SKIP",
+                    "the sweep's pages are not in the search index yet",
+                )
+            )
+        elif hl_page1.next_cursor is None:
+            if len(plain.results) >= 2:
+                broken(
+                    "page_search (highlight pagination)",
+                    "next_cursor is null on page 1 while the default mode "
+                    f"sees {len(plain.results)} hits — the paginated "
+                    "highlight mode is gone",
+                )
+            else:
+                REPORT.append(
+                    (
+                        "page_search (highlight pagination)",
+                        "SKIP",
+                        "single-hit set: nothing to page through",
+                    )
+                )
+        elif not hl_page1.next_cursor.isdigit():
+            broken(
+                "page_search (highlight pagination)",
+                f"next_cursor is not a page number: {hl_page1.next_cursor!r}",
+            )
+        else:
+            first_slug = hl_page1.results[0].slug
+            hl_page2 = await check(
+                "page_search (highlight pagination: cursor page 2)",
+                lambda: wiki.page_search(
+                    "sweep",
+                    limit=1,
+                    cluster=base,
+                    highlight=True,
+                    cursor=int(hl_page1.next_cursor),
+                ),
+                note_from_result=lambda r: (
+                    f"{len(r.results)} hit(s), next_cursor={r.next_cursor!r}"
+                ),
+            )
+            # The slug alone cannot prove a regression: the ranking can swap
+            # neighbors between two calls (api-notes), which at limit=1 puts
+            # page 1's result on top of page 2 legitimately. A wire that
+            # ignored the cursor would replay page 1 wholesale — same result
+            # AND same next_cursor — so only that pair is the signature.
+            if (
+                hl_page2 is not None
+                and hl_page2.results
+                and hl_page2.results[0].slug == first_slug
+                and hl_page2.next_cursor == hl_page1.next_cursor
+            ):
+                broken(
+                    "page_search (highlight pagination)",
+                    "cursor=2 replayed page 1 — same result, same "
+                    f"next_cursor {hl_page2.next_cursor!r}: the cursor is "
+                    "ignored again",
+                )
 
     print("\n=== attachment deletion ===")
     if attachment_id is None:
