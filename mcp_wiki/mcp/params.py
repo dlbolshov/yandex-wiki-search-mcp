@@ -118,7 +118,9 @@ SearchResultLimit = Annotated[
     Field(
         description="Number of search results to return (1-50). Filters are "
         "applied by the search backend before this limit, so filtered "
-        "searches do not need a larger limit to compensate.",
+        "searches do not need a larger limit to compensate. With "
+        "highlight=true every page is hard-capped at 10 results, and this "
+        "value only trims below that cap.",
         ge=1,
         le=50,
     ),

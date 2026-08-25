@@ -151,11 +151,17 @@ async def probe_search(session: aiohttp.ClientSession, token: str, query: str) -
                 "ERR",
                 f"HTTP {status2}: {hl2}",
             )
-    else:
+    elif status == 200:
         record(
             "search cursor pagination (highlight mode)",
-            "SKIP" if status == 200 else "ERR",
+            "SKIP",
             f"HTTP {status}, {len(hl1.get('results', []))} results",
+        )
+    else:
+        # hl1 is raw bytes when the error page is not JSON — format it whole
+        # like the default-mode branch, never .get() into it
+        record(
+            "search cursor pagination (highlight mode)", "ERR", f"HTTP {status}: {hl1}"
         )
 
     # page_size must still be ignored (10 default results, not 3)

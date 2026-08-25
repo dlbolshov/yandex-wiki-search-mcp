@@ -747,15 +747,22 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
                     f"{len(r.results)} hit(s), next_cursor={r.next_cursor!r}"
                 ),
             )
+            # The slug alone cannot prove a regression: the ranking can swap
+            # neighbors between two calls (api-notes), which at limit=1 puts
+            # page 1's result on top of page 2 legitimately. A wire that
+            # ignored the cursor would replay page 1 wholesale — same result
+            # AND same next_cursor — so only that pair is the signature.
             if (
                 hl_page2 is not None
                 and hl_page2.results
                 and hl_page2.results[0].slug == first_slug
+                and hl_page2.next_cursor == hl_page1.next_cursor
             ):
                 broken(
                     "page_search (highlight pagination)",
-                    "cursor=2 returned the same result as page 1 — the "
-                    "cursor is ignored again",
+                    "cursor=2 replayed page 1 — same result, same "
+                    f"next_cursor {hl_page2.next_cursor!r}: the cursor is "
+                    "ignored again",
                 )
 
     print("\n=== attachment deletion ===")
