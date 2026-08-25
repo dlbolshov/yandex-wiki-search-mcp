@@ -13,6 +13,7 @@ All notable changes to this project are documented in this file.
 ### Internal
 - The contract sweep pins both search modes: default-mode cursors must stay null (a cursor showing up there means the mode split healed and the tool description undersells the endpoint), and the highlight mode must actually page — page 1 over the sweep's own fixtures at `limit=1` must hand out a cursor, and following it must move: BROKEN fires only when page 2 replays both page 1's result and its `next_cursor`, because the ranking can legitimately swap neighbors between two calls. Both checks degrade to SKIP rows rather than silence when the search index has not caught up with the fixtures
 - The search section of `docs/api-notes.md` (both languages) rewritten around the mode split: the envelope bullet no longer calls pagination "schema only", `order_by` moved from dead to mode-gated, and a new highlight bullet carries the measured mode behavior — the 10-result page cap, the ~100-result reach, the end-of-set semantics, ranking agreement between the modes, and the one-letter-query anomaly (50 default-mode hits against 7 in highlight mode — a stop-word list on that backend, most likely)
+- `[tool.uv] required-version = ">=0.11,<0.13"` in `pyproject.toml`: every `setup-uv` step in CI was warning "Could not determine uv version … Falling back to latest" and silently tracking whatever uv shipped last — one constraint now feeds all five steps, and uv enforces the same floor locally
 
 ## [1.4.0] - 2026-08-21
 
