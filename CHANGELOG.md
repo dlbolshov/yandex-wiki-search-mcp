@@ -2,7 +2,10 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.5.0] - 2026-08-26
+
+Search learns to page: the wire quietly grew a second mode behind
+`highlight=true`, and `page_search` now walks it ~100 results deep.
 
 ### Added
 - `page_search` pages through results: the new `cursor` argument (1–500, the page number echoed back in `next_cursor`) works together with `highlight=true` and reaches ~100 results, where a single default-mode call stops at its top 50. Sometime between 2026-08-11 and 2026-08-25 the wire quietly grew a second search mode behind `highlight=true` — pages hard-capped at 10 results regardless of `limit`, real string cursors in the response, `order_by` honored (still unexposed: half a feature on a moving backend) — while without `highlight` the cursors stay null and a request cursor is still accepted and ignored. Two of the three "documented but dead" search parameters woke up inside that mode, which is exactly the drift `docs/api-notes.md` warns about; `filters.show_obsolete` is now the only one dead in both modes. `WikiClient.page_search` refuses `cursor` without `highlight` instead of sending it, because the wire would silently answer page 1 again; and since past the end of the set the wire keeps answering empty pages with an ever-growing `next_cursor` (up to its validation ceiling of 500), the tool description spells out the honest stop condition — empty `results`, or a null `next_cursor` on a non-empty page — instead of letting an agent trust `next_cursor` alone
