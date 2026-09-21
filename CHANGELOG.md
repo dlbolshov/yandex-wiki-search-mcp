@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+The wire grew two null keys and the weekly drift check caught them. No change to the
+tool surface or server behavior — the sweep and the field notes only.
+
+### Internal
+- The weekly API drift check went red on 2026-09-21 (green on 2026-09-14) with `UNDECLARED EXTRAS` on all 15 page-shaped rows: between the two runs every page reply — `GET /pages`, `GET /pages/{id}`, `POST /pages`, `POST /pages/{id}`, `append-content` — grew a top-level `active_revision`, and `append-content`'s an `actuality` on top. Both were `null` on every page probed, freshly created or a week old, neither is in the 2026-08 reference, and the documented `revision_id` query parameter on `GET /pages/{idx}` answers `404` `NOT_FOUND` for any id: a revision store surfacing on the wire with nothing in it yet. Tool consumers saw no change — `extra="ignore"` was already dropping both keys — so the models stay as they are, and `scripts/contract_sweep.py` now tolerates exactly these two keys while they are `null` (`NULL_UNTIL_LIVE`): the first value that arrives turns the run red again, which is the moment to decide whether `WikiPage` declares them. Recorded in `docs/api-notes.md` (both languages), along with the undocumented `is_available_for_ai` that `attributes` now carries
+- `scripts/contract_sweep.py` takes the scratch slug from `SWEEP_SLUG` — the environment, else `.env`, the same file `Settings` reads — when the positional argument is omitted, and `.env.example` documents the variable in a development-only block. The value existed only as the `DRIFT_SWEEP_SLUG` repository secret behind the weekly workflow, nowhere in a checkout
+
 ## [1.5.0] - 2026-08-26
 
 Search learns to page: the wire quietly grew a second mode behind

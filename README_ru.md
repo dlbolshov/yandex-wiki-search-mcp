@@ -395,6 +395,9 @@ uv run python scripts/contract_sweep.py users/YOU/contract-sweep            # ~3
 uv run python scripts/contract_sweep.py users/YOU/contract-sweep --cleanup  # убрать фикстуры
 ```
 
+Если в `.env` задан `SWEEP_SLUG=users/YOU/contract-sweep` (см. `.env.example`), аргумент со
+слагом можно опустить; сам сервер эту переменную не читает.
+
 Workflow [API drift check](.github/workflows/api-drift.yml) гоняет тот же свип
 еженедельно, если настроены секреты репозитория `DRIFT_*`
 (инструкция в шапке workflow); без них он тихо скипается.

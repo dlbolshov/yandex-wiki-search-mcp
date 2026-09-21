@@ -176,7 +176,19 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
 
 - **Any `POST /pages/{id}` bumps `modified_at`**, even with an empty body — the page is
   marked as modified (per slartus, see above).
-- There is **no revisions/history/backlinks API** — "who links here" workflows are not possible.
+- There is **no revisions/history/backlinks API** — "who links here" workflows are not
+  possible. **A revision store is surfacing, though** (found by the weekly sweep: green on
+  2026-09-14, red on 2026-09-21): every page reply — `GET /pages`, `GET /pages/{id}`,
+  `POST /pages`, `POST /pages/{id}`, `append-content` — now carries a top-level
+  `active_revision`, and `append-content`'s additionally an `actuality`. Both were `null`
+  on every page probed 2026-09-21, freshly created or last edited a week before, and
+  neither key is in the reference. The documented `revision_id` query parameter on
+  `GET /pages/{idx}` is live but answers `404` `NOT_FOUND` ("No Revision matches the given
+  query.") for any id tried, so nothing is addressable yet. The models keep dropping both
+  keys (`extra="ignore"`), and the contract sweep tolerates them only while null
+  (`NULL_UNTIL_LIVE`) — the first value that arrives turns the run red again, which is the
+  moment to decide whether `WikiPage` declares them. `attributes` also carries an
+  undocumented `is_available_for_ai` (a `dict` in the model, so it already flows through).
 - `created_at`/`modified_at`/`comments_count`/`is_readonly` are not top-level page
   fields; fetch them via `page_get` with `fields=["attributes"]`.
 - `GET /pages/{id}/resources?q=` is a server-side title search within one page's
@@ -209,7 +221,8 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   round-trip needs a second user and was not probed. Not exposed as tools — an admin
   feature, out of scope for now.
 - `POST /pages/{id}/append-content` responds with the **full updated page object**
-  (id, content, breadcrumbs, access data, owner…), not a status stub.
+  (id, content, breadcrumbs, access data, owner…), not a status stub — and, since 2026-09,
+  it is the one reply carrying `actuality` (see the revisions bullet above).
 - Descendants items carry **only `id` and `slug`** — no titles; a `fields` query param is
   accepted but has no effect. Cursor pagination works (verified with `page_size=5` walks).
   The documented `actuality` filter answers 200 (probed 2026-08-11 with

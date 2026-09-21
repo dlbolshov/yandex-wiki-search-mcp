@@ -391,6 +391,9 @@ uv run python scripts/contract_sweep.py users/YOU/contract-sweep            # ~3
 uv run python scripts/contract_sweep.py users/YOU/contract-sweep --cleanup  # remove fixtures
 ```
 
+With `SWEEP_SLUG=users/YOU/contract-sweep` in `.env` (see `.env.example`) the slug argument
+can be omitted; the server itself never reads that variable.
+
 The [API drift check](.github/workflows/api-drift.yml) workflow runs the same sweep
 weekly when the `DRIFT_*` repository secrets are configured
 (instructions in the workflow header); without them it skips quietly.

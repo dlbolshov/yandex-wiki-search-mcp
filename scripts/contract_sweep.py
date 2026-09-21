@@ -11,10 +11,12 @@ WIKI_READ_ONLY (that flag only gates MCP tool registration, not WikiClient).
 Usage:
     uv run python scripts/contract_sweep.py users/<login>/contract-sweep
     uv run python scripts/contract_sweep.py users/<login>/contract-sweep --cleanup
+    uv run python scripts/contract_sweep.py            # slug from SWEEP_SLUG (env or .env)
 """
 
 import argparse
 import asyncio
+import os
 import sys
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -22,8 +24,9 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
+from pydantic_settings import DotEnvSettingsSource
 
-from mcp_wiki.settings import Settings
+from mcp_wiki.settings import ENV_FILE, Settings
 from mcp_wiki.wiki.custom.client import WikiClient
 from mcp_wiki.wiki.custom.errors import (
     GridConflict,
@@ -59,6 +62,14 @@ def broken(name: str, detail: str) -> None:
 IDENTITY_KEYS = frozenset({"identity", "uid", "cloud_uid"})
 
 KNOWN_DROPPED = IDENTITY_KEYS | frozenset({"is_dismissed", "affiliation"})
+
+# Keys the page object grew between 2026-09-14 and 2026-09-21 — the wire
+# pre-announcing a revisions feature (docs/api-notes.md): `active_revision` on
+# every page reply, `actuality` on append-content's, both null on every page
+# probed, fresh or old. Nothing to declare yet, so they are tolerated only
+# while null: the first value that arrives IS the contract change, and that
+# run has to go red so someone decides whether WikiPage declares the field.
+NULL_UNTIL_LIVE = frozenset({"active_revision", "actuality"})
 
 
 def enable_extras_detection() -> None:
@@ -109,10 +120,17 @@ def make_client(settings: Settings) -> WikiClient:
 
 
 def extras_of(obj: Any) -> set[str]:
-    """Extra keys the API sent beyond the declared model fields, recursively."""
+    """Extra keys the API sent beyond the declared model fields, recursively.
+
+    A key in NULL_UNTIL_LIVE counts only once it carries a value.
+    """
     found: set[str] = set()
     if isinstance(obj, BaseModel):
-        found |= set(obj.model_extra or {})
+        found |= {
+            key
+            for key, value in (obj.model_extra or {}).items()
+            if value is not None or key not in NULL_UNTIL_LIVE
+        }
         for name in type(obj).model_fields:
             found |= extras_of(getattr(obj, name, None))
     elif isinstance(obj, list):
@@ -871,20 +889,48 @@ async def cleanup(wiki: WikiClient, base: str) -> None:
     print(f"cleanup done, {len(pages)} page(s)")
 
 
+def default_base_slug() -> str | None:
+    """SWEEP_SLUG from the environment, else from .env — the file Settings reads.
+
+    The CI workflow passes the slug explicitly from a secret; locally it lives
+    in .env next to the token, so the argument can be left off.
+    """
+    if slug := os.environ.get("SWEEP_SLUG"):
+        return slug
+    source = DotEnvSettingsSource(
+        Settings, env_file=ENV_FILE, env_file_encoding="utf-8"
+    )
+    values = {key.lower(): value for key, value in source().items()}
+    slug = values.get("sweep_slug")
+    return str(slug) if slug else None
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("base_slug", help="Scratch slug, e.g. users/me/contract-sweep")
+    parser.add_argument(
+        "base_slug",
+        nargs="?",
+        default=None,
+        help="Scratch slug, e.g. users/me/contract-sweep; defaults to SWEEP_SLUG "
+        "from the environment or .env",
+    )
     parser.add_argument("--pages", type=int, default=12)
     parser.add_argument("--cleanup", action="store_true")
     args = parser.parse_args()
+    base_slug = args.base_slug or default_base_slug()
+    if not base_slug:
+        parser.error(
+            "base_slug is required: pass it or set SWEEP_SLUG (environment or .env)"
+        )
+        raise AssertionError("unreachable")  # parser.error() exits
 
     enable_extras_detection()
     settings = Settings()
     async with make_client(settings) as wiki:
         if args.cleanup:
-            await cleanup(wiki, args.base_slug)
+            await cleanup(wiki, base_slug)
             return 0
-        await sweep(wiki, args.base_slug, args.pages)
+        await sweep(wiki, base_slug, args.pages)
 
     print("\n=== summary ===")
     broken = 0
