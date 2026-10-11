@@ -81,14 +81,17 @@ class Settings(BaseSettings):
         """Whether the local-filesystem attachment tools may be offered at all.
 
         Both page_upload_attachment and page_download_attachment name paths on
-        the filesystem of the machine running this server, which only matches
-        the caller's own files outside multi-user OAuth deployments — upload
-        would read the server's files, download would write to its disk. So
-        under OAuth their registration, their mention in the server
-        instructions, and the pointer to download in page_read_attachment's
-        description are all dropped together.
+        the filesystem of the machine running this server, which is the
+        caller's own only over stdio, where the caller is the process that
+        spawned it. Over HTTP it is a container or a shared host — and
+        without OAuth the endpoint has no authentication at all, so every
+        peer that reaches the port could read the server's files (upload) or
+        write to its disk (download). Anywhere but stdio-without-OAuth their
+        registration, their mention in the server instructions, and the
+        pointer to download in page_read_attachment's description are all
+        dropped together.
         """
-        return not self.oauth_enabled
+        return self.transport == "stdio" and not self.oauth_enabled
 
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":

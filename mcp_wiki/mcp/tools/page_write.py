@@ -1027,11 +1027,13 @@ def register_page_write_tools(
 
     if not include_local_uploads:
         # file_path/save_to name paths on the filesystem of the machine
-        # running THIS server. In a multi-user OAuth deployment that is the
-        # shared server host, not the caller's machine: the tools would be
-        # useless for their purpose, upload would let any authenticated user
-        # exfiltrate server-local files (.env, secrets) into their own wiki,
-        # and download would let them write onto the server's disk.
+        # running THIS server. Over HTTP that is a container or a shared
+        # host, not the caller's machine: the tools would be useless for
+        # their purpose, upload would let any caller exfiltrate server-local
+        # files (.env, secrets) into a wiki, and download would let them
+        # write onto the server's disk. Without OAuth "any caller" means
+        # anyone who can reach the port — the endpoint has no auth of its
+        # own. See Settings.include_local_uploads.
         return
 
     @mcp.tool(

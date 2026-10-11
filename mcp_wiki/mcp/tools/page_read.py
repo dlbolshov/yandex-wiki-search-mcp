@@ -98,7 +98,8 @@ def _oversize_remedy(include_local_downloads: bool) -> str:
     """Where to send a caller whose attachment did not fit.
 
     Conditional because `page_download_attachment` is registered only outside
-    WIKI_READ_ONLY and only when local filesystem access is on: naming it
+    WIKI_READ_ONLY and only when local filesystem access is on (stdio
+    without OAuth, see Settings.include_local_uploads): naming it
     unconditionally would send agents to a tool that does not exist, which is
     the very thing build_instructions() is dynamic to avoid. `download_url`
     always works, so it is the fallback.

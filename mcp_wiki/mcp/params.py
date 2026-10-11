@@ -255,7 +255,7 @@ def build_instructions(*, include_local_uploads: bool, read_only: bool) -> str:
     write capabilities and their usage notes survive only outside
     WIKI_READ_ONLY, and the comments line offers local-filesystem transfers
     only when page_upload_attachment and page_download_attachment are
-    actually registered (they are not under OAuth, see
+    actually registered (only over stdio without OAuth, see
     Settings.include_local_uploads).
     """
     capabilities = [
