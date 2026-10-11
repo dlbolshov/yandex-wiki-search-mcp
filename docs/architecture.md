@@ -42,7 +42,11 @@ https://api.wiki.yandex.net
 
 The response comes back as a typed pydantic model, is serialized without
 `None` fields, validated against the tool's output schema, and duplicated as a
-text block whose verbosity `TOOL_RESULT_TEXT` controls.
+text block whose verbosity `TOOL_RESULT_TEXT` controls. The one exception is
+`page_read_attachment`: registered with `structured_output=False`, it has no
+output schema and returns a single content block — `ImageContent` for a
+recognized image, `EmbeddedResource` otherwise — which ships once and which
+`TOOL_RESULT_TEXT` leaves alone.
 
 ## The two layers
 
@@ -84,9 +88,13 @@ precedent).
     this server's namespaces (`WIKI_*`, `OAUTH_*`, `REDIS_*`, `MCP_*`,
     `TOOL_*`) that is difflib-close to a real field (`WIKI_READ_ONL`) stops
     startup with a did-you-mean; unrelated keys (`REDIS_URL`) pass.
-  - The model validator enforces the invariants: exactly one of
+  - The model validator enforces the invariants: at most one of
     `WIKI_ORG_ID`/`WIKI_CLOUD_ORG_ID`, a token unless OAuth is on, the OAuth
-    triple when it is. `include_local_uploads` is a property, not a field:
+    triple when it is. Exactly one org id is required only with OAuth off;
+    under OAuth zero is valid, because the organization can arrive per
+    request (`?orgId=`/`?cloudOrgId=`), so `WikiClient._build_headers`
+    re-checks it on every call and raises `WikiConfigError` naming both
+    remedies. `include_local_uploads` is a property, not a field:
     `page_upload_attachment` and `page_download_attachment` read and write
     the *server's* filesystem, so they are only offered over stdio with
     OAuth off — the one setup where that filesystem is the caller's. Over
@@ -149,9 +157,15 @@ to Yandex OAuth:
 
 ```
 client → /authorize ──► redirect to oauth.yandex.ru (key: server-generated state_id)
-Yandex → /oauth/yandex/callback ──► exchange code, mint our code, redirect to client
-client → /token ──► our code → Yandex access/refresh token pair, stored hashed
+Yandex → /oauth/yandex/callback ──► pop state, mint an mcp_ code wrapping Yandex's code, redirect to client
+client → /token ──► our code → Yandex /token exchange → access/refresh pair, stored under hashed keys
 ```
+
+The Yandex code is not exchanged at the callback: it rides inside our
+authorization code until the client redeems that at `/token`, and only then
+does `exchange_authorization_code()` call Yandex. Token keys are SHA-256
+hashes; the values still hold the raw token — in process memory for the
+memory store, Fernet-encrypted for Redis.
 
 - **`provider.py`** — the flow above. The storage key for a pending
   authorization is always server-generated (`secrets.token_hex`); the client's
@@ -165,9 +179,14 @@ client → /token ──► our code → Yandex access/refresh token pair, store
   carries a deadline and writes run an amortized sweep (threshold re-aimed at
   twice the surviving size), so abandoned logins cannot grow the process
   without bound.
-- **`stores/redis.py`** — production store: hashed keys, field-level
-  encryption (`crypto.py`, versioned keys for rotation via
-  `OAUTH_ENCRYPTION_KEYS`), TTLs delegated to Redis. Client registrations
+- **`stores/redis.py`** — production store. Only the access, refresh and
+  refresh→access mapping keys are SHA-256 hashes; client, state and
+  auth-code keys are the raw ids. Field-level encryption (`crypto.py`,
+  versioned keys for rotation via `OAUTH_ENCRYPTION_KEYS`, which the Redis
+  store requires) covers exactly the `token` and `client_secret` fields
+  (`serializers.py`), so the pending state and the auth-code record — the
+  wrapped `yandex_auth_code` included — are stored in the clear for their
+  600 s / 300 s TTLs. TTLs are delegated to Redis. Client registrations
   expire with `client_secret_expires_at`, which the SDK stamps at `/register`
   (`OAUTH_CLIENT_SECRET_EXPIRY_SECONDS`).
 - **`types.py`** — the pydantic shapes for state, callback and code records.
@@ -188,10 +207,16 @@ client → /token ──► our code → Yandex access/refresh token pair, store
   keys through round-trips. Grid cell/row/column shapes live here too.
 - **`custom/client.py`** — `aiohttp` client. One `_request_raw()` funnel applies
   auth headers (`OAuth`/`Bearer` scheme, IAM, or per-request token),
-  organization headers via `select_org()`, retries idempotent failures
-  (exponential backoff with equal jitter, `Retry-After` honored up to a cap,
-  grid `409 CONFLICTING_OPERATION` retried as a lock rather than an error),
-  and maps failures to the error taxonomy. It also carries a per-response
+  organization headers via `select_org()`, retries what is safe to repeat,
+  and maps failures to the error taxonomy. Retryable means GET by default,
+  plus the two calls flagged `retryable=True` (`POST v1/search`,
+  `PUT upload_part`), minus the attachment-download GETs, where a repeat
+  re-transfers the whole file; only dropped connections and
+  `429`/`502`/`503`/`504` are retried, never timeouts (exponential backoff
+  with equal jitter; a `Retry-After` within the cap wins, a longer one fails
+  fast). A grid `409 CONFLICTING_OPERATION` is not retried: the rejected
+  mutation was not applied, and it surfaces as `GridConflict` with the
+  recovery appended to its message. It also carries a per-response
   byte ceiling (resolved from the reply's Content-Type, since the download
   endpoint declares no Content-Length) and a `body_sink` that streams a
   response straight to a caller-supplied consumer instead of memory;
@@ -205,10 +230,17 @@ client → /token ──► our code → Yandex access/refresh token pair, store
   an in-flight open sees the finished state rather than racing it.
 - **`custom/errors.py`** — the taxonomy. `WikiError` → `WikiApiError`
   (HTTP-level, `build_api_error()` picks the subclass; `GridConflict` for the
-  grid lock) plus `PageNotFound`/`GridNotFound`, `WikiOperationError` (a
-  deferred operation failed *after* every HTTP exchange succeeded),
-  `WikiTransportError` (timeouts and connection failures, with a non-empty
-  message even for `TimeoutError`), `WikiConfigError` (bad server setup).
+  grid lock) plus `PageNotFound`/`GridNotFound`/`AttachmentNotFound` (the
+  last mapped in the client, because the download endpoint answers a miss
+  with a placeholder GIF instead of the JSON error envelope),
+  `WikiOperationError` (a deferred operation failed *after* every HTTP
+  exchange succeeded), `WikiTransportError` (timeouts and connection
+  failures, with a non-empty message even for `TimeoutError`),
+  `ResponseTooLarge` (a body past the caller's `max_bytes` ceiling — refused
+  on `Content-Length` before reading, or one byte past the ceiling on a
+  stream that declared none), `WikiLocalFileError` (a local path the
+  attachment tools cannot use, keeping the `OSError` as `cause`),
+  `WikiConfigError` (bad server setup).
 - **`custom/mimes.py`** — `image_mime()`: the four formats a vision API will
   decode (PNG/JPEG/GIF/WebP), recognized by magic bytes and never by the
   wire's `Content-Type`. Lives in the Wiki layer because both attachment
@@ -218,8 +250,12 @@ client → /token ──► our code → Yandex access/refresh token pair, store
 - **`custom/slugs.py`** — `normalize_slug()`: full Wiki URL or slug → bare
   slug. Lives here because the client needs it on every page call (see the
   layering rule).
-- **`custom/anchors.py`** — anchor-targeted insertion for
-  `page_append_content` (heading `{#id}`, inline anchors, plain headings).
+- **`custom/anchors.py`** — the fallback behind `page_append_content`'s
+  `anchor`: when the API answers `ANCHOR_NOT_FOUND`, the client inserts
+  after the anchor in the raw markup and saves the page with `page_update`.
+  Matches explicit anchors only — a heading's `{#id}`, an inline
+  `#[text](id)`, an `{{anchor href="id"}}` macro; a heading without `{#id}`
+  is not one.
 
 ## One wire contract worth memorizing
 
@@ -293,9 +329,14 @@ findings belong in [api-notes.md](api-notes.md).
   all of the code is reachable, and `# pragma: no cover` stays reserved for
   genuinely platform-specific branches.
 
-`release.yml` triggers on a version tag: validates metadata, builds the wheel,
-the MCPB bundle and the Docker image, then publishes (PyPI, GitHub release,
-GHCR, MCP registry). `api-drift.yml` is the weekly live sweep.
+`release.yml` triggers on a version tag and on manual `workflow_dispatch`:
+validates metadata, builds the wheel and the MCPB bundle, and builds **and
+pushes** the Docker image to GHCR; the `publish` job (PyPI, GitHub release,
+MCP registry) then runs only on a tag push. The GHCR push is not behind that
+condition — it happens in `build-docker` on every run, so a manual dispatch
+still pushes an image tagged from the ref it ran on (`:main` from main), and
+on a tag the image is out before PyPI is attempted. `api-drift.yml` is the
+weekly live sweep.
 
 ## Release process
 

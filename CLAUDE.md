@@ -46,7 +46,7 @@ The full developer guide — layers, code map, design decisions, testing seams, 
 
 - `mcp_wiki/settings.py`
   Pydantic settings sourced from environment variables.
-  Main runtime env vars are `WIKI_TOKEN` or `WIKI_IAM_TOKEN`, plus exactly one of `WIKI_ORG_ID` or `WIKI_CLOUD_ORG_ID`.
+  Main runtime env vars are `WIKI_TOKEN` or `WIKI_IAM_TOKEN`, plus at most one of `WIKI_ORG_ID` or `WIKI_CLOUD_ORG_ID` (exactly one unless `OAUTH_ENABLED=true`).
 
 - `mcp_wiki/wiki/custom/client.py`
   Async HTTP client for Yandex Wiki API.
@@ -68,7 +68,7 @@ The full developer guide — layers, code map, design decisions, testing seams, 
 - `mcp_wiki/mcp/request_ctx.py`
   Contextvar holding the transport request of the message being handled, published by a `Server.middleware` entry.
   Exists because the SDK injects no `Context` into a static-URI resource, which `wiki-mcp://configuration` is.
-  `Server.middleware` is provisional upstream, so this module is deliberately the only place that touches it.
+  `Server.middleware` is provisional upstream, so this module and `middleware.py` are deliberately the only two places that touch it: both implement its `(ctx, call_next)` signature, and `server.py` registers them together.
 
 - `mcp_wiki/mcp/resources.py`
   Configuration resource exposed as `wiki-mcp://configuration`, plus the YFM cheat sheet.
@@ -230,7 +230,7 @@ Optional:
 - `OAUTH_ENABLED=true` to run the MCP OAuth provider flow
 
 Constraints:
-- exactly one of `WIKI_ORG_ID` and `WIKI_CLOUD_ORG_ID`
+- at most one of `WIKI_ORG_ID` and `WIKI_CLOUD_ORG_ID`; exactly one with OAuth off. Under `OAUTH_ENABLED=true` zero is valid, because the organization can arrive per request, so `WikiClient._build_headers` re-checks it on every call
 - if `WIKI_READ_ONLY=true`, write tools must not be registered
 - `page_update` replaces full content when `content` is provided
 - file upload uses Yandex Wiki multipart upload sessions
