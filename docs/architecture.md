@@ -88,8 +88,10 @@ precedent).
     `WIKI_ORG_ID`/`WIKI_CLOUD_ORG_ID`, a token unless OAuth is on, the OAuth
     triple when it is. `include_local_uploads` is a property, not a field:
     `page_upload_attachment` and `page_download_attachment` read and write
-    the *server's* filesystem, so they are only offered outside multi-user
-    OAuth deployments.
+    the *server's* filesystem, so they are only offered over stdio with
+    OAuth off — the one setup where that filesystem is the caller's. Over
+    HTTP it is a container or a shared host, and without OAuth the endpoint
+    authenticates nobody, so every peer would get the server's disk.
 
 ### MCP layer
 
@@ -132,7 +134,7 @@ precedent).
 - **`mcp_wiki/mcp/tools/`** — `page_read.py` (10 read tools), `page_write.py`
   (23 write tools; registered only when `WIKI_READ_ONLY=false`, and the
   local-filesystem pair — `page_upload_attachment`,
-  `page_download_attachment` — only when OAuth is off), `common.py` (locator
+  `page_download_attachment` — only over stdio with OAuth off), `common.py` (locator
   resolution against the live API when a slug must become an id or vice
   versa). Write tools attach non-blocking `yfm_warnings` from `mcp_wiki/yfm.py`.
 - **`mcp_wiki/yfm.py`** — dependency-free YFM lint (warnings only, never

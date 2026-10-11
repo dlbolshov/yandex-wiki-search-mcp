@@ -2,7 +2,7 @@ import base64
 import importlib.metadata
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -138,7 +138,7 @@ class TestToolAnnotations:
             assert tool.annotations.open_world_hint is False, tool.name
 
 
-class TestOAuthUploadGating:
+class TestLocalFileToolGating:
     async def test_local_upload_tool_is_hidden_under_oauth(self) -> None:
         settings = create_test_settings()
         settings.oauth_enabled = True
@@ -200,7 +200,9 @@ class TestOAuthUploadGating:
         assert "page_download_attachment" not in read_tool.description
         assert "download_url" in read_tool.description
 
-    async def test_local_upload_tool_is_offered_without_oauth(self) -> None:
+    async def test_local_upload_tool_is_offered_over_stdio_without_oauth(
+        self,
+    ) -> None:
         server = create_mcp_server(
             settings=create_test_settings(),
             lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
@@ -211,6 +213,63 @@ class TestOAuthUploadGating:
         assert "page_download_attachment" in tool_names
         assert server.instructions is not None
         assert "upload attachments from the local filesystem" in server.instructions
+
+    @pytest.mark.parametrize("transport", ["sse", "streamable-http"])
+    async def test_local_file_tools_are_hidden_over_http_without_oauth(
+        self, transport: Literal["sse", "streamable-http"]
+    ) -> None:
+        # Plain-token HTTP authenticates nobody, so "the caller" is whoever
+        # reaches the port, and "local" is the server's disk — a container
+        # or a shared host, never the caller's machine.
+        settings = create_test_settings()
+        settings.transport = transport
+
+        server = create_mcp_server(
+            settings=settings,
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        tools = {tool.name: tool for tool in await server.list_tools()}
+        assert "page_upload_attachment" not in tools
+        assert "page_download_attachment" not in tools
+        assert "page_create" in tools
+        assert server.instructions is not None
+        assert "upload attachments" not in server.instructions
+        assert "- Add and delete comments" in server.instructions
+        read_tool = tools["page_read_attachment"]
+        assert read_tool.description is not None
+        assert "page_download_attachment" not in read_tool.description
+
+    def test_unauthenticated_http_endpoint_does_not_list_them(self) -> None:
+        # Over the wire rather than through list_tools(): this is the
+        # tools/list any network peer gets from a writable plain-token
+        # server, which listed both file tools before the stdio gate.
+        settings = create_test_settings()
+        settings.transport = "streamable-http"
+        server = create_mcp_server(
+            settings=settings,
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+
+        app = server.streamable_http_app(**http_app_options(settings))
+        with TestClient(app) as client:
+            client.post("/mcp", json=initialize_request(), headers=MCP_HTTP_HEADERS)
+            response = client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                headers=MCP_HTTP_HEADERS,
+            )
+
+        body = response.json()
+        assert "error" not in body, body
+        tools = {tool["name"]: tool for tool in body["result"]["tools"]}
+        assert "page_upload_attachment" not in tools
+        assert "page_download_attachment" not in tools
+        assert "page_create" in tools
+        assert (
+            "page_download_attachment"
+            not in (tools["page_read_attachment"]["description"])
+        )
 
 
 class TestManifestSync:

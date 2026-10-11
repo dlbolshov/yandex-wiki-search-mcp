@@ -101,6 +101,35 @@ def test_oauth_full_config_needs_no_wiki_token() -> None:
     assert settings.wiki_token is None
 
 
+@pytest.mark.parametrize(
+    ("transport", "oauth_enabled", "expected"),
+    [
+        ("stdio", False, True),
+        # Over HTTP the server's filesystem is not the caller's, and without
+        # OAuth the endpoint authenticates nobody: every peer that reaches
+        # the port would be reading and writing the server's disk.
+        ("streamable-http", False, False),
+        ("sse", False, False),
+        ("streamable-http", True, False),
+        ("stdio", True, False),
+    ],
+)
+def test_local_file_tools_are_stdio_only(
+    transport: str, oauth_enabled: bool, expected: bool
+) -> None:
+    settings = make_settings(
+        transport=transport,
+        oauth_enabled=oauth_enabled,
+        wiki_token=SecretStr("token"),
+        wiki_org_id="1",
+        oauth_client_id="client-id",
+        oauth_client_secret=SecretStr("client-secret"),
+        mcp_server_public_url=AnyHttpUrl("https://mcp.example.com"),
+    )
+
+    assert settings.include_local_uploads is expected
+
+
 def test_max_retries_rejects_negative() -> None:
     with pytest.raises(ValidationError):
         make_settings(wiki_token=SecretStr("token"), wiki_max_retries=-1)

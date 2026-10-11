@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Security
+- `page_upload_attachment` and `page_download_attachment` are now registered only with `TRANSPORT=stdio` (and OAuth off, as before). The 1.0.0 gate hid them under `OAUTH_ENABLED=true` and left plain-token HTTP "unaffected" on the premise that a server without OAuth has a single user — but a plain-token HTTP endpoint authenticates nobody, and `HOST` defaults to `0.0.0.0`. A writable server started from the README's Docker example therefore offered every peer that reached the port an arbitrary-file read on the server (`file_path`, exfiltrated into a wiki page with the server's token) and an arbitrary-file write (`save_to`, parent directories created on demand): the exposure the OAuth gate existed to close, minus the authentication. Over HTTP "local" is a container or a shared host anyway, never the caller's machine, so the tools could not do their job there. The server instructions and `page_read_attachment`'s pointer to the download tool follow the same setting, as before. If you ran an HTTP server for a client on the same machine and relied on these tools, connect that client over stdio instead
+
+### Changed
+- The Docker and Compose examples in both READMEs publish the port on loopback (`127.0.0.1:8000:8000`), with a warning that the plain-token HTTP endpoint has no authentication of its own, and the Security section says what that means: every caller that reaches the port acts as the owner of `WIKI_TOKEN`, in any organization the token can reach via `?orgId=`/`?cloudOrgId=`
+
 ## [1.5.1] - 2026-09-21
 
 The wire grew two null keys and the weekly drift check caught them. No change to the

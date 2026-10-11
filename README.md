@@ -164,8 +164,8 @@ pip install "yandex-wiki-search-mcp<1.1"
 | `page_delete_attachment` | Delete an attachment from a page |
 | `page_delete` | Delete a page and receive a recovery token |
 | `page_recover` | Recover a deleted page by recovery token |
-| `page_upload_attachment` | Upload a local file in chunks and attach it to a page — not registered under `OAUTH_ENABLED=true`, where "local" would mean the shared server's filesystem |
-| `page_download_attachment` | Download an attachment to a local file — streamed to disk with no size cap, nothing enters the conversation. Written atomically (`.part` → fsync → rename), refuses to overwrite unless asked, and lands with the permissions a normal write would give (`0666 & ~umask`, never executable); replacing a file keeps that file's own mode. The directory fsync that makes the rename itself crash-durable, and the mode inheritance, are POSIX-only. Gated the same way as `page_upload_attachment` under OAuth |
+| `page_upload_attachment` | Upload a local file in chunks and attach it to a page — registered only with `TRANSPORT=stdio` and OAuth off: over HTTP "local" would mean the server's filesystem, not the caller's |
+| `page_download_attachment` | Download an attachment to a local file — streamed to disk with no size cap, nothing enters the conversation. Written atomically (`.part` → fsync → rename), refuses to overwrite unless asked, and lands with the permissions a normal write would give (`0666 & ~umask`, never executable); replacing a file keeps that file's own mode. The directory fsync that makes the rename itself crash-durable, and the mode inheritance, are POSIX-only. Gated the same way as `page_upload_attachment`: stdio only |
 
 ### Grids: write (11)
 
@@ -283,8 +283,8 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 With `OAUTH_ENABLED=true` the server becomes an OAuth provider: each MCP user
 authorizes with their own Yandex account, and requests to the Wiki API are made with
 their personal token. `page_upload_attachment` and `page_download_attachment` are
-not registered in this mode: they read and write files on the machine the server
-runs on, which is not the caller's machine in a shared deployment.
+not registered in this mode — nor on any HTTP transport: they read and write files
+on the machine the server runs on, which over HTTP is not the caller's machine.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -326,10 +326,16 @@ flowchart LR
 **HTTP server via Docker** (the MCP endpoint is `http://localhost:8000/mcp`):
 
 ```bash
-docker run --env-file .env -e TRANSPORT=streamable-http -p 8000:8000 \
+docker run --env-file .env -e TRANSPORT=streamable-http -p 127.0.0.1:8000:8000 \
   --log-opt max-size=10m --log-opt max-file=3 \
   ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest
 ```
+
+> [!WARNING]
+> Without `OAUTH_ENABLED=true` the HTTP endpoint has no authentication of its
+> own: anyone who can reach the port works with your `WIKI_TOKEN`. The examples
+> publish it on loopback only — widen that only behind an authenticating reverse
+> proxy, or with OAuth on.
 
 > [!NOTE]
 > The server writes no log files of its own — everything goes to stderr, which
@@ -345,7 +351,7 @@ services:
   mcp-wiki:
     image: ghcr.io/dlbolshov/yandex-wiki-search-mcp:latest  # or: build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - WIKI_TOKEN=${WIKI_TOKEN}
       - WIKI_ORG_ID=${WIKI_ORG_ID}
@@ -364,6 +370,7 @@ For Redis-backed OAuth storage, use the existing [`compose.yaml`](compose.yaml) 
 ## Security
 
 - **Read-only is server-side**: with `WIKI_READ_ONLY=true` write tools are never registered — there is nothing for a confused agent to call.
+- **Plain-token HTTP is unauthenticated**: with an HTTP transport and OAuth off, every caller that reaches the port acts as the owner of `WIKI_TOKEN` — in any organization that token can reach, since `?orgId=`/`?cloudOrgId=` on the endpoint override the configured one. Keep it on loopback or behind an authenticating proxy, or enable OAuth. The local-filesystem tools (`page_upload_attachment`, `page_download_attachment`) are registered over stdio only, so an HTTP server never reads or writes its own disk on a caller's behalf.
 - **Wiki API does not enforce OAuth scopes** (re-verified 2026-08-11, after Yandex documented the scopes — see [docs/api-notes.md](docs/api-notes.md)): a `wiki:read` token can still write, so use the read-only mode rather than relying on token scopes.
 - Secrets are `SecretStr` throughout — masked in logs and `repr`; `DEBUG` HTTP logging never includes headers or bodies.
 - Deletion is recoverable: `page_delete` returns a recovery token for `page_recover`.
