@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Internal
+- `docs/architecture.md` (both languages) and `CLAUDE.md` brought back in line with the code after an evidence sweep for an architecture diagram found eleven drifts. No code changed. The org-id invariant is *at most* one, with zero valid under OAuth, where the organization arrives per request and the client re-checks it on every call. The OAuth diagram now shows the Yandex `/token` exchange where it happens — at our `/token`, not at the callback, which only wraps Yandex's code in an `mcp_` one. "Stored hashed" now says what is hashed: the token *keys*, while the memory store keeps the raw token in the value and Redis Fernet-encrypts it. Redis hashes only the access, refresh and mapping keys and encrypts only `token`/`client_secret`, so pending states and auth-code records sit in the clear for their short TTLs. A grid `409 CONFLICTING_OPERATION` is never retried; it surfaces as `GridConflict` with recovery advice. `anchors.py` matches explicit anchors only, not plain headings. `middleware.py` is the second module touching the provisional `Server.middleware`. `release.yml` also runs on `workflow_dispatch`, and its GHCR push is not behind the tag-only condition that guards `publish`. `page_read_attachment` returns one unduplicated content block instead of a structured result plus a text mirror. The error taxonomy now lists `AttachmentNotFound`, `ResponseTooLarge` and `WikiLocalFileError`
+- `WIKI_MAX_RETRIES` in both READMEs described the retried set as "read requests". It is GETs minus the attachment downloads, plus `POST v1/search` and `PUT upload_part`, and timeouts are never retried
+
 ## [1.5.1] - 2026-09-21
 
 The wire grew two null keys and the weekly drift check caught them. No change to the
