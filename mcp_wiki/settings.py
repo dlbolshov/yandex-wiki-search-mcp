@@ -61,10 +61,14 @@ class Settings(BaseSettings):
     oauth_client_secret: SecretStr | None = None
     # Dynamic client registration is unauthenticated by protocol design, so
     # registrations that never expire accumulate without bound — in Redis as
-    # well as in memory. The SDK stamps this on the record at /register and
-    # rejects an expired client, and both stores drop what it marks dead.
-    # None disables the expiry, and registrations then live indefinitely;
-    # an empty variable is how the env file spells it (see below).
+    # well as in memory. A confidential client gets this as its secret's
+    # lifetime: the SDK stamps it at /register, tells the client and refuses
+    # the secret past it. A public one has no secret, so the provider applies
+    # it as an idle window instead, restarted by every token grant and never
+    # shorter than the refresh token that grant issued. Both stores drop a
+    # registration when its time is up. None disables the expiry, and
+    # registrations then live indefinitely; an empty variable is how the env
+    # file spells it (see below).
     oauth_client_secret_expiry_seconds: int | None = Field(
         default=30 * 24 * 60 * 60, ge=1
     )

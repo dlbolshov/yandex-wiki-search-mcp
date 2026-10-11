@@ -13,6 +13,7 @@ from tests.mcp.oauth.helpers import (
     CLIENT_REDIRECT_URI,
     make_auth_code,
     make_client,
+    make_public_client,
     make_state,
     make_token,
 )
@@ -53,25 +54,35 @@ async def test_save_client_requires_id(redis_store: RedisOAuthStore) -> None:
         await redis_store.save_client(client)
 
 
-async def test_client_expires_with_its_secret(redis_store: RedisOAuthStore) -> None:
+async def test_client_expires_after_its_ttl(redis_store: RedisOAuthStore) -> None:
     # /register is unauthenticated by protocol design, so a registration
-    # without a TTL would stay in Redis indefinitely.
+    # without a TTL would stay in Redis indefinitely — a public one as much
+    # as one with a secret.
     expiry = 30 * 24 * 60 * 60
-    await redis_store.save_client(
-        make_client(client_secret_expires_at=int(time.time()) + expiry)
-    )
+    await redis_store.save_client(make_public_client(), ttl=expiry)
 
     ttl = await raw_client(redis_store).ttl("oauth:client:client-1")
     assert 0 < ttl <= expiry
 
 
-# 0 is what the SDK stamps with client_secret_expiry_seconds unset — RFC
-# 7591's "never expires" — and None is a public client's, issued no secret.
-@pytest.mark.parametrize("expires_at", [0, None])
-async def test_client_without_an_expiry_is_kept_indefinitely(
-    redis_store: RedisOAuthStore, expires_at: int | None
+async def test_saving_a_client_again_restarts_its_ttl(
+    redis_store: RedisOAuthStore,
 ) -> None:
-    await redis_store.save_client(make_client(client_secret_expires_at=expires_at))
+    await redis_store.save_client(make_public_client(), ttl=60)
+    await redis_store.save_client(make_public_client(), ttl=REFRESH_TTL)
+
+    ttl = await raw_client(redis_store).ttl("oauth:client:client-1")
+    assert 60 < ttl <= REFRESH_TTL
+
+
+async def test_client_without_a_ttl_is_kept_indefinitely(
+    redis_store: RedisOAuthStore,
+) -> None:
+    # The TTL is the provider's call, never read off the record: a secret
+    # stamped to expire tomorrow sets nothing here on its own.
+    await redis_store.save_client(
+        make_client(client_secret_expires_at=int(time.time()) + 86400)
+    )
 
     # -1 is redis for "key exists, no TTL".
     assert await raw_client(redis_store).ttl("oauth:client:client-1") == -1

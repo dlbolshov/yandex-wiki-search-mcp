@@ -5,11 +5,7 @@ from aiocache import BaseCache, Cache
 from mcp.server.auth.provider import AccessToken, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from mcp_wiki.mcp.oauth.store import (
-    REFRESH_TOKEN_TTL_SECONDS,
-    OAuthStore,
-    client_deadline,
-)
+from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS, OAuthStore
 from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthState
 
 from .crypto import FieldEncryptor, hash_token
@@ -92,22 +88,17 @@ class RedisOAuthStore(OAuthStore):
         """
         return f"{self._MAPPING_KEY_PREFIX}{hash_token(refresh_token)}"
 
-    async def save_client(self, client: OAuthClientInformationFull) -> None:
-        """Save a client to Redis, expiring with its secret.
+    async def save_client(
+        self, client: OAuthClientInformationFull, *, ttl: int | None = None
+    ) -> None:
+        """Save a client with optional TTL; saving it again restarts the TTL.
 
         `/register` is unauthenticated by protocol design, so without a TTL
         every registration ever made would stay in Redis indefinitely. The
-        lifetime is the one the SDK stamps on the record and enforces on
-        every client authentication; with no `client_secret_expiry_seconds`
-        configured it stamps 0, which is no expiry, and so no TTL.
+        provider decides how long that is.
         """
         if client.client_id is None:
             raise ValueError("client_id must be provided")
-
-        ttl = None
-        deadline = client_deadline(client)
-        if deadline is not None:
-            ttl = max(deadline - int(time.time()), 1)
         await self._cache.set(self._client_key(client.client_id), client, ttl=ttl)
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:

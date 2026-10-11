@@ -8,7 +8,7 @@ from mcp.shared.auth import OAuthClientInformationFull
 from mcp_wiki.mcp.oauth.provider import YandexOAuthAuthorizationServerProvider
 from mcp_wiki.mcp.oauth.stores.memory import InMemoryOAuthStore
 from mcp_wiki.mcp.oauth.stores.redis import RedisOAuthStore
-from tests.mcp.oauth.helpers import make_client
+from tests.mcp.oauth.helpers import PUBLIC_CLIENT_IDLE_TTL, make_client
 
 
 @pytest.fixture
@@ -40,5 +40,6 @@ def provider(
         server_url=yarl.URL("https://mcp.example.test"),
         yandex_oauth_issuer=yarl.URL("https://oauth.yandex.test"),
         store=memory_store,
+        public_client_idle_ttl=PUBLIC_CLIENT_IDLE_TTL,
         scopes=["wiki:read"],
     )

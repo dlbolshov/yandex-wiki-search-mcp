@@ -5,11 +5,7 @@ from typing import Generic, TypeVar
 from mcp.server.auth.provider import AccessToken, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from mcp_wiki.mcp.oauth.store import (
-    REFRESH_TOKEN_TTL_SECONDS,
-    OAuthStore,
-    client_deadline,
-)
+from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS, OAuthStore
 from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthState
 
 from .crypto import hash_token
@@ -56,7 +52,7 @@ class InMemoryOAuthStore(OAuthStore):
     """
 
     def __init__(self) -> None:
-        self._dynamic_clients: dict[str, OAuthClientInformationFull] = {}
+        self._dynamic_clients: dict[str, _Expiring[OAuthClientInformationFull]] = {}
         self._states: dict[str, _Expiring[YandexOAuthState]] = {}
         self._auth_codes: dict[str, _Expiring[YandexOauthAuthorizationCode]] = {}
         # Keys are hashed tokens, values contain the original token
@@ -108,14 +104,13 @@ class InMemoryOAuthStore(OAuthStore):
         ]:
             self._forget_refresh_token(token_hash)
 
-        # Registrations expire on the secret the SDK stamps at /register;
-        # dropping them here only reclaims what get_client already refuses.
-        # Without client_secret_expiry_seconds configured the SDK stamps 0,
-        # which is no deadline at all, and they stay.
+        # /register is unauthenticated too, so registrations are the other
+        # record anyone can mint on purpose; get_client already refuses the
+        # expired ones, and this reclaims those nobody asks for again.
         for client_id in [
             key
-            for key, client in self._dynamic_clients.items()
-            if _is_expired(client_deadline(client), now)
+            for key, entry in self._dynamic_clients.items()
+            if _is_expired(entry.expires_at, now)
         ]:
             del self._dynamic_clients[client_id]
 
@@ -138,31 +133,35 @@ class InMemoryOAuthStore(OAuthStore):
         if access_token_hash is not None:
             self._tokens.pop(access_token_hash, None)
 
-    async def save_client(self, client: OAuthClientInformationFull) -> None:
-        """Save a client to the in-memory store."""
+    async def save_client(
+        self, client: OAuthClientInformationFull, *, ttl: int | None = None
+    ) -> None:
+        """Save a client with optional TTL; saving it again restarts the TTL."""
         if client.client_id is None:
             raise ValueError("client_id must be provided")
         self._maybe_sweep()
-        self._dynamic_clients[client.client_id] = client
+        self._dynamic_clients[client.client_id] = _Expiring(
+            client, time.time() + ttl if ttl is not None else None
+        )
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        """Retrieve a client if it exists and its registration hasn't expired.
+        """Get a client if it exists and its registration hasn't expired.
 
-        The SDK rejects an expired secret only when the client authenticates
-        at /token; /authorize looks the client up without authenticating it.
-        Returned here, an expired registration would walk the user through
-        the whole Yandex login just to be refused at the end — where Redis,
-        which has already dropped the key by TTL, refuses it up front.
+        Refused here, not left for the sweep: the SDK checks no deadline at
+        all on a public client, which has no secret to expire, and checks a
+        confidential one only at /token — after /authorize has walked the
+        user through the whole Yandex login. Redis has dropped the key by
+        then, and the two stores must give the same answer.
         """
-        client = self._dynamic_clients.get(client_id)
-        if client is None:
+        entry = self._dynamic_clients.get(client_id)
+        if entry is None:
             return None
 
-        if _is_expired(client_deadline(client), time.time()):
+        if _is_expired(entry.expires_at, time.time()):
             del self._dynamic_clients[client_id]
             return None
 
-        return client
+        return entry.value
 
     async def save_state(
         self, state: YandexOAuthState, *, state_id: str, ttl: int | None = None

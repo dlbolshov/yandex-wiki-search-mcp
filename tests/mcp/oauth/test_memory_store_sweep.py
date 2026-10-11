@@ -14,6 +14,7 @@ from mcp_wiki.mcp.oauth.stores.memory import SWEEP_MIN_ENTRIES, InMemoryOAuthSto
 from tests.mcp.oauth.helpers import (
     make_auth_code,
     make_client,
+    make_public_client,
     make_state,
     make_token,
 )
@@ -130,11 +131,10 @@ class TestAbandonedRecordsAreReclaimed:
     async def test_expired_registrations_are_reclaimed(
         self, store: InMemoryOAuthStore, clock: FakeClock
     ) -> None:
-        expires_at = int(clock.now) + 60
+        # Public ones included: nobody ever comes back for a registration
+        # minted only to fill the store.
         for index in range(ENOUGH_TO_SWEEP):
-            await store.save_client(
-                make_client(f"old-{index}", client_secret_expires_at=expires_at)
-            )
+            await store.save_client(make_public_client(f"old-{index}"), ttl=60)
 
         clock.advance(61)
         for index in range(ENOUGH_TO_SWEEP):
@@ -143,16 +143,16 @@ class TestAbandonedRecordsAreReclaimed:
         assert not any(key.startswith("old-") for key in store._dynamic_clients)
         assert len(store._dynamic_clients) == ENOUGH_TO_SWEEP
 
-    # 0 is what the SDK stamps with client_secret_expiry_seconds unset —
-    # RFC 7591's "never expires" — and None is a public client's, issued no
-    # secret. Neither is a deadline, so nothing may be dropped.
-    @pytest.mark.parametrize("expires_at", [0, None])
     async def test_registrations_without_an_expiry_are_kept(
-        self, store: InMemoryOAuthStore, clock: FakeClock, expires_at: int | None
+        self, store: InMemoryOAuthStore, clock: FakeClock
     ) -> None:
+        # client_secret_expiry_seconds unset on the server: no expiry to act
+        # on, so nothing may be dropped — including what the SDK stamps
+        # client_secret_expires_at=0 then, RFC 7591's "never". The store
+        # once read that 0 as a 1970 deadline and swept every such record.
         for index in range(ENOUGH_TO_SWEEP):
             await store.save_client(
-                make_client(f"client-{index}", client_secret_expires_at=expires_at)
+                make_client(f"client-{index}", client_secret_expires_at=0)
             )
 
         clock.advance(365 * 24 * 60 * 60)

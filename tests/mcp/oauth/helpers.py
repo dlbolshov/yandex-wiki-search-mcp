@@ -6,6 +6,9 @@ from pydantic import AnyUrl
 from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthState
 
 CLIENT_REDIRECT_URI = "http://localhost:3000/callback"
+# Shorter than REFRESH_TOKEN_TTL_SECONDS on purpose, so a test can tell the
+# window a registration starts with from the one a token grant renews it to.
+PUBLIC_CLIENT_IDLE_TTL = 24 * 60 * 60
 
 
 def make_state(client_state: str | None = "state-1") -> YandexOAuthState:
@@ -56,6 +59,20 @@ def make_client(
         client_id=client_id,
         client_secret="client-secret-1",
         client_secret_expires_at=client_secret_expires_at,
+        redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)],
+        scope="wiki:read wiki:write",
+    )
+
+
+def make_public_client(client_id: str = "client-1") -> OAuthClientInformationFull:
+    """What the SDK's /register builds for token_endpoint_auth_method "none".
+
+    No secret, and so no client_secret_expires_at either: RFC 7591 ties
+    that field to an issued secret.
+    """
+    return OAuthClientInformationFull(
+        client_id=client_id,
+        token_endpoint_auth_method="none",
         redirect_uris=[AnyUrl(CLIENT_REDIRECT_URI)],
         scope="wiki:read wiki:write",
     )

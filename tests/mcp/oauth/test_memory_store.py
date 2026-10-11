@@ -11,6 +11,7 @@ from tests.mcp.oauth.helpers import (
     CLIENT_REDIRECT_URI,
     make_auth_code,
     make_client,
+    make_public_client,
     make_state,
     make_token,
 )
@@ -41,39 +42,29 @@ async def test_client_roundtrip(memory_store: InMemoryOAuthStore) -> None:
     assert await memory_store.get_client("missing") is None
 
 
-async def test_an_expired_registration_is_not_returned(
+async def test_client_is_refused_once_its_ttl_runs_out(
     memory_store: InMemoryOAuthStore, clock: FakeClock
 ) -> None:
-    # /authorize looks the client up without authenticating it, so a
-    # registration returned here past its deadline would send the user
-    # through the Yandex login only to be refused at /token. Redis has
-    # dropped the key by then.
-    await memory_store.save_client(
-        make_client(client_secret_expires_at=int(clock.now) + 60)
-    )
-    assert await memory_store.get_client("client-1") is not None
+    # Refused on lookup, not left for a sweep that may be far off: nothing
+    # downstream would catch a public client, which has no secret to expire.
+    await memory_store.save_client(make_public_client(), ttl=60)
 
-    clock.advance(61)
+    clock.advance(59)
+    assert await memory_store.get_client("client-1") == make_public_client()
+
+    clock.advance(1)
     assert await memory_store.get_client("client-1") is None
     assert "client-1" not in memory_store._dynamic_clients
 
 
-@pytest.mark.parametrize(
-    "expires_at",
-    [
-        # What the SDK stamps when client_secret_expiry_seconds is unset:
-        # RFC 7591's "never expires", not a deadline in 1970.
-        0,
-        # A public client, which is issued no secret at all.
-        None,
-    ],
-)
-async def test_a_registration_without_an_expiry_is_always_returned(
-    memory_store: InMemoryOAuthStore, clock: FakeClock, expires_at: int | None
+async def test_saving_a_client_again_restarts_its_ttl(
+    memory_store: InMemoryOAuthStore, clock: FakeClock
 ) -> None:
-    await memory_store.save_client(make_client(client_secret_expires_at=expires_at))
+    await memory_store.save_client(make_public_client(), ttl=60)
+    clock.advance(50)
+    await memory_store.save_client(make_public_client(), ttl=60)
 
-    clock.advance(10 * 365 * 24 * 60 * 60)
+    clock.advance(50)
     assert await memory_store.get_client("client-1") is not None
 
 
