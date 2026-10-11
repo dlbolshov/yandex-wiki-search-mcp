@@ -209,3 +209,44 @@ class TestTypoDetection:
     def test_missing_env_file_is_fine(self, env_dir: Path) -> None:
         assert not (env_dir / ".env").exists()
         assert suspicious_env_keys() == {}
+
+
+class TestClientSecretExpiry:
+    """OAUTH_CLIENT_SECRET_EXPIRY_SECONDS: empty is the documented "off"."""
+
+    @staticmethod
+    def _settings() -> Settings:
+        return make_settings(wiki_token=SecretStr("token"), wiki_org_id="1")
+
+    def test_defaults_to_thirty_days(self) -> None:
+        assert self._settings().oauth_client_secret_expiry_seconds == 30 * 24 * 60 * 60
+
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_an_empty_variable_disables_it(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        # An environment variable cannot carry None; without the validator
+        # this was an unparsable integer and the server would not start.
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECONDS", value)
+
+        assert self._settings().oauth_client_secret_expiry_seconds is None
+
+    def test_an_empty_env_file_entry_disables_it(self, env_dir: Path) -> None:
+        write_env(
+            env_dir,
+            "WIKI_TOKEN=abc\nWIKI_ORG_ID=123\nOAUTH_CLIENT_SECRET_EXPIRY_SECONDS=\n",
+        )
+
+        assert Settings().oauth_client_secret_expiry_seconds is None
+
+    def test_a_number_is_seconds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECONDS", "3600")
+
+        assert self._settings().oauth_client_secret_expiry_seconds == 3600
+
+    def test_zero_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # "Expire at once" or "never"? Too ambiguous to guess at.
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECONDS", "0")
+
+        with pytest.raises(ValidationError):
+            self._settings()

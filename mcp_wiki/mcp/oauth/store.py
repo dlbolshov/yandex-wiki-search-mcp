@@ -11,7 +11,12 @@ REFRESH_TOKEN_TTL_SECONDS = 31 * 24 * 60 * 60
 
 
 class OAuthStore(Protocol):
-    async def save_client(self, client: OAuthClientInformationFull) -> None: ...
+    # The lifetime is the provider's to decide, as for states and codes: a
+    # store that read it off the record itself would have to agree with the
+    # other store on what each value of client_secret_expires_at means.
+    async def save_client(
+        self, client: OAuthClientInformationFull, *, ttl: int | None = None
+    ) -> None: ...
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None: ...
 
     async def save_state(

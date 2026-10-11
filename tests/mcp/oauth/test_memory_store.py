@@ -11,6 +11,7 @@ from tests.mcp.oauth.helpers import (
     CLIENT_REDIRECT_URI,
     make_auth_code,
     make_client,
+    make_public_client,
     make_state,
     make_token,
 )
@@ -39,6 +40,32 @@ async def test_client_roundtrip(memory_store: InMemoryOAuthStore) -> None:
     await memory_store.save_client(client)
     assert await memory_store.get_client("client-1") == client
     assert await memory_store.get_client("missing") is None
+
+
+async def test_client_is_refused_once_its_ttl_runs_out(
+    memory_store: InMemoryOAuthStore, clock: FakeClock
+) -> None:
+    # Refused on lookup, not left for a sweep that may be far off: nothing
+    # downstream would catch a public client, which has no secret to expire.
+    await memory_store.save_client(make_public_client(), ttl=60)
+
+    clock.advance(59)
+    assert await memory_store.get_client("client-1") == make_public_client()
+
+    clock.advance(1)
+    assert await memory_store.get_client("client-1") is None
+    assert "client-1" not in memory_store._dynamic_clients
+
+
+async def test_saving_a_client_again_restarts_its_ttl(
+    memory_store: InMemoryOAuthStore, clock: FakeClock
+) -> None:
+    await memory_store.save_client(make_public_client(), ttl=60)
+    clock.advance(50)
+    await memory_store.save_client(make_public_client(), ttl=60)
+
+    clock.advance(50)
+    assert await memory_store.get_client("client-1") is not None
 
 
 async def test_save_client_requires_id(memory_store: InMemoryOAuthStore) -> None:
