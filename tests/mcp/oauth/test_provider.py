@@ -4,7 +4,7 @@ import aiohttp
 import pytest
 import yarl
 from aioresponses import aioresponses
-from mcp.server.auth.provider import AuthorizationParams, RefreshToken
+from mcp.server.auth.provider import AuthorizationParams, RefreshToken, TokenError
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 from starlette.requests import Request
@@ -327,12 +327,50 @@ async def test_exchange_authorization_code_failure(
     memory_store: InMemoryOAuthStore,
     client_info: OAuthClientInformationFull,
 ) -> None:
+    # TokenError is the one exception the SDK's /token handler turns into an
+    # OAuth error response; anything else reaches the client as a bare 500.
     with aioresponses() as mocked:
-        mocked.post(TOKEN_URL, status=400)
-        with pytest.raises(ValueError, match="Failed to exchange"):
+        mocked.post(
+            TOKEN_URL,
+            status=400,
+            payload={"error": "invalid_grant", "error_description": "Code has expired"},
+        )
+        with pytest.raises(TokenError) as raised:
             await provider.exchange_authorization_code(client_info, make_auth_code())
 
+    assert raised.value.error == "invalid_grant"
+    assert raised.value.error_description == (
+        "Yandex OAuth refused the authorization code: "
+        "HTTP 400 invalid_grant: Code has expired"
+    )
     assert await memory_store.get_access_token("ya-access-1") is None
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        # A proxy in front of Yandex answering with its own page.
+        (502, "<html>Bad Gateway</html>"),
+        (400, ""),
+        (400, '{"message": "not an OAuth error"}'),
+    ],
+    ids=["html", "empty", "json-without-oauth-fields"],
+)
+async def test_exchange_failure_without_an_oauth_error_body_is_still_one(
+    provider: YandexOAuthAuthorizationServerProvider,
+    client_info: OAuthClientInformationFull,
+    status: int,
+    body: str,
+) -> None:
+    with aioresponses() as mocked:
+        mocked.post(TOKEN_URL, status=status, body=body)
+        with pytest.raises(TokenError) as raised:
+            await provider.exchange_authorization_code(client_info, make_auth_code())
+
+    assert raised.value.error == "invalid_grant"
+    assert raised.value.error_description == (
+        f"Yandex OAuth refused the authorization code: HTTP {status}"
+    )
 
 
 async def test_exchange_refresh_token_rotates_tokens(
@@ -387,10 +425,14 @@ async def test_exchange_refresh_token_failure_keeps_old_tokens(
     assert refresh is not None
 
     with aioresponses() as mocked:
-        mocked.post(TOKEN_URL, status=400)
-        with pytest.raises(ValueError, match="Failed to refresh"):
+        mocked.post(TOKEN_URL, status=400, payload={"error": "invalid_grant"})
+        with pytest.raises(TokenError) as raised:
             await provider.exchange_refresh_token(client_info, refresh, scopes=[])
 
+    assert raised.value.error == "invalid_grant"
+    assert raised.value.error_description == (
+        "Yandex OAuth refused the refresh token: HTTP 400 invalid_grant"
+    )
     assert await memory_store.get_refresh_token("old-refresh") is not None
     assert await memory_store.get_access_token("old-access") is not None
 

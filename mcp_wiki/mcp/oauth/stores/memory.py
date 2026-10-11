@@ -5,7 +5,11 @@ from typing import Generic, TypeVar
 from mcp.server.auth.provider import AccessToken, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS, OAuthStore
+from mcp_wiki.mcp.oauth.store import (
+    REFRESH_TOKEN_TTL_SECONDS,
+    OAuthStore,
+    client_deadline,
+)
 from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthState
 
 from .crypto import hash_token
@@ -104,14 +108,14 @@ class InMemoryOAuthStore(OAuthStore):
         ]:
             self._forget_refresh_token(token_hash)
 
-        # Registrations expire on the secret the SDK stamps at /register and
-        # enforces on every client authentication; dropping them here only
-        # reclaims what is already dead. Without client_secret_expiry_seconds
-        # configured there is no expiry to act on and they stay.
+        # Registrations expire on the secret the SDK stamps at /register;
+        # dropping them here only reclaims what get_client already refuses.
+        # Without client_secret_expiry_seconds configured the SDK stamps 0,
+        # which is no deadline at all, and they stay.
         for client_id in [
             key
             for key, client in self._dynamic_clients.items()
-            if _is_expired(client.client_secret_expires_at, now)
+            if _is_expired(client_deadline(client), now)
         ]:
             del self._dynamic_clients[client_id]
 
@@ -142,13 +146,23 @@ class InMemoryOAuthStore(OAuthStore):
         self._dynamic_clients[client.client_id] = client
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        """Retrieve a client from the in-memory store.
+        """Retrieve a client if it exists and its registration hasn't expired.
 
-        An expired registration is left for the sweep rather than filtered
-        here: the SDK rejects it on the authentication path regardless, so
-        this stays a plain lookup.
+        The SDK rejects an expired secret only when the client authenticates
+        at /token; /authorize looks the client up without authenticating it.
+        Returned here, an expired registration would walk the user through
+        the whole Yandex login just to be refused at the end — where Redis,
+        which has already dropped the key by TTL, refuses it up front.
         """
-        return self._dynamic_clients.get(client_id)
+        client = self._dynamic_clients.get(client_id)
+        if client is None:
+            return None
+
+        if _is_expired(client_deadline(client), time.time()):
+            del self._dynamic_clients[client_id]
+            return None
+
+        return client
 
     async def save_state(
         self, state: YandexOAuthState, *, state_id: str, ttl: int | None = None

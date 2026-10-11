@@ -10,6 +10,19 @@ from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthSt
 REFRESH_TOKEN_TTL_SECONDS = 31 * 24 * 60 * 60
 
 
+def client_deadline(client: OAuthClientInformationFull) -> int | None:
+    """When a registration dies, or None if it never does.
+
+    RFC 7591 §3.2.1 spells "never expires" as `client_secret_expires_at=0`,
+    and that is what the SDK stamps at /register when
+    `client_secret_expiry_seconds` is unset; a public client, issued no
+    secret, carries None instead. Both mean no deadline. Shared so the
+    stores cannot read the field differently: one that took 0 at face value
+    would treat every such registration as dead since 1970.
+    """
+    return client.client_secret_expires_at or None
+
+
 class OAuthStore(Protocol):
     async def save_client(self, client: OAuthClientInformationFull) -> None: ...
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None: ...

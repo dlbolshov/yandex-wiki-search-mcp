@@ -171,14 +171,26 @@ memory store, Fernet-encrypted for Redis.
   authorization is always server-generated (`secrets.token_hex`); the client's
   `state` is data echoed back on the final redirect, never a key. Breaking
   that rule was CVE-shaped: a predictable key let an attacker overwrite the
-  pending record and collect the victim's code, PKCE included.
-- **`store.py`** — the `OAuthStore` protocol and the shared
-  `REFRESH_TOKEN_TTL_SECONDS` (31 days, Yandex's refresh-token lifetime).
+  pending record and collect the victim's code, PKCE included. A refusal
+  from Yandex's `/token` (any non-200, on the code exchange or a refresh) is
+  raised as `TokenError(invalid_grant)` carrying Yandex's status and error,
+  and logged as a warning: that is the one exception the SDK's
+  `TokenHandler` turns into a 400 OAuth error, and anything else reaches the
+  client as a bare 500. On the code exchange `invalid_grant` is accurate
+  whatever Yandex's reason, since loading the `mcp_` code already spent it.
+- **`store.py`** — the `OAuthStore` protocol, the shared
+  `REFRESH_TOKEN_TTL_SECONDS` (31 days, Yandex's refresh-token lifetime) and
+  `client_deadline()`, the one reading of `client_secret_expires_at` both
+  stores use. `0` — what the SDK stamps when the expiry is disabled, RFC
+  7591's "never" — and a public client's `None` both mean no deadline.
 - **`stores/memory.py`** — dict store for single-process deployments. Since
   `/authorize` and `/register` are unauthenticated, everything expirable
   carries a deadline and writes run an amortized sweep (threshold re-aimed at
   twice the surviving size), so abandoned logins cannot grow the process
-  without bound.
+  without bound. `get_client` refuses an expired registration itself rather
+  than waiting for the sweep, as Redis has by then dropped the key: the SDK
+  checks the expiry only at `/token`, so `/authorize` would otherwise send
+  the user through the Yandex login just to be refused at the end.
 - **`stores/redis.py`** — production store. Only the access, refresh and
   refresh→access mapping keys are SHA-256 hashes; client, state and
   auth-code keys are the raw ids. Field-level encryption (`crypto.py`,
@@ -188,7 +200,10 @@ memory store, Fernet-encrypted for Redis.
   wrapped `yandex_auth_code` included — are stored in the clear for their
   600 s / 300 s TTLs. TTLs are delegated to Redis. Client registrations
   expire with `client_secret_expires_at`, which the SDK stamps at `/register`
-  (`OAUTH_CLIENT_SECRET_EXPIRY_SECONDS`).
+  (`OAUTH_CLIENT_SECRET_EXPIRY_SECONDS`; empty disables it, and the record
+  then gets no TTL). Single-use records — state and auth code — are claimed
+  by the `DEL`, not the `GET`: two concurrent redemptions may both read one,
+  but only the caller whose `DEL` removed the key gets it.
 - **`types.py`** — the pydantic shapes for state, callback and code records.
 
 ### Wiki layer (`mcp_wiki/wiki/`)

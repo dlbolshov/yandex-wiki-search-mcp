@@ -143,13 +143,17 @@ class TestAbandonedRecordsAreReclaimed:
         assert not any(key.startswith("old-") for key in store._dynamic_clients)
         assert len(store._dynamic_clients) == ENOUGH_TO_SWEEP
 
+    # 0 is what the SDK stamps with client_secret_expiry_seconds unset —
+    # RFC 7591's "never expires" — and None is a public client's, issued no
+    # secret. Neither is a deadline, so nothing may be dropped.
+    @pytest.mark.parametrize("expires_at", [0, None])
     async def test_registrations_without_an_expiry_are_kept(
-        self, store: InMemoryOAuthStore, clock: FakeClock
+        self, store: InMemoryOAuthStore, clock: FakeClock, expires_at: int | None
     ) -> None:
-        # client_secret_expiry_seconds unset on the server: no expiry to act
-        # on, so nothing may be dropped.
         for index in range(ENOUGH_TO_SWEEP):
-            await store.save_client(make_client(f"client-{index}"))
+            await store.save_client(
+                make_client(f"client-{index}", client_secret_expires_at=expires_at)
+            )
 
         clock.advance(365 * 24 * 60 * 60)
         await store.save_client(make_client("client-fresh"))

@@ -1,4 +1,5 @@
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 import fakeredis.aioredis
@@ -64,11 +65,13 @@ async def test_client_expires_with_its_secret(redis_store: RedisOAuthStore) -> N
     assert 0 < ttl <= expiry
 
 
+# 0 is what the SDK stamps with client_secret_expiry_seconds unset — RFC
+# 7591's "never expires" — and None is a public client's, issued no secret.
+@pytest.mark.parametrize("expires_at", [0, None])
 async def test_client_without_an_expiry_is_kept_indefinitely(
-    redis_store: RedisOAuthStore,
+    redis_store: RedisOAuthStore, expires_at: int | None
 ) -> None:
-    # client_secret_expiry_seconds unset on the server: nothing to expire on.
-    await redis_store.save_client(make_client())
+    await redis_store.save_client(make_client(client_secret_expires_at=expires_at))
 
     # -1 is redis for "key exists, no TTL".
     assert await raw_client(redis_store).ttl("oauth:client:client-1") == -1
@@ -90,6 +93,61 @@ async def test_auth_code_single_use(redis_store: RedisOAuthStore) -> None:
 
     assert await redis_store.get_auth_code("mcp_code-1") == make_auth_code()
     assert await redis_store.get_auth_code("mcp_code-1") is None
+
+
+class TestSingleUseUnderConcurrency:
+    """Two redemptions racing for one record: exactly one of them gets it.
+
+    Both can read the record before either deletes it, so a GET-then-DEL
+    that honours its own read hands the same code out twice. The race is
+    staged deterministically: a rival redemption runs to completion between
+    the first caller's GET and its DEL.
+    """
+
+    @staticmethod
+    def _let_rival_in_after_the_get(
+        monkeypatch: pytest.MonkeyPatch,
+        store: RedisOAuthStore,
+        rival: Callable[[], Awaitable[object]],
+    ) -> list[object]:
+        cache = store._cache
+        real_get = cache.get
+        rival_got: list[object] = []
+
+        async def get_then_rival(key: str, *args: Any, **kwargs: Any) -> Any:
+            value = await real_get(key, *args, **kwargs)
+            monkeypatch.setattr(cache, "get", real_get)
+            rival_got.append(await rival())
+            return value
+
+        monkeypatch.setattr(cache, "get", get_then_rival)
+        return rival_got
+
+    async def test_an_auth_code_is_redeemed_once(
+        self, redis_store: RedisOAuthStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        await redis_store.save_auth_code(make_auth_code(), ttl=300)
+        rival_got = self._let_rival_in_after_the_get(
+            monkeypatch, redis_store, lambda: redis_store.get_auth_code("mcp_code-1")
+        )
+
+        ours = await redis_store.get_auth_code("mcp_code-1")
+
+        assert rival_got == [make_auth_code()]
+        assert ours is None
+
+    async def test_a_state_is_spent_once(
+        self, redis_store: RedisOAuthStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        await redis_store.save_state(make_state(), state_id="state-1", ttl=600)
+        rival_got = self._let_rival_in_after_the_get(
+            monkeypatch, redis_store, lambda: redis_store.get_state("state-1")
+        )
+
+        ours = await redis_store.get_state("state-1")
+
+        assert rival_got == [make_state()]
+        assert ours is None
 
 
 async def test_save_token_requires_expires_in(redis_store: RedisOAuthStore) -> None:

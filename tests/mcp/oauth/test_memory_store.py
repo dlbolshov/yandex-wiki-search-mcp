@@ -41,6 +41,42 @@ async def test_client_roundtrip(memory_store: InMemoryOAuthStore) -> None:
     assert await memory_store.get_client("missing") is None
 
 
+async def test_an_expired_registration_is_not_returned(
+    memory_store: InMemoryOAuthStore, clock: FakeClock
+) -> None:
+    # /authorize looks the client up without authenticating it, so a
+    # registration returned here past its deadline would send the user
+    # through the Yandex login only to be refused at /token. Redis has
+    # dropped the key by then.
+    await memory_store.save_client(
+        make_client(client_secret_expires_at=int(clock.now) + 60)
+    )
+    assert await memory_store.get_client("client-1") is not None
+
+    clock.advance(61)
+    assert await memory_store.get_client("client-1") is None
+    assert "client-1" not in memory_store._dynamic_clients
+
+
+@pytest.mark.parametrize(
+    "expires_at",
+    [
+        # What the SDK stamps when client_secret_expiry_seconds is unset:
+        # RFC 7591's "never expires", not a deadline in 1970.
+        0,
+        # A public client, which is issued no secret at all.
+        None,
+    ],
+)
+async def test_a_registration_without_an_expiry_is_always_returned(
+    memory_store: InMemoryOAuthStore, clock: FakeClock, expires_at: int | None
+) -> None:
+    await memory_store.save_client(make_client(client_secret_expires_at=expires_at))
+
+    clock.advance(10 * 365 * 24 * 60 * 60)
+    assert await memory_store.get_client("client-1") is not None
+
+
 async def test_save_client_requires_id(memory_store: InMemoryOAuthStore) -> None:
     # mcp 2.x types client_id as a required str, so this builds what the type
     # system forbids on purpose: model_construct skips validation, and the

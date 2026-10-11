@@ -2,7 +2,7 @@ import difflib
 import os
 from typing import Literal
 
-from pydantic import AnyHttpUrl, Field, SecretStr, model_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
 
 # Shared so the server cannot widen it back to str and silently accept a typo.
@@ -63,7 +63,8 @@ class Settings(BaseSettings):
     # registrations that never expire accumulate without bound — in Redis as
     # well as in memory. The SDK stamps this on the record at /register and
     # rejects an expired client, and both stores drop what it marks dead.
-    # None disables the expiry, and registrations then live indefinitely.
+    # None disables the expiry, and registrations then live indefinitely;
+    # an empty variable is how the env file spells it (see below).
     oauth_client_secret_expiry_seconds: int | None = Field(
         default=30 * 24 * 60 * 60, ge=1
     )
@@ -75,6 +76,21 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: SecretStr | None = None
     redis_pool_max_size: int = 10
+
+    @field_validator("oauth_client_secret_expiry_seconds", mode="before")
+    @classmethod
+    def empty_expiry_disables_it(cls, value: object) -> object:
+        """Read an empty OAUTH_CLIENT_SECRET_EXPIRY_SECONDS as None.
+
+        Empty is the documented way to switch the expiry off, but an
+        environment variable cannot carry None — pydantic sees the empty
+        string, fails to parse it as an integer, and the server refuses to
+        start. `0` stays rejected: it reads as "expire at once" just as
+        easily as "never", and the setting should not have to guess.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @property
     def include_local_uploads(self) -> bool:

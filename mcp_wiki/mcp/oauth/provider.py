@@ -1,3 +1,4 @@
+import logging
 import secrets
 import time
 
@@ -8,6 +9,7 @@ from mcp.server.auth.provider import (
     AuthorizationParams,
     OAuthAuthorizationServerProvider,
     RefreshToken,
+    TokenError,
     construct_redirect_uri,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
@@ -21,6 +23,25 @@ from mcp_wiki.mcp.oauth.types import (
     YandexOauthAuthorizationCode,
     YandexOAuthState,
 )
+
+logger = logging.getLogger(__name__)
+
+
+async def _describe_refusal(response: aiohttp.ClientResponse) -> str:
+    """The status of a Yandex /token refusal plus its own error, if it sent one."""
+    reason = f"HTTP {response.status}"
+    try:
+        body = await response.json(content_type=None)
+    except ValueError:
+        # An HTML error page from a proxy, or no JSON at all.
+        return reason
+    if isinstance(body, dict):
+        details = [
+            str(body[key]) for key in ("error", "error_description") if body.get(key)
+        ]
+        if details:
+            reason = f"{reason} {': '.join(details)}"
+    return reason
 
 
 class YandexOAuthAuthorizationServerProvider(
@@ -132,6 +153,32 @@ class YandexOAuthAuthorizationServerProvider(
             scope=" ".join(scopes) if scopes else None,
         )
 
+    async def _request_yandex_token(
+        self, form: aiohttp.FormData, *, grant: str
+    ) -> OAuthToken:
+        """POST a grant to Yandex's /token; a refusal becomes an OAuth error.
+
+        The SDK's TokenHandler turns a TokenError into the 400 OAuth error
+        JSON a client knows how to act on. Anything else escapes it as a bare
+        500, which tells the client nothing — not even that this grant is
+        dead and it has to authorize again.
+        """
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(self._yandex_oauth_issuer / "token", data=form) as response,
+        ):
+            if response.status != 200:
+                reason = await _describe_refusal(response)
+                # The client gets a clean 400 and the server no traceback, so
+                # without this line a misconfigured OAUTH_CLIENT_SECRET would
+                # show up in the log only as a run of 400s on /token.
+                logger.warning("Yandex OAuth refused the %s: %s", grant, reason)
+                raise TokenError(
+                    error="invalid_grant",
+                    error_description=f"Yandex OAuth refused the {grant}: {reason}",
+                )
+            return OAuthToken.model_validate_json(await response.read())
+
     async def load_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: str
     ) -> YandexOauthAuthorizationCode | None:
@@ -149,13 +196,10 @@ class YandexOAuthAuthorizationServerProvider(
         form.add_field("client_secret", self._client_secret)
         form.add_field("redirect_uri", str(self._server_url / "oauth/yandex/callback"))
 
-        async with (
-            aiohttp.ClientSession() as session,
-            session.post(self._yandex_oauth_issuer / "token", data=form) as response,
-        ):
-            if response.status != 200:
-                raise ValueError("Failed to exchange authorization code")
-            token = OAuthToken.model_validate_json(await response.read())
+        # load_authorization_code() has already spent our mcp_ code, so
+        # invalid_grant is accurate whatever Yandex's reason: there is
+        # nothing left to retry, and the client has to authorize again.
+        token = await self._request_yandex_token(form, grant="authorization code")
 
         if client.client_id is None:
             raise ValueError("client_id must be provided")
@@ -184,13 +228,7 @@ class YandexOAuthAuthorizationServerProvider(
         form.add_field("client_id", self._client_id)
         form.add_field("client_secret", self._client_secret)
 
-        async with (
-            aiohttp.ClientSession() as session,
-            session.post(self._yandex_oauth_issuer / "token", data=form) as response,
-        ):
-            if response.status != 200:
-                raise ValueError("Failed to refresh token")
-            token = OAuthToken.model_validate_json(await response.read())
+        token = await self._request_yandex_token(form, grant="refresh token")
 
         await self._store.revoke_refresh_token(refresh_token.token)
         if client.client_id is None:

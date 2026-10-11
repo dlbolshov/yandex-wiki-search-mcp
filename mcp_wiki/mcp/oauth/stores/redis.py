@@ -5,7 +5,11 @@ from aiocache import BaseCache, Cache
 from mcp.server.auth.provider import AccessToken, RefreshToken
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS, OAuthStore
+from mcp_wiki.mcp.oauth.store import (
+    REFRESH_TOKEN_TTL_SECONDS,
+    OAuthStore,
+    client_deadline,
+)
 from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthState
 
 from .crypto import FieldEncryptor, hash_token
@@ -95,14 +99,15 @@ class RedisOAuthStore(OAuthStore):
         every registration ever made would stay in Redis indefinitely. The
         lifetime is the one the SDK stamps on the record and enforces on
         every client authentication; with no `client_secret_expiry_seconds`
-        configured there is no expiry, and so no TTL.
+        configured it stamps 0, which is no expiry, and so no TTL.
         """
         if client.client_id is None:
             raise ValueError("client_id must be provided")
 
         ttl = None
-        if client.client_secret_expires_at:
-            ttl = max(client.client_secret_expires_at - int(time.time()), 1)
+        deadline = client_deadline(client)
+        if deadline is not None:
+            ttl = max(deadline - int(time.time()), 1)
         await self._cache.set(self._client_key(client.client_id), client, ttl=ttl)
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -118,15 +123,26 @@ class RedisOAuthStore(OAuthStore):
         """Save an OAuth state with optional TTL."""
         await self._cache.set(self._state_key(state_id), state, ttl=ttl)
 
+    async def _take(self, key: str) -> Any:
+        """Read a single-use record and spend it; None if it is already gone.
+
+        The DEL is the claim, not the GET. Two concurrent redemptions can
+        both read the record before either deletes it, but Redis removes a
+        key once, so only the caller whose DEL removed it gets the value.
+        Plain GET + DEL rather than GETDEL keeps this within the aiocache API
+        (and its serializer) and working on Redis older than 6.2.
+        """
+        data = await self._cache.get(key)
+        if data is None or not await self._cache.delete(key):
+            return None
+        return data
+
     async def get_state(self, state_id: str) -> YandexOAuthState | None:
         """Get and remove an OAuth state if it exists."""
-        key = self._state_key(state_id)
-        data = await self._cache.get(key)
-        if data is not None:
-            # States are single-use, so delete after retrieval
-            await self._cache.delete(key)
-            return YandexOAuthState.model_validate(data)
-        return None
+        data = await self._take(self._state_key(state_id))
+        if data is None:
+            return None
+        return YandexOAuthState.model_validate(data)
 
     async def save_auth_code(
         self, code: YandexOauthAuthorizationCode, *, ttl: int | None = None
@@ -136,13 +152,10 @@ class RedisOAuthStore(OAuthStore):
 
     async def get_auth_code(self, code_id: str) -> YandexOauthAuthorizationCode | None:
         """Get and remove an authorization code if it exists."""
-        key = self._auth_code_key(code_id)
-        data = await self._cache.get(key)
-        if data is not None:
-            # Auth codes are single-use, so delete after retrieval
-            await self._cache.delete(key)
-            return YandexOauthAuthorizationCode.model_validate(data)
-        return None
+        data = await self._take(self._auth_code_key(code_id))
+        if data is None:
+            return None
+        return YandexOauthAuthorizationCode.model_validate(data)
 
     async def save_oauth_token(
         self, token: OAuthToken, client_id: str, scopes: list[str], resource: str | None
