@@ -21,3 +21,6 @@ ci
 .venv
 Dockerfile
 *.Dockerfile
+
+# Archify diagrams are published to GitHub Pages, not shipped in the image
+docs/diagrams

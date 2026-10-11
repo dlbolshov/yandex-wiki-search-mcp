@@ -1,0 +1,574 @@
+{
+ "schema_version": 2,
+ "diagram_type": "workflow",
+ "meta": {
+  "title": "page_search: checks, modes and paging",
+  "output": "docs/diagrams/en/page-search.html",
+  "quality_profile": "showcase",
+  "repository": {
+   "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
+   "revision": "054abf72362586491781e1ef595120696e54bf30"
+  },
+  "legend": {
+   "entries": {
+    "external": {
+     "label": "Agent"
+    },
+    "security": {
+     "label": "Check / refusal"
+    },
+    "backend": {
+     "label": "Server code"
+    },
+    "cloud": {
+     "label": "Yandex Wiki API"
+    }
+   }
+  },
+  "locale": "en"
+ },
+ "lanes": [
+  {
+   "id": "agent",
+   "label": "Agent (MCP client)"
+  },
+  {
+   "id": "sdk",
+   "label": "MCP SDK"
+  },
+  {
+   "id": "tool",
+   "label": "page_search tool"
+  },
+  {
+   "id": "client",
+   "label": "WikiClient"
+  },
+  {
+   "id": "api",
+   "label": "Yandex Wiki API"
+  },
+  {
+   "id": "err",
+   "label": "Error → isError=true",
+   "variant": "exception"
+  }
+ ],
+ "phases": [
+  {
+   "id": "offline",
+   "label": "Offline checks",
+   "fromCol": 0,
+   "toCol": 3,
+   "variant": "security"
+  },
+  {
+   "id": "request",
+   "label": "Request & paging",
+   "fromCol": 4,
+   "toCol": 5,
+   "variant": "emphasis"
+  }
+ ],
+ "mainPath": [
+  "a_call",
+  "schema",
+  "slug",
+  "body",
+  "cursor",
+  "post",
+  "api",
+  "absolutize",
+  "more"
+ ],
+ "nodes": [
+  {
+   "id": "a_call",
+   "lane": "agent",
+   "col": 0,
+   "type": "external",
+   "label": "tools/call",
+   "sublabel": "page_search(query, …)",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/tools/page_read.py",
+     "line": 229,
+     "end_line": 252,
+     "label": "page_search description: two modes"
+    },
+    {
+     "path": "mcp_wiki/mcp/params.py",
+     "line": 281,
+     "end_line": 283,
+     "label": "server instructions on search"
+    }
+   ],
+   "width": 124
+  },
+  {
+   "id": "schema",
+   "lane": "sdk",
+   "col": 0,
+   "type": "security",
+   "label": "Argument schema",
+   "sublabel": "limit 1–50 · cursor 1–500",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/params.py",
+     "line": 108,
+     "end_line": 127,
+     "label": "SearchQuery / SearchResultLimit"
+    },
+    {
+     "path": "mcp_wiki/mcp/tools/page_read.py",
+     "line": 302,
+     "end_line": 321,
+     "label": "highlight and cursor (1–500)"
+    },
+    {
+     "path": "mcp_wiki/wiki/proto/types/pages.py",
+     "line": 125,
+     "end_line": 140,
+     "label": "date interval: both bounds"
+    }
+   ],
+   "width": 128
+  },
+  {
+   "id": "slug",
+   "lane": "tool",
+   "col": 1,
+   "type": "security",
+   "label": "slug_prefix",
+   "sublabel": "non-empty once normalized",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/tools/page_read.py",
+     "line": 323,
+     "end_line": 331,
+     "label": "refuses an empty slug_prefix"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/slugs.py",
+     "line": 4,
+     "end_line": 16,
+     "label": "normalize_slug"
+    }
+   ],
+   "width": 128
+  },
+  {
+   "id": "body",
+   "lane": "client",
+   "col": 2,
+   "type": "backend",
+   "label": "Request body",
+   "sublabel": "cluster: normalize + lower",
+   "tag": "limit ≤ 50",
+   "sources": [
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 958,
+     "end_line": 986,
+     "label": "body, filters, highlight"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 965,
+     "end_line": 974,
+     "label": "cluster: normalize_slug + lower()"
+    },
+    {
+     "path": "tests/wiki/custom/test_client.py",
+     "line": 172,
+     "end_line": 193,
+     "label": "URL → 'tech-doc/ml' (test)"
+    }
+   ],
+   "width": 128
+  },
+  {
+   "id": "cursor",
+   "lane": "client",
+   "col": 3,
+   "type": "security",
+   "label": "cursor w/o highlight?",
+   "sublabel": "pre-HTTP check",
+   "sources": [
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 985,
+     "end_line": 997,
+     "label": "refusal: cursor without highlight"
+    },
+    {
+     "path": "tests/wiki/custom/test_client.py",
+     "line": 160,
+     "end_line": 170,
+     "label": "refused with no network call (test)"
+    }
+   ],
+   "width": 156
+  },
+  {
+   "id": "post",
+   "lane": "client",
+   "col": 4,
+   "type": "backend",
+   "label": "POST v1/search",
+   "sublabel": "≤ 3 attempts",
+   "tag": "429/502/503/504",
+   "sources": [
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 998,
+     "end_line": 1005,
+     "label": "POST v1/search, retryable=True"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 90,
+     "end_line": 92,
+     "label": "RETRY_STATUSES, Retry-After ≤ 3 s"
+    },
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 54,
+     "end_line": 54,
+     "label": "WIKI_MAX_RETRIES=2 default → up to 3 attempts"
+    }
+   ],
+   "width": 116
+  },
+  {
+   "id": "api",
+   "lane": "api",
+   "col": 4,
+   "type": "cloud",
+   "label": "Mode by highlight",
+   "sublabel": "≤10 per page or ≤limit",
+   "tag": "probed 2026-08",
+   "sources": [
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 935,
+     "end_line": 947,
+     "label": "highlight is the mode switch"
+    },
+    {
+     "path": "docs/api-notes.md",
+     "line": 56,
+     "end_line": 65,
+     "label": "default mode: cursors null"
+    },
+    {
+     "path": "docs/api-notes.md",
+     "line": 128,
+     "end_line": 143,
+     "label": "highlight: 10 per page, ~100, end of set"
+    }
+   ],
+   "width": 136
+  },
+  {
+   "id": "absolutize",
+   "lane": "tool",
+   "col": 5,
+   "type": "backend",
+   "label": "URL → absolute URL",
+   "sublabel": "'/…' + WIKI_WEB_BASE_URL",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/tools/page_read.py",
+     "line": 344,
+     "end_line": 348,
+     "label": "prefix '/…' with web_base_url"
+    },
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 47,
+     "end_line": 47,
+     "label": "WIKI_WEB_BASE_URL: default wiki.yandex.ru"
+    },
+    {
+     "path": "docs/api-notes.md",
+     "line": 66,
+     "end_line": 69,
+     "label": "page: relative url, file: absolute"
+    }
+   ],
+   "width": 150
+  },
+  {
+   "id": "more",
+   "lane": "agent",
+   "col": 5,
+   "type": "external",
+   "label": "Need more?",
+   "sublabel": "stop rule",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/tools/page_read.py",
+     "line": 234,
+     "end_line": 242,
+     "label": "stop condition in the description"
+    },
+    {
+     "path": "CLAUDE.md",
+     "line": 240,
+     "label": "paging depends on the mode"
+    }
+   ],
+   "width": 124,
+   "yOffset": -55
+  },
+  {
+   "id": "done",
+   "lane": "agent",
+   "col": 5,
+   "type": "external",
+   "label": "page_get by slug",
+   "sublabel": "read the page",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/tools/page_read.py",
+     "line": 242,
+     "end_line": 247,
+     "label": "open a result via page_get"
+    }
+   ],
+   "width": 124,
+   "yOffset": 55
+  },
+  {
+   "id": "e_schema",
+   "lane": "err",
+   "col": 0,
+   "type": "security",
+   "label": "Invalid arguments",
+   "sublabel": "before the tool runs",
+   "sources": [
+    {
+     "path": "tests/mcp/tools/test_page_read_tools.py",
+     "line": 287,
+     "end_line": 301,
+     "label": "cursor 0 / 501 → isError (test)"
+    }
+   ],
+   "width": 128
+  },
+  {
+   "id": "e_slug",
+   "lane": "err",
+   "col": 1,
+   "type": "security",
+   "label": "Empty slug_prefix",
+   "sublabel": "ValueError, no HTTP",
+   "sources": [
+    {
+     "path": "tests/mcp/tools/test_page_read_tools.py",
+     "line": 402,
+     "end_line": 418,
+     "label": "'/', '///' → isError (test)"
+    }
+   ],
+   "width": 128
+  },
+  {
+   "id": "e_cursor",
+   "lane": "err",
+   "col": 3,
+   "type": "security",
+   "label": "cursor w/o highlight",
+   "sublabel": "ValueError, no HTTP",
+   "sources": [
+    {
+     "path": "tests/mcp/tools/test_page_read_tools.py",
+     "line": 303,
+     "end_line": 322,
+     "label": "refusal arrives as isError (test)"
+    }
+   ],
+   "width": 136
+  },
+  {
+   "id": "e_api",
+   "lane": "err",
+   "col": 4,
+   "type": "security",
+   "label": "WikiApiError",
+   "sublabel": "or WikiTransportError",
+   "sources": [
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 770,
+     "end_line": 778,
+     "label": "no response / timeout → WikiTransportError"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 794,
+     "end_line": 809,
+     "label": "retries on status, then WikiApiError"
+    },
+    {
+     "path": "tests/wiki/custom/test_client.py",
+     "line": 241,
+     "end_line": 263,
+     "label": "error body → WikiApiError (test)"
+    }
+   ],
+   "width": 128
+  }
+ ],
+ "edges": [
+  {
+   "id": "call-schema",
+   "from": "a_call",
+   "to": "schema",
+   "label": "arguments",
+   "variant": "emphasis",
+   "fromSide": "bottom",
+   "toSide": "top"
+  },
+  {
+   "id": "schema-slug",
+   "from": "schema",
+   "to": "slug",
+   "variant": "emphasis"
+  },
+  {
+   "id": "schema-err",
+   "from": "schema",
+   "to": "e_schema",
+   "label": "no",
+   "variant": "security",
+   "role": "error"
+  },
+  {
+   "id": "slug-body",
+   "from": "slug",
+   "to": "body",
+   "variant": "emphasis"
+  },
+  {
+   "id": "slug-err",
+   "from": "slug",
+   "to": "e_slug",
+   "label": "empty",
+   "variant": "security",
+   "role": "error"
+  },
+  {
+   "id": "body-cursor",
+   "from": "body",
+   "to": "cursor",
+   "variant": "emphasis"
+  },
+  {
+   "id": "cursor-post",
+   "from": "cursor",
+   "to": "post",
+   "label": "no",
+   "variant": "emphasis"
+  },
+  {
+   "id": "cursor-err",
+   "from": "cursor",
+   "to": "e_cursor",
+   "label": "yes",
+   "variant": "security",
+   "role": "error"
+  },
+  {
+   "id": "post-api",
+   "from": "post",
+   "to": "api",
+   "label": "JSON",
+   "variant": "emphasis"
+  },
+  {
+   "id": "api-err",
+   "from": "api",
+   "to": "e_api",
+   "label": "4xx/5xx · no reply",
+   "variant": "security",
+   "role": "error"
+  },
+  {
+   "id": "api-tool",
+   "from": "api",
+   "to": "absolutize",
+   "label": "SearchResponse",
+   "variant": "emphasis"
+  },
+  {
+   "id": "tool-more",
+   "from": "absolutize",
+   "to": "more",
+   "variant": "emphasis",
+   "fromSide": "right",
+   "toSide": "right",
+   "route": "outside-right"
+  },
+  {
+   "id": "more-done",
+   "from": "more",
+   "to": "done",
+   "label": "stop",
+   "variant": "default",
+   "role": "branch",
+   "fromSide": "bottom",
+   "toSide": "top"
+  },
+  {
+   "id": "more-next",
+   "from": "more",
+   "to": "a_call",
+   "label": "highlight, cursor = page #",
+   "variant": "dashed",
+   "role": "return",
+   "fromSide": "left",
+   "toSide": "right"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "Two modes",
+   "items": [
+    "Without highlight: top ≤ limit (max 50), cursors null: that is the whole set",
+    "highlight=true: ≤10 per page, cursor = page number, up to ~100 results",
+    "Filters (section, type, authors, dates) apply server-side before limit"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "When to stop",
+   "items": [
+    "End: empty results or next_cursor = null on a non-empty page",
+    "Past the end, next_cursor keeps growing: never trust it alone",
+    "Search has no fetch_all: the agent pages by hand"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Why WikiClient checks",
+   "items": [
+    "API silently ignores cursor without highlight, returns page 1 again",
+    "cluster matches literally: mixed case or a \"/\" gives 0 results",
+    "POST, yet retried: search is safe to repeat"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "Result",
+   "items": [
+    "content: excerpt of up to ~510 chars, <em> only with highlight",
+    "Page links get the WIKI_WEB_BASE_URL prefix; the web host is never called",
+    "Before answering, the agent reads the page via page_get",
+    "Mode behavior: live API probes, 2026-08 (docs/api-notes.md)"
+   ]
+  }
+ ]
+}

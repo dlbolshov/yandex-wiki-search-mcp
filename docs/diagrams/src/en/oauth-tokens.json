@@ -1,0 +1,382 @@
+{
+ "schema_version": 1,
+ "diagram_type": "sequence",
+ "meta": {
+  "title": "OAuth 2/2: tokens, call and refresh",
+  "output": "docs/diagrams/en/oauth-tokens.html",
+  "quality_profile": "showcase",
+  "column_fit": "spread",
+  "legend": {
+   "entries": {
+    "emphasis": {
+     "label": "request"
+    },
+    "return": {
+     "label": "response"
+    },
+    "security": {
+     "label": "code or token"
+    },
+    "dashed": {
+     "label": "302 redirect"
+    },
+    "default": {
+     "label": "store (SET: no reply)"
+    }
+   }
+  },
+  "repository": {
+   "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
+   "revision": "054abf72362586491781e1ef595120696e54bf30"
+  },
+  "locale": "en"
+ },
+ "participants": [
+  {
+   "id": "client",
+   "type": "external",
+   "label": "MCP client",
+   "sublabel": "Claude Code etc.",
+   "sources": [
+    {
+     "path": "README.md",
+     "line": 283,
+     "end_line": 306,
+     "label": "OAuth mode and ?orgId= in URL"
+    }
+   ]
+  },
+  {
+   "id": "server",
+   "type": "backend",
+   "label": "MCP server",
+   "sublabel": "SDK + provider",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 229,
+     "end_line": 294,
+     "label": "/token: code and refresh, load_access_token"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 125,
+     "end_line": 159,
+     "label": "registration expiry, public-client renewal"
+    },
+    {
+     "path": "mcp_wiki/mcp/utils.py",
+     "line": 16,
+     "end_line": 43,
+     "label": "Bearer → YandexAuth, org from ?orgId="
+    }
+   ]
+  },
+  {
+   "id": "store",
+   "type": "database",
+   "label": "Store",
+   "sublabel": "Redis or memory",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/oauth/stores/redis.py",
+     "line": 15,
+     "end_line": 89,
+     "label": "oauth:* keys, sha256, Fernet"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/stores/redis.py",
+     "line": 91,
+     "end_line": 149,
+     "label": "client SET with TTL; mcp_ code: GET + DEL"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/stores/redis.py",
+     "line": 151,
+     "end_line": 227,
+     "label": "token SET/GET with TTL, refresh rotation"
+    }
+   ]
+  },
+  {
+   "id": "yandex",
+   "type": "external",
+   "label": "Yandex OAuth",
+   "sublabel": "oauth.yandex.ru",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 203,
+     "end_line": 227,
+     "label": "POST /token; refusal → invalid_grant"
+    },
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 58,
+     "end_line": 61,
+     "label": "Yandex URL, app id and secret"
+    }
+   ]
+  },
+  {
+   "id": "wiki",
+   "type": "external",
+   "label": "Wiki API",
+   "sublabel": "Yandex",
+   "sources": [
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 598,
+     "end_line": 633,
+     "label": "Authorization and X-Org-Id/X-Cloud-Org-Id"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 708,
+     "end_line": 731,
+     "label": "Wiki API request with these headers"
+    }
+   ]
+  }
+ ],
+ "segments": [
+  {
+   "from": 152,
+   "to": 367,
+   "label": "Code exchange: SDK verifies PKCE, single-use code"
+  },
+  {
+   "from": 386,
+   "to": 545,
+   "label": "Call: Bearer is Yandex's own token, org from ?orgId="
+  },
+  {
+   "from": 564,
+   "to": 779,
+   "label": "Refresh: old tokens deleted, client renewed"
+  }
+ ],
+ "messages": [
+  {
+   "id": "m01",
+   "from": "client",
+   "to": "server",
+   "label": "POST /token + verifier",
+   "variant": "security",
+   "y": 172
+  },
+  {
+   "id": "m02",
+   "from": "server",
+   "to": "store",
+   "label": "claim mcp_ code (DEL)",
+   "variant": "default",
+   "y": 194
+  },
+  {
+   "id": "m03",
+   "from": "store",
+   "to": "server",
+   "label": "code record",
+   "variant": "return",
+   "note": "SDK checks verifier & redirect_uri",
+   "y": 222
+  },
+  {
+   "id": "m04",
+   "from": "server",
+   "to": "yandex",
+   "label": "POST /token (Yandex code)",
+   "variant": "security",
+   "y": 250
+  },
+  {
+   "id": "m05",
+   "from": "yandex",
+   "to": "server",
+   "label": "access + refresh",
+   "variant": "return",
+   "y": 278
+  },
+  {
+   "id": "m06",
+   "from": "server",
+   "to": "store",
+   "label": "SET tokens",
+   "variant": "default",
+   "y": 306
+  },
+  {
+   "id": "m07",
+   "from": "server",
+   "to": "store",
+   "label": "renew public client",
+   "variant": "default",
+   "note": "public only: idle window restarts",
+   "y": 334
+  },
+  {
+   "id": "m08",
+   "from": "server",
+   "to": "client",
+   "label": "200: Yandex tokens",
+   "variant": "return",
+   "y": 356
+  },
+  {
+   "id": "m09",
+   "from": "client",
+   "to": "server",
+   "label": "POST /mcp?orgId= + Bearer",
+   "variant": "security",
+   "y": 406
+  },
+  {
+   "id": "m10",
+   "from": "server",
+   "to": "store",
+   "label": "GET access token",
+   "variant": "default",
+   "y": 428
+  },
+  {
+   "id": "m11",
+   "from": "store",
+   "to": "server",
+   "label": "AccessToken",
+   "variant": "return",
+   "note": "SDK checks expiry, scopes",
+   "y": 456
+  },
+  {
+   "id": "m12",
+   "from": "server",
+   "to": "wiki",
+   "label": "OAuth <token> · X-Org-Id",
+   "variant": "security",
+   "y": 484
+  },
+  {
+   "id": "m13",
+   "from": "wiki",
+   "to": "server",
+   "label": "200 JSON",
+   "variant": "return",
+   "y": 512
+  },
+  {
+   "id": "m14",
+   "from": "server",
+   "to": "client",
+   "label": "200 · result",
+   "variant": "return",
+   "y": 534
+  },
+  {
+   "id": "m15",
+   "from": "client",
+   "to": "server",
+   "label": "POST /token (refresh)",
+   "variant": "security",
+   "y": 584
+  },
+  {
+   "id": "m16",
+   "from": "server",
+   "to": "store",
+   "label": "GET refresh token",
+   "variant": "default",
+   "y": 606
+  },
+  {
+   "id": "m17",
+   "from": "store",
+   "to": "server",
+   "label": "RefreshToken",
+   "variant": "return",
+   "y": 634
+  },
+  {
+   "id": "m18",
+   "from": "server",
+   "to": "yandex",
+   "label": "POST /token (refresh)",
+   "variant": "security",
+   "y": 662
+  },
+  {
+   "id": "m19",
+   "from": "yandex",
+   "to": "server",
+   "label": "new pair",
+   "variant": "return",
+   "y": 690
+  },
+  {
+   "id": "m20",
+   "from": "server",
+   "to": "store",
+   "label": "DEL old, SET new",
+   "variant": "default",
+   "y": 718
+  },
+  {
+   "id": "m21",
+   "from": "server",
+   "to": "store",
+   "label": "renew public client",
+   "variant": "default",
+   "note": "public only: idle window restarts",
+   "y": 746
+  },
+  {
+   "id": "m22",
+   "from": "server",
+   "to": "client",
+   "label": "200: new pair",
+   "variant": "return",
+   "y": 768
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "Whose tokens",
+   "items": [
+    "The server issues no tokens of its own: the client gets Yandex's pair as is",
+    "The same access token goes to Wiki API as Authorization: OAuth",
+    "Yandex code is exchanged for tokens only here, at /token"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "Store",
+   "items": [
+    "Redis: token keys are sha256, token and client_secret fields Fernet",
+    "access lasts Yandex's expires_in, refresh 31 days",
+    "Memory (default): unencrypted, single replica, lost on restart"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "Refresh",
+   "items": [
+    "Old refresh and access are deleted after the Yandex exchange",
+    "The old Bearer gets 401 after refresh",
+    "Public client: registration renewed, never for less than 31 days",
+    "Not renewed for a client with a secret: lives until secret expiry, default 30 days from /register"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Errors",
+   "items": [
+    "Wrong verifier → 400, code already burned: log in again",
+    "Yandex refuses at /token → 400 invalid_grant, warning logged",
+    "Missing or expired Bearer → 401, missing scope → 403",
+    "Client registration expired → 401 invalid_client at /token, re-register",
+    "No org in URL or settings → isError from the tool"
+   ]
+  }
+ ]
+}

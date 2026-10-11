@@ -1,0 +1,472 @@
+{
+ "schema_version": 1,
+ "diagram_type": "sequence",
+ "meta": {
+  "title": "page_edit by slug: path of one call",
+  "output": "docs/diagrams/en/page-edit.html",
+  "quality_profile": "showcase",
+  "column_fit": "spread",
+  "repository": {
+   "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
+   "revision": "054abf72362586491781e1ef595120696e54bf30"
+  },
+  "legend": {
+   "entries": {
+    "dashed": {
+     "label": "error branch"
+    }
+   }
+  },
+  "locale": "en"
+ },
+ "participants": [
+  {
+   "id": "client",
+   "type": "external",
+   "label": "MCP client",
+   "sublabel": "HTTP · JSON-RPC",
+   "sources": [
+    {
+     "path": "tests/mcp/tools/test_page_write_tools.py",
+     "line": 982,
+     "end_line": 1007,
+     "label": "tools/call page_edit by slug (test)"
+    },
+    {
+     "path": "tests/mcp/server/test_request_ctx.py",
+     "line": 37,
+     "end_line": 55,
+     "label": "POST /mcp?… over HTTP (resources/read)"
+    }
+   ]
+  },
+  {
+   "id": "sdk",
+   "type": "frontend",
+   "label": "MCP SDK",
+   "sublabel": "transport",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 298,
+     "end_line": 312,
+     "label": "host · json_response · stateless"
+    },
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 276,
+     "end_line": 278,
+     "label": "middleware: log → stash"
+    },
+    {
+     "path": "mcp_wiki/mcp/request_ctx.py",
+     "line": 38,
+     "end_line": 51,
+     "label": "request stash in contextvar"
+    }
+   ]
+  },
+  {
+   "id": "call_tool",
+   "type": "backend",
+   "label": "call_tool",
+   "sublabel": "WikiMCPServer",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 101,
+     "end_line": 126,
+     "label": "call_tool and TOOL_RESULT_TEXT"
+    }
+   ]
+  },
+  {
+   "id": "tool",
+   "type": "backend",
+   "label": "page_edit",
+   "sublabel": "tool",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/tools/page_write.py",
+     "line": 777,
+     "end_line": 807,
+     "label": "NON_IDEMPOTENT_WRITE, allow_merge=True"
+    },
+    {
+     "path": "mcp_wiki/mcp/tools/page_write.py",
+     "line": 808,
+     "end_line": 848,
+     "label": "locator, auth, read, write, response"
+    },
+    {
+     "path": "mcp_wiki/mcp/tools/page_write.py",
+     "line": 196,
+     "end_line": 226,
+     "label": "_apply_replacements: 0 or >1 → ValueError"
+    }
+   ]
+  },
+  {
+   "id": "auth",
+   "type": "security",
+   "label": "YandexAuth",
+   "sublabel": "get_yandex_auth",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/utils.py",
+     "line": 16,
+     "end_line": 43,
+     "label": "token and per-request ?orgId="
+    },
+    {
+     "path": "mcp_wiki/wiki/proto/common.py",
+     "line": 4,
+     "end_line": 8,
+     "label": "YandexAuth: token, org_id, cloud_org_id"
+    }
+   ]
+  },
+  {
+   "id": "wiki",
+   "type": "backend",
+   "label": "WikiClient",
+   "sublabel": "aiohttp",
+   "sources": [
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 598,
+     "end_line": 633,
+     "label": "Authorization (WIKI_TOKEN) and select_org"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 722,
+     "end_line": 809,
+     "label": "GET: max_retries+1 attempts, POST: one"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 90,
+     "end_line": 92,
+     "label": "429/502/503/504, Retry-After ≤ 3 s"
+    }
+   ]
+  },
+  {
+   "id": "api",
+   "type": "external",
+   "label": "Wiki API",
+   "sublabel": "Yandex",
+   "sources": [
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 885,
+     "end_line": 897,
+     "label": "GET v1/pages?slug="
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 1528,
+     "end_line": 1536,
+     "label": "POST v1/pages/{id}"
+    },
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 46,
+     "end_line": 54,
+     "label": "WIKI_API_BASE_URL, WIKI_MAX_RETRIES=2"
+    }
+   ]
+  }
+ ],
+ "segments": [
+  {
+   "from": 150,
+   "to": 280,
+   "label": "Intake: tools/call page_edit"
+  },
+  {
+   "from": 290,
+   "to": 360,
+   "label": "Auth: org from ?orgId=; token: server's WIKI_TOKEN / WIKI_IAM_TOKEN"
+  },
+  {
+   "from": 370,
+   "to": 515,
+   "label": "Read (GET: up to 3 tries) and in-memory replace"
+  },
+  {
+   "from": 525,
+   "to": 670,
+   "label": "Write (POST: one attempt)"
+  },
+  {
+   "from": 680,
+   "to": 790,
+   "label": "Reply"
+  },
+  {
+   "from": 800,
+   "to": 890,
+   "label": "Error → isError: before POST (no match, not text, GET failure) or at POST (write may have landed)"
+  }
+ ],
+ "messages": [
+  {
+   "id": "m-post",
+   "from": "client",
+   "to": "sdk",
+   "y": 170,
+   "label": "POST /mcp?orgId=",
+   "variant": "emphasis",
+   "note": "tools/call page_edit; OAuth off: no authentication"
+  },
+  {
+   "id": "m-dispatch",
+   "from": "sdk",
+   "to": "call_tool",
+   "y": 215,
+   "label": "call_tool",
+   "variant": "emphasis",
+   "note": "after middleware: DEBUG log → stash"
+  },
+  {
+   "id": "m-invoke",
+   "from": "call_tool",
+   "to": "tool",
+   "y": 255,
+   "label": "page_edit(slug, …)",
+   "variant": "emphasis",
+   "note": "arguments schema-validated"
+  },
+  {
+   "id": "m-auth",
+   "from": "tool",
+   "to": "auth",
+   "y": 300,
+   "label": "get_yandex_auth(ctx)",
+   "variant": "security",
+   "note": "slug pre-normalized"
+  },
+  {
+   "id": "m-auth-ret",
+   "from": "auth",
+   "to": "tool",
+   "y": 338,
+   "label": "YandexAuth",
+   "variant": "return",
+   "note": "token=None, org_id from ?orgId="
+  },
+  {
+   "id": "m-read",
+   "from": "tool",
+   "to": "wiki",
+   "y": 380,
+   "label": "page_get_by_slug",
+   "variant": "emphasis",
+   "note": "fields=content"
+  },
+  {
+   "id": "m-get",
+   "from": "wiki",
+   "to": "api",
+   "y": 420,
+   "label": "GET v1/pages?slug=",
+   "variant": "emphasis",
+   "note": "≤3 tries: 429/502/503/504, conn drop"
+  },
+  {
+   "id": "m-get-ret",
+   "from": "api",
+   "to": "wiki",
+   "y": 460,
+   "label": "200 · page",
+   "variant": "return"
+  },
+  {
+   "id": "m-page",
+   "from": "wiki",
+   "to": "tool",
+   "y": 492,
+   "label": "WikiPage",
+   "variant": "return",
+   "note": "in-memory replace: exactly 1 match"
+  },
+  {
+   "id": "m-update",
+   "from": "tool",
+   "to": "wiki",
+   "y": 540,
+   "label": "page_update",
+   "variant": "emphasis",
+   "note": "allow_merge=true"
+  },
+  {
+   "id": "m-post-api",
+   "from": "wiki",
+   "to": "api",
+   "y": 580,
+   "label": "POST v1/pages/{id}",
+   "variant": "emphasis",
+   "note": "one attempt: 5xx may follow the write"
+  },
+  {
+   "id": "m-post-ret",
+   "from": "api",
+   "to": "wiki",
+   "y": 620,
+   "label": "200 · page",
+   "variant": "return"
+  },
+  {
+   "id": "m-updated",
+   "from": "wiki",
+   "to": "tool",
+   "y": 650,
+   "label": "WikiPage",
+   "variant": "return"
+  },
+  {
+   "id": "m-response",
+   "from": "tool",
+   "to": "call_tool",
+   "y": 695,
+   "label": "PageEditResponse",
+   "variant": "return",
+   "note": "id · slug · title · count · yfm_warnings"
+  },
+  {
+   "id": "m-result",
+   "from": "call_tool",
+   "to": "sdk",
+   "y": 735,
+   "label": "CallToolResult",
+   "variant": "return",
+   "note": "TOOL_RESULT_TEXT: pretty | compact | none"
+  },
+  {
+   "id": "m-http",
+   "from": "sdk",
+   "to": "client",
+   "y": 772,
+   "label": "200 · result",
+   "variant": "return"
+  },
+  {
+   "id": "m-error",
+   "from": "tool",
+   "to": "sdk",
+   "y": 820,
+   "label": "exception → ToolError",
+   "variant": "dashed",
+   "note": "ValueError: before POST; WikiError: at GET or POST"
+  },
+  {
+   "id": "m-error-http",
+   "from": "sdk",
+   "to": "client",
+   "y": 862,
+   "label": "200 · isError=true",
+   "variant": "dashed",
+   "note": "JSON-RPC result, not error"
+  }
+ ],
+ "activations": [
+  {
+   "participant": "sdk",
+   "from": 165,
+   "to": 778,
+   "type": "frontend"
+  },
+  {
+   "participant": "call_tool",
+   "from": 210,
+   "to": 741,
+   "type": "backend"
+  },
+  {
+   "participant": "tool",
+   "from": 250,
+   "to": 701,
+   "type": "backend"
+  },
+  {
+   "participant": "auth",
+   "from": 295,
+   "to": 344,
+   "type": "security"
+  },
+  {
+   "participant": "wiki",
+   "from": 375,
+   "to": 498,
+   "type": "backend"
+  },
+  {
+   "participant": "api",
+   "from": 415,
+   "to": 466,
+   "type": "external"
+  },
+  {
+   "participant": "wiki",
+   "from": 535,
+   "to": 656,
+   "type": "backend"
+  },
+  {
+   "participant": "api",
+   "from": 575,
+   "to": 626,
+   "type": "external"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "slate",
+   "title": "Scenario",
+   "items": [
+    "TRANSPORT=streamable-http, single-JSON response",
+    "OAUTH_ENABLED=false, WIKI_READ_ONLY=false",
+    "Endpoint URL with ?orgId=, one replacement, exactly 1 match"
+   ]
+  },
+  {
+   "dot": "cyan",
+   "title": "Two Wiki requests",
+   "items": [
+    "GET v1/pages?slug=…&fields=content: read, no separate id lookup",
+    "POST v1/pages/{id}?allow_merge=true: writes the full text",
+    "One YandexAuth for both requests; headers rebuilt each time"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "Retries",
+   "items": [
+    "GET: up to WIKI_MAX_RETRIES+1 = 3 tries on 429/502/503/504, conn drop",
+    "Timeout, 404, 500 and Retry-After > 3 s: no retry",
+    "POST: one attempt; 5xx may come after the write"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Errors",
+   "items": [
+    "No match, several matches, or a non-text page: error before POST",
+    "A failed POST also gives isError, but the write may have landed",
+    "ValueError and WikiError → ToolError → result with isError",
+    "Client gets HTTP 200, not a JSON-RPC error"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "Not atomic",
+   "items": [
+    "No revision to lock on: the page may change between GET and POST",
+    "allow_merge=true by default (page_update: false)",
+    "NON_IDEMPOTENT_WRITE: a repeated call may replace again"
+   ]
+  }
+ ]
+}
