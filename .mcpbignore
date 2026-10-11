@@ -31,3 +31,23 @@ tests
 Taskfile.yml
 docs/assets/*.gif
 docs/diagrams/
+
+# Docs, changelogs and dev scripts: the bundle runs from mcp_wiki/,
+# pyproject.toml and uv.lock (README.md, LICENSE and NOTICE stay — the build
+# reads the first, the Apache license requires the other two), and the
+# manifest needs only the icon kept below.
+CHANGELOG.md
+CONTRIBUTING.md
+README_ru.md
+ROADMAP.md
+docs/*.md
+docs/assets/logo/*
+!docs/assets/logo/icon-512.png
+scripts/
+
+# Local build and work output, absent from CI checkouts but not from a
+# local `task mcpb`
+.archify/
+local/
+dist/
+build/

@@ -179,3 +179,7 @@ docs/assets/logo/fonts/
 
 # Archify runtime output
 .archify/
+
+# Claude Code: per-user settings and background-task worktrees
+.claude/settings.local.json
+.claude/worktrees/
