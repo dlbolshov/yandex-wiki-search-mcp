@@ -18,7 +18,7 @@ Always follow `@CLAUDE.md`.
    - MCP registration in `mcp_wiki/mcp/tools/page_read.py` or `mcp_wiki/mcp/tools/page_write.py`
 2. If the tool is read-only, register it only in `page_read.py`.
 3. If the tool mutates Wiki state, register it only in `page_write.py` and make sure it is hidden in read-only mode.
-4. Refuse bad arguments with `ToolError` (`mcp.server.mcpserver.exceptions`), never a bare `ValueError`: mcp 2.1+ hides any other exception's text from the model. In the client, raise `WikiArgumentError`.
+4. In the tool body, refuse bad arguments with `ToolError` (`mcp.server.mcpserver.exceptions`), never `ValueError`: mcp 2.1+ hides any other exception's text from the model. Inside a pydantic validator keep `ValueError`, which the SDK reports as an argument error. In the client, raise `WikiArgumentError`.
 5. Add or update tests:
    - HTTP-level tests in `tests/wiki/custom/` when client behavior changes
    - MCP-level tests in `tests/mcp/tools/`

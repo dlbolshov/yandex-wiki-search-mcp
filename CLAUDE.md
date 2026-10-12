@@ -219,8 +219,8 @@ dedicated release commit on `main` (`Release vX.Y.Z`) that updates everything
 at once: `pyproject.toml`, `uv.lock` (via `uv lock`, never by hand),
 `manifest.json`, `server.json` (both `version` fields **and** the OCI image
 tag), promotes `[Unreleased]` to `[X.Y.Z] - date`, and appends the ROADMAP
-log entry. `scripts/check_versions.py` verifies the sync (except the OCI
-tag). Full procedure: `docs/architecture.md` → "Release process". Do not
+log entry. `scripts/check_versions.py` verifies the sync, OCI tag included.
+Full procedure: `docs/architecture.md` → "Release process". Do not
 reference the future version number from docs, ROADMAP entries, or code
 comments before that commit exists — the number is not decided until release.
 

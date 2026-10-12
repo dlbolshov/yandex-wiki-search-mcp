@@ -79,7 +79,9 @@ jobs:
       # Reads the unpacked manifest the way the host does and runs its exact
       # command, args and env, on a machine with no Python of its own: uv may
       # use only interpreters it downloads, into an empty directory. With
-      # stdin at EOF the server starts, logs, and exits 0.
+      # stdin at EOF the server starts, logs, and exits 0. UV_NO_BUILD keeps
+      # it honest: the runners have compilers a Claude Desktop user lacks, so
+      # a missing wheel has to fail here rather than get built.
       - name: Launch the bundle the way Claude Desktop does
         shell: bash
         run: |
@@ -126,26 +128,38 @@ jobs:
           launch_env |= {
               "UV_PYTHON_PREFERENCE": "only-managed",
               "UV_PYTHON_INSTALL_DIR": str(pythons),
+              "UV_NO_BUILD": "1",
           }
           argv = [substitute(command), *map(substitute, args)]
           print("$", " ".join(argv), flush=True)
           for name in sorted(env):
               print(f"  {name}={launch_env[name]}", flush=True)
 
-          result = subprocess.run(
-              argv,
-              cwd=bundle,
-              env=launch_env,
-              stdin=subprocess.DEVNULL,
-              capture_output=True,
-              text=True,
-              timeout=900,
-          )
-          print(result.stderr, result.stdout, sep="\n")
-          if pythons.is_dir():
-              print("Python downloaded:", *sorted(p.name for p in pythons.iterdir()))
+          # Files, not pipes: a timeout then still leaves the output to print,
+          # and on Windows run() cannot block after the kill on a grandchild
+          # (uv's trampoline, then python.exe) that holds a pipe open.
+          logs = pythons.parent / "bundle-logs"
+          logs.mkdir(exist_ok=True)
+          stdout, stderr = logs / "stdout.txt", logs / "stderr.txt"
+          try:
+              with stdout.open("wb") as out, stderr.open("wb") as err:
+                  result = subprocess.run(
+                      argv,
+                      cwd=bundle,
+                      env=launch_env,
+                      stdin=subprocess.DEVNULL,
+                      stdout=out,
+                      stderr=err,
+                      timeout=900,
+                  )
+          finally:
+              for log in (stderr, stdout):
+                  print(log.read_text(encoding="utf-8", errors="replace"))
+              if pythons.is_dir():
+                  print("Python downloaded:", *sorted(p.name for p in pythons.iterdir()))
           assert result.returncode == 0, f"exit code {result.returncode}"
-          assert "mcp_wiki starting" in result.stderr, "the server never started"
+          started = "mcp_wiki starting" in stderr.read_text(encoding="utf-8", errors="replace")
+          assert started, "the server never started"
           PY
 
   suite:
@@ -155,10 +169,19 @@ jobs:
         os: [ ubuntu-latest, macos-latest ]
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      # uv takes the first Python on PATH. Pinned so the image's own python3
+      # moving to a release the lock has no wheels for cannot turn this red
+      # for a reason that has nothing to do with uv.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7

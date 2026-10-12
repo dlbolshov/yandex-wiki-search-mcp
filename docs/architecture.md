@@ -350,7 +350,7 @@ The suite runs against mocks at every seam the architecture defines:
 | OAuth ↔ Redis | `fakeredis` |
 | package ↔ interpreter | `tests/test_imports.py` imports every module in a subprocess |
 | Docker image ↔ CI ↔ uv | `tests/test_dockerfile.py`: the Dockerfile's uv pin is exact, every `setup-uv` step pins the same release except the weekly canary's, which must float to `latest`, and `required-version` grows no ceiling (the project sets none) and no `uv.toml` overrides it (see [Toolchain](#toolchain)) |
-| bundle ↔ host | `tests/test_manifest.py`: a platform override in `manifest.json` repeats the whole base `env`, and Windows keeps x86_64 Python (see [Toolchain](#toolchain)) |
+| bundle ↔ host | `tests/test_manifest.py`: `Settings` builds from the env the bundle passes (empty strings for what the user left blank), a platform override in `manifest.json` repeats the whole base `env`, every env keeps Python below 3.15, and Windows keeps x86_64 Python (see [Toolchain](#toolchain)) |
 
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
@@ -427,9 +427,11 @@ does. It runs the unpacked manifest's own `mcp_config` command, args and env,
 with `${__dirname}` and `${user_config.*}` substituted (a dummy token and org
 id) and the working directory set to the bundle. stdin is at EOF, and
 `UV_PYTHON_PREFERENCE=only-managed` with an empty `UV_PYTHON_INSTALL_DIR`
-makes it a machine with no Python of its own. The server must log
-`mcp_wiki starting` and exit 0. The `suite` job runs `uv sync --locked --dev`
-and the tests on ubuntu and macOS. The workflow exists because uv 0.13.0 broke the bundle twice
+makes it a machine with no Python of its own. `UV_NO_BUILD=1` makes a missing
+wheel fail instead of being compiled with the runner's toolchain, which a
+Claude Desktop user does not have. The server must log `mcp_wiki starting`
+and exit 0. The `suite` job runs `uv sync --locked --dev` and the tests on
+ubuntu and macOS, on Python 3.13. The workflow exists because uv 0.13.0 broke the bundle twice
 and CI saw neither break. `release.yml` validates and packs the bundle but
 never runs it, and Dependabot cannot bump either uv pin (see
 [Toolchain](#toolchain)). Both breaks reproduce against this workflow's
@@ -446,8 +448,8 @@ locally (see [Diagrams](#diagrams)).
 
 Versions live in **four files plus one tag string**: `pyproject.toml`,
 `uv.lock` (regenerate, do not edit), `manifest.json`, `server.json` (two
-`version` fields **and** the OCI image tag — the one `check_versions.py` does
-not cover). The release commit, by convention titled `Release vX.Y.Z`:
+`version` fields **and** the OCI image tag; `check_versions.py` checks all of
+them). The release commit, by convention titled `Release vX.Y.Z`:
 
 1. Bump all of the above; run `uv lock`.
 2. Promote `## [Unreleased]` to `## [X.Y.Z] - date` in `CHANGELOG.md`.
