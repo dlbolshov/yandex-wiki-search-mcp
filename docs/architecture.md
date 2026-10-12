@@ -139,6 +139,20 @@ precedent).
     loopback and auto-arms DNS rebinding protection, which answers every MCP
     request behind a real hostname with `421` while `/healthz` still says
     `200`.
+  - Both HTTP transports also get `transport_security()`, chosen here rather
+    than left to that auto-arming. Without OAuth the endpoint authenticates
+    nobody, so a web page whose name is re-resolved to `127.0.0.1` could
+    drive it from the operator's browser, same-origin as far as the browser
+    knows; only the `Host` header, which a page cannot forge, gives it away.
+    So without OAuth only loopback names pass (`localhost`, `127.0.0.1`,
+    `[::1]`, on any port) unless `MCP_ALLOWED_HOSTS` lists others, and an
+    Origin, when a browser sends one, has to be on an allowed host too.
+    Under OAuth a bearer token is no credential a browser attaches by
+    itself, so nothing is checked unless `MCP_ALLOWED_HOSTS` is set. `*`
+    switches the check off. `HOST` itself defaults to `127.0.0.1`, as the
+    MCP spec asks of a local server; the Docker image sets `0.0.0.0`. The
+    startup line logs both, and a rejected request is logged by the SDK
+    with its `Host`.
   - `server_version()`/`server_description()` read package metadata, so
     `pyproject.toml` stays the single source for both.
 - **`mcp_wiki/mcp/context.py`** — `AppContext`, the lifespan payload: the

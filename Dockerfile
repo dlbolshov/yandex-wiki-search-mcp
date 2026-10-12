@@ -53,6 +53,10 @@ FROM base as final
 LABEL io.modelcontextprotocol.server.name="io.github.dlbolshov/yandex-wiki-search-mcp"
 
 ENV PATH=/venv/bin:$PATH
+# The server listens on loopback unless told otherwise; in a container that
+# is unreachable through a published port, so the image binds every address.
+# Which Host names the HTTP endpoint answers is MCP_ALLOWED_HOSTS's business.
+ENV HOST=0.0.0.0
 COPY --from=builder /venv /venv
 COPY . .
 RUN adduser --system --no-create-home nonroot

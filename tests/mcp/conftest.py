@@ -55,6 +55,11 @@ MCP_HTTP_HEADERS = {
     "Content-Type": "application/json",
 }
 
+# Where a client on the same machine reaches the HTTP endpoint. TestClient's
+# own default, `http://testserver`, is a name the plain-token Host check
+# refuses, as it would a page DNS-rebound to loopback.
+LOCAL_BASE_URL = "http://localhost:8000"
+
 
 def initialize_request(request_id: int = 1) -> dict[str, Any]:
     """A 2025-era `initialize`, the handshake a legacy client still sends.

@@ -268,7 +268,8 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 | `WIKI_CLOUD_ORG_ID` | | — | Yandex Cloud organization ID (`X-Cloud-Org-Id`) |
 | `WIKI_READ_ONLY` | no | `false` | `true` disables all write tools server-side |
 | `TRANSPORT` | no | `stdio` | `stdio` \| `sse` \| `streamable-http` |
-| `HOST` / `PORT` | no | `0.0.0.0` / `8000` | HTTP transports only |
+| `HOST` / `PORT` | no | `127.0.0.1` / `8000` | HTTP transports only. The Docker image sets `HOST=0.0.0.0`, the address a published port reaches; natively, set it only to serve other machines |
+| `MCP_ALLOWED_HOSTS` | no | loopback without OAuth | HTTP transports only: comma-separated `Host` names the MCP endpoint answers, each with or without a port (`wiki.example.com,mcp-wiki:8000`). Unset, a server without OAuth answers only `localhost`, `127.0.0.1` and `[::1]`, which keeps a web page from driving it through DNS rebinding; list any other name clients use — a Compose service name, a LAN address, a reverse proxy's hostname — or they get `421`. Under OAuth nothing is checked unless this is set. `*` switches the check off |
 | `STATELESS_HTTP` / `JSON_RESPONSE` | no | `true` / `true` | `streamable-http` only: keep no per-session state / answer with JSON instead of SSE |
 | `LOG_LEVEL` | no | `INFO` | Logs go to stderr; `DEBUG` additionally logs Wiki API requests (method, path, status, duration — never headers or bodies) |
 | `WIKI_API_BASE_URL` | no | `https://api.wiki.yandex.net` | Wiki API endpoint |
@@ -336,8 +337,11 @@ docker run --env-file .env -e TRANSPORT=streamable-http -p 127.0.0.1:8000:8000 \
 > [!WARNING]
 > Without `OAUTH_ENABLED=true` the HTTP endpoint has no authentication of its
 > own: anyone who can reach the port works with your `WIKI_TOKEN`. The examples
-> publish it on loopback only — widen that only behind an authenticating reverse
-> proxy, or with OAuth on.
+> publish it on loopback only, which keeps other machines out, and the server
+> answers only loopback `Host` names, which keeps out a web page that rebinds
+> its own name to `127.0.0.1` (see `MCP_ALLOWED_HOSTS`). Neither is
+> authentication: any process on the machine can still use it. Widen access
+> only behind an authenticating reverse proxy, or with OAuth on.
 
 > [!NOTE]
 > The server writes no log files of its own — everything goes to stderr, which
@@ -358,6 +362,8 @@ services:
       - WIKI_TOKEN=${WIKI_TOKEN}
       - WIKI_ORG_ID=${WIKI_ORG_ID}
       - TRANSPORT=streamable-http
+      # Only if another container reaches it as http://mcp-wiki:8000:
+      # - MCP_ALLOWED_HOSTS=localhost,mcp-wiki
     logging:
       driver: json-file
       options:
@@ -372,7 +378,7 @@ For Redis-backed OAuth storage, use the existing [`compose.yaml`](compose.yaml) 
 ## Security
 
 - **Read-only is server-side**: with `WIKI_READ_ONLY=true` write tools are never registered — there is nothing for a confused agent to call.
-- **Plain-token HTTP is unauthenticated**: with an HTTP transport and OAuth off, every caller that reaches the port acts as the owner of `WIKI_TOKEN` — in any organization that token can reach, since `?orgId=`/`?cloudOrgId=` on the endpoint override the configured one. Keep it on loopback or behind an authenticating proxy, or enable OAuth. The local-filesystem tools (`page_upload_attachment`, `page_download_attachment`) are registered over stdio only, so an HTTP server never reads or writes its own disk on a caller's behalf.
+- **Plain-token HTTP is unauthenticated**: with an HTTP transport and OAuth off, every caller that reaches the port acts as the owner of `WIKI_TOKEN` — in any organization that token can reach, since `?orgId=`/`?cloudOrgId=` on the endpoint override the configured one. Keep it on loopback or behind an authenticating proxy, or enable OAuth. Loopback alone does not keep out a web page that rebinds its own name to `127.0.0.1`, so the server also answers only the `Host` names in `MCP_ALLOWED_HOSTS` — loopback ones by default. The local-filesystem tools (`page_upload_attachment`, `page_download_attachment`) are registered over stdio only, so an HTTP server never reads or writes its own disk on a caller's behalf.
 - **Wiki API does not enforce OAuth scopes** (re-verified 2026-08-11, after Yandex documented the scopes — see [docs/api-notes.md](docs/api-notes.md)): a `wiki:read` token can still write, so use the read-only mode rather than relying on token scopes.
 - Secrets are `SecretStr` throughout — masked in logs and `repr`; `DEBUG` HTTP logging never includes headers or bodies.
 - Deletion is recoverable: `page_delete` returns a recovery token for `page_recover`.

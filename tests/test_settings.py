@@ -201,6 +201,59 @@ class TestTypoDetection:
         assert suspicious_env_keys() == {}
 
 
+class TestAllowedHosts:
+    """MCP_ALLOWED_HOSTS: which Host names the HTTP endpoint answers to."""
+
+    @staticmethod
+    def _settings() -> Settings:
+        return make_settings(wiki_token=SecretStr("token"), wiki_org_id="1")
+
+    def test_unset_by_default_and_the_server_listens_on_loopback(self) -> None:
+        settings = self._settings()
+
+        assert settings.mcp_allowed_hosts is None
+        assert settings.host == "127.0.0.1"
+
+    def test_a_comma_list_is_read_trimmed_and_lowercased(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MCP_ALLOWED_HOSTS", " Wiki.Example.com , mcp-wiki:8000,, ")
+
+        assert self._settings().mcp_allowed_hosts == [
+            "wiki.example.com",
+            "mcp-wiki:8000",
+        ]
+
+    def test_an_empty_variable_means_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MCP_ALLOWED_HOSTS", " ")
+
+        assert self._settings().mcp_allowed_hosts is None
+
+    def test_read_from_the_env_file(self, env_dir: Path) -> None:
+        write_env(env_dir, "WIKI_TOKEN=abc\nWIKI_ORG_ID=1\nMCP_ALLOWED_HOSTS=*\n")
+
+        assert Settings().mcp_allowed_hosts == ["*"]
+
+    @pytest.mark.parametrize("value", ["https://wiki.example.com", "host/path"])
+    def test_a_url_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        # It would never equal a Host header: every request would get a 421.
+        monkeypatch.setenv("MCP_ALLOWED_HOSTS", value)
+
+        with pytest.raises(ValidationError, match="takes host names"):
+            self._settings()
+
+    def test_a_misspelling_is_caught(
+        self, monkeypatch: pytest.MonkeyPatch, env_dir: Path
+    ) -> None:
+        monkeypatch.setenv("MCP_ALLOWED_HOST", "mcp-wiki")
+
+        assert suspicious_env_keys() == {"mcp_allowed_host": "mcp_allowed_hosts"}
+
+
 class TestRegistrationIdleWindow:
     """OAUTH_REGISTRATION_IDLE_SECONDS: empty is the documented "off"."""
 

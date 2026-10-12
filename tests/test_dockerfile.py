@@ -110,6 +110,14 @@ def test_dockerfile_installs_without_the_dev_group() -> None:
     assert all("--no-dev" in sync.split() for sync in syncs), syncs
 
 
+def test_the_image_listens_on_every_address() -> None:
+    # The server defaults to loopback, which a published port cannot reach;
+    # without this the container would start and answer nothing.
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    final = dockerfile.split("FROM base as final", 1)[1]
+    assert re.search(r"^ENV HOST=0\.0\.0\.0$", final, re.MULTILINE), final
+
+
 def test_every_setup_uv_step_pins_the_dockerfile_uv() -> None:
     steps = {
         step: found.version

@@ -1,6 +1,6 @@
 import difflib
 import os
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     AliasChoices,
@@ -10,7 +10,12 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    NoDecode,
+    SettingsConfigDict,
+)
 
 # Shared so the server cannot widen it back to str and silently accept a typo.
 ToolResultText = Literal["pretty", "compact", "none"]
@@ -48,7 +53,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    host: str = "0.0.0.0"  # noqa: S104
+    # Loopback, as the MCP spec asks of a local server and the SDK defaults
+    # to: a plain-token HTTP endpoint authenticates nobody, so on 0.0.0.0 it
+    # served anyone on the network. The Docker image sets 0.0.0.0, the only
+    # address a published port reaches.
+    host: str = "127.0.0.1"
     port: int = 8000
     transport: Literal["stdio", "sse", "streamable-http"] = "stdio"
     stateless_http: bool = True
@@ -92,6 +101,11 @@ class Settings(BaseSettings):
         ),
     )
     mcp_server_public_url: AnyHttpUrl | None = None
+    # HTTP transports: the Host header values the MCP endpoint answers to,
+    # comma-separated — DNS-rebinding protection. Unset means loopback names
+    # only without OAuth, and no check under OAuth; `*` switches it off.
+    # NoDecode: a comma list, not the JSON pydantic-settings expects of a list.
+    mcp_allowed_hosts: Annotated[list[str] | None, NoDecode] = None
     oauth_encryption_keys: SecretStr | None = None
 
     redis_endpoint: str = "localhost"
@@ -99,6 +113,28 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: SecretStr | None = None
     redis_pool_max_size: int = 10
+
+    @field_validator("mcp_allowed_hosts", mode="before")
+    @classmethod
+    def split_allowed_hosts(cls, value: object) -> object:
+        """Read `a, B:8000` as ["a", "b:8000"]; an empty value as unset.
+
+        A URL is refused rather than kept: `https://wiki.example.com` would
+        never equal a Host header, and every request would get a 421.
+        """
+        if isinstance(value, str):
+            value = value.split(",")
+        if not isinstance(value, list):
+            return value
+        entries = [str(entry).strip().lower() for entry in value]
+        entries = [entry for entry in entries if entry]
+        for entry in entries:
+            if "/" in entry:
+                raise ValueError(
+                    f"MCP_ALLOWED_HOSTS takes host names, optionally with a "
+                    f"port (wiki.example.com, mcp-wiki:8000), not {entry!r}"
+                )
+        return entries or None
 
     @field_validator("oauth_registration_idle_seconds", mode="before")
     @classmethod

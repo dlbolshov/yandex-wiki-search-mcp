@@ -13,8 +13,9 @@ services:
     image: redis:8-alpine
     volumes:
       - redis:/data
+    # Loopback only: this Redis has no password, and it holds OAuth tokens.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     logging: *logging
 
 volumes:

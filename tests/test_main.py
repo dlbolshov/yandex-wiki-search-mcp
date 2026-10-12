@@ -117,3 +117,34 @@ def test_startup_line_names_the_authentication_mode(
         main()
 
     assert expected_auth in caplog.records[-1].getMessage()
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ("", "transport=stdio host=- allowed_hosts=-"),
+        (
+            "TRANSPORT=streamable-http\n",
+            "host=127.0.0.1 allowed_hosts=localhost,127.0.0.1,[::1]",
+        ),
+        (
+            "TRANSPORT=sse\nHOST=0.0.0.0\nMCP_ALLOWED_HOSTS=mcp-wiki\n",
+            "host=0.0.0.0 allowed_hosts=mcp-wiki",
+        ),
+    ],
+    ids=["stdio", "http-default", "http-listed"],
+)
+def test_startup_line_names_the_binding_and_the_host_check(
+    env_dir: Path, caplog: pytest.LogCaptureFixture, env: str, expected: str
+) -> None:
+    # A 421 names the rejected Host in its own warning; this line says what
+    # the server accepts, so the two can be compared without reading code.
+    write_env(env_dir, "WIKI_TOKEN=abc\nWIKI_ORG_ID=123\n" + env)
+
+    with (
+        caplog.at_level(logging.INFO, logger="mcp_wiki"),
+        patch("mcp_wiki.__main__.create_mcp_server", return_value=MagicMock()),
+    ):
+        main()
+
+    assert expected in caplog.records[-1].getMessage()
