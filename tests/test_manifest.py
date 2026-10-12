@@ -38,6 +38,16 @@ def _envs() -> dict[str, dict[str, str]]:
     }
 
 
+def _args() -> dict[str, list[str]]:
+    """The args each platform gets: the base ones, or an override's instead."""
+    config = _mcp_config()
+    overrides = config.get("platform_overrides", {})
+    return {"base": config["args"]} | {
+        platform: override.get("args", config["args"])
+        for platform, override in overrides.items()
+    }
+
+
 def _resolved(env: dict[str, str], **user: str) -> dict[str, str]:
     """Substitute placeholders the way mcpb does: defaults, then the user's."""
     values: dict[str, str] = {"__dirname": "/bundle"}
@@ -76,6 +86,16 @@ def test_every_env_keeps_python_below_3_15(platform: str) -> None:
     allowed = SpecifierSet(_envs()[platform]["UV_PYTHON"])
     assert Version("3.11.0") in allowed
     assert Version("3.15.0") not in allowed
+
+
+@pytest.mark.parametrize("platform", ["base", "win32"])
+def test_every_launch_skips_the_dev_group(platform: str) -> None:
+    # uv installs the `dev` group by default, so a first launch would also
+    # download mypy, ruff, ty and the test stack. An option after the script
+    # name goes to the server, not to uv.
+    args = _args()[platform]
+    assert args[0] == "run"
+    assert "--no-dev" in args[: args.index("yandex-wiki-search-mcp")]
 
 
 @pytest.mark.parametrize("platform", ["base", "win32"])
