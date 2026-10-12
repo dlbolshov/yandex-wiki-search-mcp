@@ -45,7 +45,9 @@ ARG UV_INDEX_STRATEGY=unsafe-best-match
 COPY pyproject.toml uv.lock /code/
 ENV PATH=/venv/bin:$PATH
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN uv venv /venv && UV_PROJECT_ENVIRONMENT=/venv uv sync --locked
+# --no-dev: uv installs the `dev` dependency group by default, which would put
+# the test and lint toolchain (mypy, pytest, ruff, ty...) into the image.
+RUN uv venv /venv && UV_PROJECT_ENVIRONMENT=/venv uv sync --locked --no-dev
 
 FROM base as final
 LABEL io.modelcontextprotocol.server.name="io.github.dlbolshov/yandex-wiki-search-mcp"

@@ -101,6 +101,15 @@ def test_dockerfile_uv_image_is_an_exact_release() -> None:
     assert re.fullmatch(r"\d+\.\d+\.\d+", tag), tag
 
 
+def test_dockerfile_installs_without_the_dev_group() -> None:
+    # uv syncs the `dev` group by default, which put mypy, pytest, ruff, ty
+    # and the rest of the toolchain into the published image's /venv.
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    syncs = re.findall(r"\buv sync\b.*", dockerfile)
+    assert syncs
+    assert all("--no-dev" in sync.split() for sync in syncs), syncs
+
+
 def test_every_setup_uv_step_pins_the_dockerfile_uv() -> None:
     steps = {
         step: found.version

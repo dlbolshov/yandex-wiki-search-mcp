@@ -349,8 +349,8 @@ The suite runs against mocks at every seam the architecture defines:
 | Wiki client ↔ HTTP | `aioresponses`; assertions on headers, query params and bodies as aiohttp would send them |
 | OAuth ↔ Redis | `fakeredis` |
 | package ↔ interpreter | `tests/test_imports.py` imports every module in a subprocess |
-| Docker image ↔ CI ↔ uv | `tests/test_dockerfile.py`: the Dockerfile's uv pin is exact, every `setup-uv` step pins the same release except the weekly canary's, which must float to `latest`, and `required-version` grows no ceiling (the project sets none) and no `uv.toml` overrides it (see [Toolchain](#toolchain)) |
-| bundle ↔ host | `tests/test_manifest.py`: `Settings` builds from the env the bundle passes (empty strings for what the user left blank), a platform override in `manifest.json` repeats the whole base `env`, every env keeps Python below 3.15, and Windows keeps x86_64 Python (see [Toolchain](#toolchain)) |
+| Docker image ↔ CI ↔ uv | `tests/test_dockerfile.py`: the Dockerfile's uv pin is exact, every `setup-uv` step pins the same release except the weekly canary's, which must float to `latest`, `required-version` grows no ceiling (the project sets none), no `uv.toml` overrides it, and the image's `uv sync` skips the `dev` group (see [Toolchain](#toolchain)) |
+| bundle ↔ host | `tests/test_manifest.py`: `Settings` builds from the env the bundle passes (empty strings for what the user left blank), a platform override in `manifest.json` repeats the whole base `env`, every env keeps Python below 3.15, Windows keeps x86_64 Python, and every platform's `uv run` passes `--no-dev` ahead of the script name (see [Toolchain](#toolchain)) |
 
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
@@ -558,6 +558,22 @@ sanctioned float. Its `setup-uv` steps carry a `uv-canary` marker in the
 comment on their `version:` line and must say `latest`. The test accepts the
 marker in that workflow only, and holds every unmarked step to the pin. When
 the canary goes red on a new uv, fix compatibility first, then move the pins.
+
+The dev tools above live in `pyproject.toml`'s `dev` dependency group, which
+uv installs unless told not to, so both shipped installs tell it: the
+Dockerfile's builder runs `uv sync --locked --no-dev`, and `manifest.json`
+launches `uv run --no-dev yandex-wiki-search-mcp`. Each gets the 46
+distributions the server needs instead of 68. The image's `/venv` drops from
+152 MB to 50 MB. The bundle's first launch no longer downloads mypy, ty and
+ruff (about 34 MiB of wheels between them), each of which would also need a
+wheel for every platform the bundle runs on. `--no-dev` has to come before the
+script name, since uv hands anything after it to the server. The `win32`
+override sets only `env` and so inherits these args: an override replaces only
+the fields it sets. Runtime code must not import from the group. That includes
+`httpx`: the SDK moved to `httpx2`, and the group declares `httpx` only for
+starlette's test client. `tests/test_dockerfile.py` and `tests/test_manifest.py` fail when
+either install drops `--no-dev`. Contributors and CI still get the group from
+`uv sync`, `uv sync --dev` or a plain `uv run`.
 
 The bundle's interpreter is the user's uv's choice, so `manifest.json` bounds
 it with `UV_PYTHON` (3.11–3.14) in `mcp_config.env`. Since 0.13 uv downloads
