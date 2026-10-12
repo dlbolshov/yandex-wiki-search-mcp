@@ -27,7 +27,7 @@ pages, comments, attachments, and dynamic tables ("grids") — **33 tools** with
 - 📄 **Full page lifecycle** — create, update, append (top / bottom / anchor), clone, delete with a recovery token, comments, file uploads
 - 📊 **Dynamic tables (grids)** — 11 write tools: rows, columns, cells, copy, sort
 - 🔒 **Server-side read-only mode** — `WIKI_READ_ONLY=true` simply doesn't register write tools, so the agent can't bypass it
-- 🧩 **Typed tool surface** — every tool ships input *and* output JSON schemas plus safety annotations (read-only / destructive / idempotent hints)
+- 🧩 **Typed tool surface** — every tool ships an input JSON schema and safety annotations (read-only / destructive / idempotent hints), and all but `page_read_attachment`, which answers with a native image or resource block, an output schema too
 - 🐳 **Runs anywhere** — stdio for desktop clients, streamable-http + Docker (with optional multi-user OAuth) for teams
 
 ## Quick start
@@ -405,7 +405,7 @@ when it was undocumented) — `scripts/contract_sweep.py` re-verifies every clie
 against a live organization and reports validation mismatches and undeclared keys:
 
 ```bash
-uv run python scripts/contract_sweep.py users/YOU/contract-sweep            # ~30 live checks
+uv run python scripts/contract_sweep.py users/YOU/contract-sweep            # live contract checks
 uv run python scripts/contract_sweep.py users/YOU/contract-sweep --cleanup  # remove fixtures
 ```
 
@@ -421,7 +421,7 @@ weekly when the `DRIFT_*` repository secrets are configured
 This project began as a fork of [APonkratov/yandex-wiki-mcp](https://github.com/APonkratov/yandex-wiki-mcp)
 (`ya-yandex-wiki-mcp`) by Aleksandr Ponkratov, an excellent, well-tested Python MCP server
 for the Yandex Wiki API, licensed under Apache-2.0. It has since grown its own surface —
-full-text search, typed input *and* output schemas across all 33 tools, YFM helpers,
+full-text search, typed input schemas on all 33 tools and output schemas on 32, YFM helpers,
 cursor draining, multi-user OAuth and a live contract sweep against the API — while the
 original copyright and license are preserved (see [LICENSE](LICENSE) and [NOTICE](NOTICE)).
 

@@ -19,10 +19,17 @@ Prepare a new release of `yandex-wiki-search-mcp`.
 
 1. Make sure current code passes `task`.
 2. Verify `@README.md`, `@README_ru.md`, and `@CLAUDE.md` match the current Wiki project, toolset, and configuration.
-3. Decide the next version in `@pyproject.toml`.
-   While major version is `0.x`:
-   - small fixes and documentation-only changes usually bump patch
-   - substantial API/tool additions usually bump minor
+3. Decide the next version in `@pyproject.toml`. Since 1.0.0 the tool
+   surface is the compatibility promise (`docs/architecture.md` → "Release
+   process"):
+   - fixes and documentation-only changes bump patch, including a security
+     fix that closes a hole by taking something away (1.5.2)
+   - a new tool, argument or setting, or a deprecated one, bumps minor
+     (1.6.0)
+   - a breaking change to the tool surface bumps major
+
+   When the choice is not obvious, the `CHANGELOG.md` entry's lead
+   paragraph says why, and what an upgrading deployment has to do.
 4. Keep versions synchronized across:
    - `@pyproject.toml`
    - `@manifest.json`

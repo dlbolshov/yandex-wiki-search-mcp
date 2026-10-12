@@ -578,3 +578,23 @@ MCP-сервер `mcp.wiki.yandex.net` (`wiki-mcp-server` 1.28.1 — 31 тулз
   Docker-контекст стал allowlist'ом (`/code` 8.1 → 0.8 MB), MCPB 427 → 246 KB;
   Deployment-схема README перерисована под Mermaid 12; в architecture-доках
   закрыто 11 дрейфов. 766 тестов, 100% покрытие.
+- 2026-10-12: v1.6.0 выпущен — minor: новая настройка `MCP_ALLOWED_HOSTS` и
+  `OAUTH_REGISTRATION_IDLE_SECONDS` вместо `OAUTH_CLIENT_SECRET_EXPIRY_SECONDS`
+  (старое имя читается с предупреждением); набор тулзов не менялся. Ошибки
+  тулзов снова доходят до модели на mcp 2.1+ (python-sdk#3314 скрывает всё,
+  кроме `ToolError`): отказы тулзов — `ToolError`, `WikiMCPServer.call_tool`
+  поднимает до него `WikiError`; новые `WikiArgumentError`,
+  `WikiResponseError` (2xx с нечитаемым телом) и `WikiRateLimited` (429: не
+  применён, повторить позже). Защита plain-token HTTP от DNS rebinding: без
+  OAuth сервер отвечает только loopback-`Host` или именам из
+  `MCP_ALLOWED_HOSTS`; `HOST` по умолчанию `127.0.0.1` (образ ставит
+  `0.0.0.0`); Redis из `compose.yaml` опубликован на loopback. OAuth: секреты
+  клиентов больше не истекают, у всех регистраций одно idle-окно, отсчитанное
+  от момента, когда перестаёт работать последний выданный токен; refresh
+  сохраняет новую пару до отзыва старой; 5xx/429 Yandex на refresh — 500, а
+  не `invalid_grant`. uv 0.13: `required-version` убран, CI и образ запинены
+  на uv 0.13.0, бандл держит Python 3.11–3.14 (`UV_PYTHON`) и x86_64 на
+  Windows, `.python-versions` делает то же для чекаута; образ и бандл без
+  dev-группы (образ 331 → 211 MB). CI: `test-latest-mcp`, Python 3.14 в
+  матрице, еженедельный `uv-canary.yml`. Drift-check переживает 429
+  (`contract_sweep.py` ждёт 2–32 с). 912 тестов, 100% покрытие.

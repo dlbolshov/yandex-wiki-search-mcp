@@ -119,7 +119,7 @@ precedent).
 - **`mcp_wiki/mcp/server.py`** — assembly point. `create_mcp_server()` wires
   the lifespan, the optional OAuth provider and store, instructions, cache
   hints, middleware, custom routes (`/healthz`, the OAuth callback), then
-  registers resources and tools. Four details that bite:
+  registers resources and tools. Five details that bite:
   - `WikiMCPServer.call_tool` decides what a failed tool tells the model.
     Since mcp 2.1 (python-sdk#3314) the SDK passes the error text on only
     for a `ToolError`. Anything else counts as a crash: the server logs it
@@ -306,8 +306,8 @@ then the code exchange, a call with the Bearer and a refresh:
 ### Wiki layer (`mcp_wiki/wiki/`)
 
 - **`proto/pages.py`** — `WikiProtocol`, the interface tools program against.
-  Tools never see `WikiClient` directly; tests substitute an `AsyncMock` with
-  this protocol's surface.
+  Tools never see `WikiClient` directly; tests substitute a bare `AsyncMock`
+  for it.
 - **`proto/common.py`** — `YandexAuth` (per-request credentials) and
   `select_org()`: per-request auth replaces the organization **as a unit**,
   never mixing a request's `cloud_org_id` with the server-wide `org_id`. The
@@ -443,7 +443,8 @@ findings belong in [api-notes.md](api-notes.md).
 
 ## CI
 
-`test.yml` runs four jobs on every push and PR:
+`test.yml` runs four jobs on every pull request and every push to main (or
+by hand):
 
 - **lint** — `scripts/check_versions.py` (version consistency across release
   metadata), ruff check, ruff format check, ty, mypy.
