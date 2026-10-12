@@ -1,9 +1,22 @@
 import difflib
 import os
-from typing import Literal
+import re
+from typing import Annotated, Literal
 
-from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
+from pydantic import (
+    AliasChoices,
+    AnyHttpUrl,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    NoDecode,
+    SettingsConfigDict,
+)
 
 # Shared so the server cannot widen it back to str and silently accept a typo.
 ToolResultText = Literal["pretty", "compact", "none"]
@@ -14,6 +27,16 @@ ENV_FILE = ".env"
 # field is either someone else's variable or our own typo — see
 # suspicious_env_keys().
 SETTINGS_PREFIXES = ("wiki_", "oauth_", "redis_", "mcp_", "tool_")
+
+# One MCP_ALLOWED_HOSTS entry: a host name or a bracketed IPv6 address, with
+# an optional port or `*` for any — the shapes a Host header can match.
+ALLOWED_HOST_ENTRY = re.compile(r"(\[[0-9a-f:.]+\]|[a-z0-9_.-]+)(:(\d+|\*))?")
+
+# Former names of settings, still read and mapped to the field that replaced
+# them. main() warns when one is in use; suspicious_env_keys() leaves them be.
+RENAMED_SETTINGS = {
+    "oauth_client_secret_expiry_seconds": "oauth_registration_idle_seconds",
+}
 
 # How close an unknown key must be to a real field to be called a typo rather
 # than an unrelated variable. 0.8 keeps WIKI_READ_ONL (0.96 against
@@ -35,7 +58,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    host: str = "0.0.0.0"  # noqa: S104
+    # Loopback, as the MCP spec asks of a local server and the SDK defaults
+    # to: a plain-token HTTP endpoint authenticates nobody, so on 0.0.0.0 it
+    # served anyone on the network. The Docker image sets 0.0.0.0, the only
+    # address a published port reaches.
+    host: str = "127.0.0.1"
     port: int = 8000
     transport: Literal["stdio", "sse", "streamable-http"] = "stdio"
     stateless_http: bool = True
@@ -61,18 +88,32 @@ class Settings(BaseSettings):
     oauth_client_secret: SecretStr | None = None
     # Dynamic client registration is unauthenticated by protocol design, so
     # registrations that never expire accumulate without bound — in Redis as
-    # well as in memory. A confidential client gets this as its secret's
-    # lifetime: the SDK stamps it at /register, tells the client and refuses
-    # the secret past it. A public one has no secret, so the provider applies
-    # it as an idle window instead, restarted by every token grant and never
-    # shorter than the refresh token that grant issued. Both stores drop a
-    # registration when its time is up. None disables the expiry, and
-    # registrations then live indefinitely; an empty variable is how the env
-    # file spells it (see below).
-    oauth_client_secret_expiry_seconds: int | None = Field(
-        default=30 * 24 * 60 * 60, ge=1
+    # well as in memory. A registration nobody signs in with is dropped this
+    # long after /register; every token grant restarts the window, counted
+    # from the moment the last token that grant issued stops working (the
+    # refresh token after 31 days, or a longer-lived access token). Both
+    # stores drop a registration when its time is up. Client secrets do not
+    # expire on their own: a deadline on them cut off clients in daily use,
+    # and the MCP Python SDK client never recovers from that. None disables
+    # the expiry; a registration kept with one while it was on loses it at
+    # its next grant. An empty variable is how the env file spells None (see
+    # below). Read under its former name too, OAUTH_CLIENT_SECRET_EXPIRY_SECONDS:
+    # within one source the new name wins, but as for every setting the
+    # process environment beats .env whichever name it uses.
+    oauth_registration_idle_seconds: int | None = Field(
+        default=30 * 24 * 60 * 60,
+        ge=1,
+        validation_alias=AliasChoices(
+            "oauth_registration_idle_seconds", "oauth_client_secret_expiry_seconds"
+        ),
     )
     mcp_server_public_url: AnyHttpUrl | None = None
+    # HTTP transports: the Host header values the MCP endpoint answers to,
+    # comma-separated — DNS-rebinding protection. Unset means loopback names
+    # only without OAuth, and no check under OAuth; a list replaces the
+    # loopback default rather than adding to it; `*` switches it off.
+    # NoDecode: a comma list, not the JSON pydantic-settings expects of a list.
+    mcp_allowed_hosts: Annotated[list[str] | None, NoDecode] = None
     oauth_encryption_keys: SecretStr | None = None
 
     redis_endpoint: str = "localhost"
@@ -81,10 +122,34 @@ class Settings(BaseSettings):
     redis_password: SecretStr | None = None
     redis_pool_max_size: int = 10
 
-    @field_validator("oauth_client_secret_expiry_seconds", mode="before")
+    @field_validator("mcp_allowed_hosts", mode="before")
+    @classmethod
+    def split_allowed_hosts(cls, value: object) -> object:
+        """Read `a, B:8000` as ["a", "b:8000"]; an empty value as unset.
+
+        An entry no Host header could ever equal is refused rather than
+        kept, since every request would get a 421: a URL, an IPv6 address
+        without brackets, a JSON list where a comma list is expected.
+        """
+        if isinstance(value, str):
+            value = value.split(",")
+        if not isinstance(value, list):
+            return value
+        entries = [str(entry).strip().lower() for entry in value]
+        entries = [entry for entry in entries if entry]
+        for entry in entries:
+            if entry != "*" and not ALLOWED_HOST_ENTRY.fullmatch(entry):
+                raise ValueError(
+                    "MCP_ALLOWED_HOSTS is a comma-separated list of host names, "
+                    "each optionally with a port (wiki.example.com, "
+                    f"mcp-wiki:8000, [::1]), or `*`; {entry!r} is none of these"
+                )
+        return entries or None
+
+    @field_validator("oauth_registration_idle_seconds", mode="before")
     @classmethod
     def empty_expiry_disables_it(cls, value: object) -> object:
-        """Read an empty OAUTH_CLIENT_SECRET_EXPIRY_SECONDS as None.
+        """Read an empty OAUTH_REGISTRATION_IDLE_SECONDS as None.
 
         Empty is the documented way to switch the expiry off, but an
         environment variable cannot carry None — pydantic sees the empty
@@ -160,7 +225,9 @@ def _configured_keys() -> set[str]:
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
     )
-    keys |= {name.lower() for name in source()}
+    # env_vars, the file's own keys, not source(): that maps a key read under
+    # an alias (a setting's former name) to the field's name, hiding it.
+    keys |= {name.lower() for name in source.env_vars}
     return keys
 
 
@@ -172,7 +239,7 @@ def suspicious_env_keys() -> dict[str, str]:
     variable — so a misspelled setting is caught in either channel while a
     REDIS_URL belonging to something else passes untouched.
     """
-    known = set(Settings.model_fields)
+    known = set(Settings.model_fields) | set(RENAMED_SETTINGS)
     candidates = sorted(
         key for key in _configured_keys() - known if key.startswith(SETTINGS_PREFIXES)
     )
@@ -181,5 +248,12 @@ def suspicious_env_keys() -> dict[str, str]:
     for key in candidates:
         close = difflib.get_close_matches(key, known, n=1, cutoff=TYPO_SIMILARITY)
         if close:
-            suspects[key] = close[0]
+            # A slip on a former name points at the name that replaced it.
+            suspects[key] = RENAMED_SETTINGS.get(close[0], close[0])
     return suspects
+
+
+def renamed_env_keys() -> dict[str, str]:
+    """Configured keys that still use a setting's former name: old -> new."""
+    configured = _configured_keys()
+    return {old: new for old, new in RENAMED_SETTINGS.items() if old in configured}

@@ -27,7 +27,7 @@
   },
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "054abf72362586491781e1ef595120696e54bf30"
+   "revision": "6d0d3d45e0d72c4cb9b63bafcf22837d4f4268fb"
   },
   "locale": "en"
  },
@@ -40,8 +40,8 @@
    "sources": [
     {
      "path": "README.md",
-     "line": 283,
-     "end_line": 306,
+     "line": 284,
+     "end_line": 307,
      "label": "OAuth mode and ?orgId= in the URL"
     }
    ]
@@ -54,14 +54,14 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 194,
-     "end_line": 201,
+     "line": 243,
+     "end_line": 250,
      "label": "Yandex /authorize URL"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 104,
-     "end_line": 115,
+     "line": 127,
+     "end_line": 138,
      "label": "302 to the client's redirect_uri"
     }
    ]
@@ -74,20 +74,20 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 233,
-     "end_line": 257,
-     "label": "provider and AuthSettings: DCR, TTL"
+     "line": 255,
+     "end_line": 278,
+     "label": "provider, DCR: idle TTL, secrets never expire"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 161,
-     "end_line": 201,
+     "line": 210,
+     "end_line": 250,
      "label": "authorize: server's own state, 600 s"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 80,
-     "end_line": 115,
+     "line": 103,
+     "end_line": 138,
      "label": "callback: state → mcp_ code for 300 s"
     }
    ]
@@ -100,8 +100,8 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 120,
-     "end_line": 159,
+     "line": 143,
+     "end_line": 208,
      "label": "registration expiry and idle-window renewal"
     },
     {
@@ -126,14 +126,14 @@
    "sources": [
     {
      "path": "mcp_wiki/settings.py",
-     "line": 58,
-     "end_line": 61,
+     "line": 85,
+     "end_line": 88,
      "label": "Yandex URL, app id and secret"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 194,
-     "end_line": 201,
+     "line": 243,
+     "end_line": 250,
      "label": "redirect to Yandex /authorize"
     }
    ]
@@ -342,9 +342,9 @@
    "dot": "violet",
    "title": "Registration TTL",
    "items": [
-    "Client with secret: lives until secret expiry (30 days), known to it",
-    "Public client: 30 days from registration; each code exchange or refresh on /token (part 2) extends it, to no less than 31 days",
-    "Empty OAUTH_CLIENT_SECRET_EXPIRY_SECONDS: no expiry"
+    "Public or confidential, one rule: a registration is kept OAUTH_REGISTRATION_IDLE_SECONDS (default 30 days) after /register; empty: no expiry",
+    "Each code exchange or refresh on /token (part 2) renews it: max(31 days, access-token lifetime) + that window",
+    "Secrets never expire (client_secret_expires_at 0); a deadline stamped by an earlier version is lifted at the first grant"
    ]
   },
   {

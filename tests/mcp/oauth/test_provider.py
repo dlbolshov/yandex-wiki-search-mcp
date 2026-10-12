@@ -1,3 +1,4 @@
+import time
 from typing import Any, cast
 
 import aiohttp
@@ -10,13 +11,17 @@ from pydantic import AnyUrl
 from starlette.requests import Request
 
 import mcp_wiki.mcp.oauth.provider as provider_module
-from mcp_wiki.mcp.oauth.provider import YandexOAuthAuthorizationServerProvider
-from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS
+from mcp_wiki.mcp.oauth.provider import (
+    YandexOAuthAuthorizationServerProvider,
+    YandexOAuthUnavailable,
+)
+from mcp_wiki.mcp.oauth.store import REFRESH_TOKEN_TTL_SECONDS, OAuthStore
 from mcp_wiki.mcp.oauth.stores.memory import InMemoryOAuthStore
+from mcp_wiki.mcp.oauth.stores.redis import RedisOAuthStore
 from tests.aioresponses_utils import RequestCapture
 from tests.mcp.oauth.helpers import (
     CLIENT_REDIRECT_URI,
-    PUBLIC_CLIENT_IDLE_TTL,
+    REGISTRATION_IDLE_TTL,
     make_auth_code,
     make_client,
     make_public_client,
@@ -111,7 +116,7 @@ async def test_authorize_without_scopes(
         server_url=yarl.URL("https://mcp.example.test"),
         yandex_oauth_issuer=yarl.URL("https://oauth.yandex.test"),
         store=memory_store,
-        public_client_idle_ttl=None,
+        registration_idle_ttl=None,
         use_scopes=False,
     )
 
@@ -358,8 +363,11 @@ async def test_exchange_authorization_code_failure(
         (502, "<html>Bad Gateway</html>"),
         (400, ""),
         (400, '{"message": "not an OAuth error"}'),
+        # Transient, unlike on a refresh, still invalid_grant: our mcp_ code
+        # is spent either way, so there is nothing left to retry.
+        (503, ""),
     ],
-    ids=["html", "empty", "json-without-oauth-fields"],
+    ids=["html", "empty", "json-without-oauth-fields", "unavailable"],
 )
 async def test_exchange_failure_without_an_oauth_error_body_is_still_one(
     provider: YandexOAuthAuthorizationServerProvider,
@@ -442,6 +450,241 @@ async def test_exchange_refresh_token_failure_keeps_old_tokens(
     assert await memory_store.get_access_token("old-access") is not None
 
 
+class TestRefreshOrdering:
+    """A refresh stores the new pair before it lets go of the old token."""
+
+    @pytest.fixture
+    async def refresh(self, memory_store: InMemoryOAuthStore) -> RefreshToken:
+        await memory_store.save_oauth_token(
+            make_token(access="old-access", refresh="old-refresh"),
+            "client-1",
+            ["wiki:read"],
+            None,
+        )
+        refresh = await memory_store.get_refresh_token("old-refresh")
+        assert refresh is not None
+        return refresh
+
+    async def test_a_failed_save_leaves_the_old_refresh_token_usable(
+        self,
+        provider: YandexOAuthAuthorizationServerProvider,
+        memory_store: InMemoryOAuthStore,
+        client_info: OAuthClientInformationFull,
+        refresh: RefreshToken,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Revoked first, the old token was gone with nothing in its place:
+        # the client got a 500 and could not even retry.
+        async def unavailable(*args: Any, **kwargs: Any) -> None:
+            raise ConnectionError("Redis went away")
+
+        monkeypatch.setattr(memory_store, "save_oauth_token", unavailable)
+        with aioresponses() as mocked:
+            mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
+            with pytest.raises(ConnectionError):
+                await provider.exchange_refresh_token(client_info, refresh, scopes=[])
+
+        assert await memory_store.get_refresh_token("old-refresh") is not None
+
+    async def test_a_refresh_token_handed_back_is_not_revoked(
+        self,
+        provider: YandexOAuthAuthorizationServerProvider,
+        memory_store: InMemoryOAuthStore,
+        client_info: OAuthClientInformationFull,
+        refresh: RefreshToken,
+    ) -> None:
+        # The record just saved is the old token renewed; revoking "the old
+        # one" would delete it.
+        with aioresponses() as mocked:
+            mocked.post(
+                TOKEN_URL, payload={**TOKEN_PAYLOAD, "refresh_token": "old-refresh"}
+            )
+            await provider.exchange_refresh_token(client_info, refresh, scopes=[])
+
+        assert await memory_store.get_refresh_token("old-refresh") is not None
+        assert await memory_store.get_access_token("ya-access-1") is not None
+
+    async def test_an_access_token_handed_back_survives_the_cleanup(
+        self,
+        provider: YandexOAuthAuthorizationServerProvider,
+        memory_store: InMemoryOAuthStore,
+        client_info: OAuthClientInformationFull,
+        refresh: RefreshToken,
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.post(
+                TOKEN_URL, payload={**TOKEN_PAYLOAD, "access_token": "old-access"}
+            )
+            await provider.exchange_refresh_token(client_info, refresh, scopes=[])
+
+        assert await memory_store.get_refresh_token("old-refresh") is None
+        assert await memory_store.get_access_token("old-access") is not None
+
+    async def test_no_new_refresh_token_keeps_the_old_one(
+        self,
+        provider: YandexOAuthAuthorizationServerProvider,
+        memory_store: InMemoryOAuthStore,
+        client_info: OAuthClientInformationFull,
+        refresh: RefreshToken,
+    ) -> None:
+        # RFC 6749 §6: without a new one the client keeps using the old one.
+        payload = {k: v for k, v in TOKEN_PAYLOAD.items() if k != "refresh_token"}
+        with aioresponses() as mocked:
+            mocked.post(TOKEN_URL, payload=payload)
+            await provider.exchange_refresh_token(client_info, refresh, scopes=[])
+
+        assert await memory_store.get_refresh_token("old-refresh") is not None
+        assert await memory_store.get_access_token("ya-access-1") is not None
+
+    @pytest.mark.parametrize("store_kind", ["memory", "redis"])
+    @pytest.mark.parametrize(
+        ("new_refresh", "new_access"),
+        [
+            ("ya-refresh-1", "ya-access-1"),
+            ("old-refresh", "ya-access-1"),
+            (None, "ya-access-1"),
+            ("ya-refresh-1", "old-access"),
+        ],
+        ids=["both-new", "refresh-handed-back", "no-refresh", "access-handed-back"],
+    )
+    async def test_every_shape_of_answer_leaves_one_live_pair(
+        self,
+        memory_store: InMemoryOAuthStore,
+        redis_store: RedisOAuthStore,
+        client_info: OAuthClientInformationFull,
+        store_kind: str,
+        new_refresh: str | None,
+        new_access: str,
+    ) -> None:
+        # Whatever Yandex hands back, the replaced access token stops working
+        # and the refresh token the client now holds leads to the new one —
+        # so revoking it later takes the new access token with it.
+        store: OAuthStore = memory_store if store_kind == "memory" else redis_store
+        provider = make_provider(store, registration_idle_ttl=REGISTRATION_IDLE_TTL)
+        await store.save_oauth_token(
+            make_token(access="old-access", refresh="old-refresh"),
+            "client-1",
+            ["wiki:read"],
+            None,
+        )
+        refresh = await store.get_refresh_token("old-refresh")
+        assert refresh is not None
+        payload: dict[str, Any] = {**TOKEN_PAYLOAD, "access_token": new_access}
+        if new_refresh is None:
+            del payload["refresh_token"]
+        else:
+            payload["refresh_token"] = new_refresh
+
+        with aioresponses() as mocked:
+            mocked.post(TOKEN_URL, payload=payload)
+            await provider.exchange_refresh_token(client_info, refresh, scopes=[])
+
+        held = new_refresh or "old-refresh"
+        assert await store.get_access_token(new_access) is not None
+        assert await store.get_refresh_token(held) is not None
+        if new_access != "old-access":
+            assert await store.get_access_token("old-access") is None
+        if held != "old-refresh":
+            assert await store.get_refresh_token("old-refresh") is None
+
+        await store.revoke_refresh_token(held)
+        assert await store.get_access_token(new_access) is None
+
+    async def test_a_failed_revoke_does_not_fail_the_grant(
+        self,
+        provider: YandexOAuthAuthorizationServerProvider,
+        memory_store: InMemoryOAuthStore,
+        client_info: OAuthClientInformationFull,
+        refresh: RefreshToken,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        async def unavailable(*args: Any, **kwargs: Any) -> None:
+            raise ConnectionError("Redis went away")
+
+        monkeypatch.setattr(memory_store, "revoke_refresh_token", unavailable)
+        with aioresponses() as mocked, caplog.at_level("WARNING"):
+            mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
+            token = await provider.exchange_refresh_token(
+                client_info, refresh, scopes=[]
+            )
+
+        assert token.access_token == "ya-access-1"
+        assert await memory_store.get_access_token("ya-access-1") is not None
+        assert "Could not revoke a refresh token after a refresh" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (503, '{"error": "temporarily_unavailable"}'),
+        (429, ""),
+        # A proxy in front of Yandex answering with its own page.
+        (502, "<html>Bad Gateway</html>"),
+    ],
+    ids=["unavailable", "rate-limited", "proxy-page"],
+)
+async def test_a_refresh_yandex_could_not_take_is_not_invalid_grant(
+    provider: YandexOAuthAuthorizationServerProvider,
+    memory_store: InMemoryOAuthStore,
+    client_info: OAuthClientInformationFull,
+    status: int,
+    body: str,
+) -> None:
+    # invalid_grant would tell the client its refresh token is dead, and a
+    # client following RFC 6749 would throw it away. It is not: it is still
+    # here, still valid at Yandex, and the next attempt can succeed.
+    await memory_store.save_oauth_token(
+        make_token(access="old-access", refresh="old-refresh"),
+        "client-1",
+        ["wiki:read"],
+        None,
+    )
+    refresh = await memory_store.get_refresh_token("old-refresh")
+    assert refresh is not None
+
+    with aioresponses() as mocked:
+        mocked.post(TOKEN_URL, status=status, body=body)
+        with pytest.raises(YandexOAuthUnavailable, match=f"HTTP {status}"):
+            await provider.exchange_refresh_token(client_info, refresh, scopes=[])
+
+    assert await memory_store.get_refresh_token("old-refresh") is not None
+    assert await memory_store.get_access_token("old-access") is not None
+
+
+class _FakeRefusal:
+    """Just enough of an aiohttp response for _describe_refusal."""
+
+    status = 400
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def json(self, content_type: str | None = None) -> Any:
+        raise self._error
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        aiohttp.ClientPayloadError("Response payload is not completed"),
+        aiohttp.ClientConnectionError("Connection reset by peer"),
+        TimeoutError(),
+        # aiohttp decodes with the charset the response names.
+        LookupError("'rot-13' is not a text encoding"),
+        ValueError("Expecting value: line 1 column 1 (char 0)"),
+    ],
+    ids=["truncated-body", "connection-lost", "timeout", "charset", "not-json"],
+)
+async def test_a_refusal_whose_body_cannot_be_read_is_described_by_its_status(
+    error: Exception,
+) -> None:
+    # Escaping here would turn the refusal into the SDK's bare 500.
+    response = cast(aiohttp.ClientResponse, _FakeRefusal(error))
+
+    assert await provider_module._describe_refusal(response) == "HTTP 400"
+
+
 async def test_load_access_token(
     provider: YandexOAuthAuthorizationServerProvider,
     memory_store: InMemoryOAuthStore,
@@ -512,7 +755,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
 
 
 def make_provider(
-    store: InMemoryOAuthStore, public_client_idle_ttl: int | None
+    store: OAuthStore, registration_idle_ttl: int | None
 ) -> YandexOAuthAuthorizationServerProvider:
     return YandexOAuthAuthorizationServerProvider(
         client_id="yandex-app-id",
@@ -520,7 +763,7 @@ def make_provider(
         server_url=yarl.URL("https://mcp.example.test"),
         yandex_oauth_issuer=yarl.URL("https://oauth.yandex.test"),
         store=store,
-        public_client_idle_ttl=public_client_idle_ttl,
+        registration_idle_ttl=registration_idle_ttl,
         scopes=["wiki:read"],
     )
 
@@ -533,57 +776,29 @@ class TestRegistrationLifetime:
     """How long a registration is kept. /register is unauthenticated, so
     whatever it keeps forever is a way to fill the store on purpose."""
 
-    async def test_a_public_registration_gets_the_idle_window(
+    @pytest.mark.parametrize(
+        "client",
+        [make_public_client(), make_client(client_secret_expires_at=0)],
+        ids=["public", "confidential"],
+    )
+    async def test_every_registration_gets_the_idle_window(
         self,
         provider: YandexOAuthAuthorizationServerProvider,
         memory_store: InMemoryOAuthStore,
         clock: FakeClock,
+        client: OAuthClientInformationFull,
     ) -> None:
-        # The SDK stamps no deadline on a client it issued no secret, so
-        # without this one the record would be kept forever.
-        await provider.register_client(make_public_client())
+        # One rule, whether the SDK issued a secret or not: without it the
+        # record would be kept forever, and a secret's own deadline cut off
+        # clients in daily use.
+        await provider.register_client(client)
 
-        assert deadline(memory_store) == clock.now + PUBLIC_CLIENT_IDLE_TTL
-
-    async def test_a_confidential_registration_goes_with_its_secret(
-        self,
-        provider: YandexOAuthAuthorizationServerProvider,
-        memory_store: InMemoryOAuthStore,
-        clock: FakeClock,
-    ) -> None:
-        expires_at = int(clock.now) + 600
-        await provider.register_client(make_client(client_secret_expires_at=expires_at))
-
-        assert deadline(memory_store) == expires_at
-
-    async def test_a_secret_stamped_zero_never_expires(
-        self,
-        provider: YandexOAuthAuthorizationServerProvider,
-        memory_store: InMemoryOAuthStore,
-        clock: FakeClock,
-    ) -> None:
-        # RFC 7591's "never", stamped by the SDK when the expiry is off.
-        await provider.register_client(make_client(client_secret_expires_at=0))
-
-        assert deadline(memory_store) is None
-
-    async def test_a_secret_already_past_its_deadline_gets_a_second(
-        self,
-        provider: YandexOAuthAuthorizationServerProvider,
-        memory_store: InMemoryOAuthStore,
-        clock: FakeClock,
-    ) -> None:
-        # Not zero or less: Redis refuses SET EX 0 outright.
-        await provider.register_client(
-            make_client(client_secret_expires_at=int(clock.now) - 5)
-        )
-
-        assert deadline(memory_store) == clock.now + 1
+        assert deadline(memory_store) == clock.now + REGISTRATION_IDLE_TTL
 
     async def test_nothing_expires_with_the_expiry_switched_off(
         self, memory_store: InMemoryOAuthStore, clock: FakeClock
     ) -> None:
-        provider = make_provider(memory_store, public_client_idle_ttl=None)
+        provider = make_provider(memory_store, registration_idle_ttl=None)
 
         await provider.register_client(make_public_client())
 
@@ -591,7 +806,7 @@ class TestRegistrationLifetime:
 
 
 class TestRegistrationRenewal:
-    """A token grant restarts a public registration's idle window.
+    """A token grant restarts a registration's idle window.
 
     A fixed lifetime would retire a registration in active use: the next
     refresh gets invalid_client, and the SDK's own client then reopens
@@ -605,7 +820,7 @@ class TestRegistrationRenewal:
         clock: FakeClock,
     ) -> None:
         await provider.register_client(make_public_client())
-        clock.advance(PUBLIC_CLIENT_IDLE_TTL - 1)
+        clock.advance(REGISTRATION_IDLE_TTL - 1)
 
         with aioresponses() as mocked:
             mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
@@ -613,8 +828,11 @@ class TestRegistrationRenewal:
                 make_public_client(), make_auth_code()
             )
 
-        # Stretched to the refresh token's lifetime, the longer of the two.
-        assert deadline(memory_store) == clock.now + REFRESH_TOKEN_TTL_SECONDS
+        # A whole window more, counted from the end of the refresh token,
+        # the longer-lived of the two.
+        assert deadline(memory_store) == (
+            clock.now + REFRESH_TOKEN_TTL_SECONDS + REGISTRATION_IDLE_TTL
+        )
 
     async def test_a_refresh_restarts_the_window(
         self,
@@ -631,7 +849,7 @@ class TestRegistrationRenewal:
         )
         refresh = await memory_store.get_refresh_token("old-refresh")
         assert refresh is not None
-        clock.advance(PUBLIC_CLIENT_IDLE_TTL - 1)
+        clock.advance(REGISTRATION_IDLE_TTL - 1)
 
         with aioresponses() as mocked:
             mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
@@ -639,7 +857,9 @@ class TestRegistrationRenewal:
                 make_public_client(), refresh, scopes=[]
             )
 
-        assert deadline(memory_store) == clock.now + REFRESH_TOKEN_TTL_SECONDS
+        assert deadline(memory_store) == (
+            clock.now + REFRESH_TOKEN_TTL_SECONDS + REGISTRATION_IDLE_TTL
+        )
 
     async def test_the_registration_outlives_the_refresh_token_it_was_issued(
         self,
@@ -647,9 +867,9 @@ class TestRegistrationRenewal:
         memory_store: InMemoryOAuthStore,
         clock: FakeClock,
     ) -> None:
-        # The idle window here is a day, the refresh token lives 31: had the
-        # registration gone first, a refresh that could succeed would get
-        # invalid_client instead.
+        # Had the registration gone first, a refresh that could succeed would
+        # get invalid_client; had it gone with the token, a client coming
+        # back after it would find no registration to sign in again with.
         await provider.register_client(make_public_client())
 
         with aioresponses() as mocked:
@@ -663,13 +883,19 @@ class TestRegistrationRenewal:
         assert refresh.expires_at is not None
         registration_deadline = deadline(memory_store)
         assert registration_deadline is not None
-        assert refresh.expires_at <= registration_deadline
+        assert registration_deadline == refresh.expires_at + REGISTRATION_IDLE_TTL
 
-    async def test_a_window_longer_than_the_refresh_token_is_kept(
+        # Back the day after the refresh token died: told invalid_grant by
+        # the SDK (no such token), it signs in again with this registration.
+        clock.advance(REFRESH_TOKEN_TTL_SECONDS + 24 * 60 * 60 - 1)
+        assert await memory_store.get_refresh_token("ya-refresh-1") is None
+        assert await provider.get_client("client-1") is not None
+
+    async def test_a_window_longer_than_the_refresh_token_is_kept_whole(
         self, memory_store: InMemoryOAuthStore, clock: FakeClock
     ) -> None:
         idle = 2 * REFRESH_TOKEN_TTL_SECONDS
-        provider = make_provider(memory_store, public_client_idle_ttl=idle)
+        provider = make_provider(memory_store, registration_idle_ttl=idle)
         await provider.register_client(make_public_client())
 
         with aioresponses() as mocked:
@@ -678,7 +904,7 @@ class TestRegistrationRenewal:
                 make_public_client(), make_auth_code()
             )
 
-        assert deadline(memory_store) == clock.now + idle
+        assert deadline(memory_store) == clock.now + REFRESH_TOKEN_TTL_SECONDS + idle
 
     async def test_a_refused_grant_renews_nothing(
         self,
@@ -699,30 +925,103 @@ class TestRegistrationRenewal:
 
         assert deadline(memory_store) == registered_until
 
-    async def test_a_confidential_deadline_does_not_move(
+    async def test_a_confidential_registration_renews_like_a_public_one(
         self,
         provider: YandexOAuthAuthorizationServerProvider,
         memory_store: InMemoryOAuthStore,
         clock: FakeClock,
     ) -> None:
-        # The client was told this deadline at /register, and the SDK
-        # refuses the secret past it whatever the store says.
-        expires_at = int(clock.now) + 600
-        client = make_client(client_secret_expires_at=expires_at)
+        client = make_client(client_secret_expires_at=0)
         await provider.register_client(client)
-        clock.advance(100)
+        clock.advance(REGISTRATION_IDLE_TTL - 1)
 
         with aioresponses() as mocked:
             mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
             await provider.exchange_authorization_code(client, make_auth_code())
 
-        assert deadline(memory_store) == expires_at
+        assert deadline(memory_store) == (
+            clock.now + REFRESH_TOKEN_TTL_SECONDS + REGISTRATION_IDLE_TTL
+        )
 
-    async def test_nothing_is_renewed_with_the_expiry_switched_off(
+    @pytest.mark.parametrize("store_kind", ["memory", "redis"])
+    async def test_a_secret_deadline_from_before_is_lifted_at_the_next_grant(
+        self,
+        memory_store: InMemoryOAuthStore,
+        redis_store: RedisOAuthStore,
+        store_kind: str,
+    ) -> None:
+        # Registered while secrets still expired: the record carries the
+        # deadline it was stamped with, which the SDK enforces whatever the
+        # store keeps, and its TTL in the store is that deadline. A client
+        # still in use moves to the idle rule at its first grant.
+        store: OAuthStore = memory_store if store_kind == "memory" else redis_store
+        provider = make_provider(store, registration_idle_ttl=REGISTRATION_IDLE_TTL)
+        stamped = make_client(client_secret_expires_at=int(time.time()) + 600)
+        await store.save_client(stamped, ttl=600)
+
+        with aioresponses() as mocked:
+            mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
+            await provider.exchange_authorization_code(stamped, make_auth_code())
+
+        saved = await provider.get_client("client-1")
+        assert saved is not None
+        assert saved.client_secret_expires_at == 0
+        assert saved.client_secret == stamped.client_secret
+
+    @pytest.mark.parametrize("grant", ["code", "refresh"])
+    async def test_the_registration_outlives_a_long_lived_access_token(
+        self,
+        provider: YandexOAuthAuthorizationServerProvider,
+        memory_store: InMemoryOAuthStore,
+        clock: FakeClock,
+        grant: str,
+    ) -> None:
+        # Yandex ID tokens commonly last a year. A client spending one sends
+        # only bearer requests, which renew nothing, and comes back to /token
+        # only after the token has expired — by its own clock, which started
+        # when the reply arrived. A window ending with the token would be
+        # gone by then, so it runs one idle window past the token's expiry.
+        year = 365 * 24 * 60 * 60
+        await provider.register_client(make_public_client())
+        await memory_store.save_oauth_token(
+            make_token(access="old-access", refresh="old-refresh"),
+            "client-1",
+            ["wiki:read"],
+            None,
+        )
+
+        with aioresponses() as mocked:
+            mocked.post(TOKEN_URL, payload={**TOKEN_PAYLOAD, "expires_in": year})
+            if grant == "code":
+                await provider.exchange_authorization_code(
+                    make_public_client(), make_auth_code()
+                )
+            else:
+                refresh = await memory_store.get_refresh_token("old-refresh")
+                assert refresh is not None
+                await provider.exchange_refresh_token(
+                    make_public_client(), refresh, scopes=[]
+                )
+
+        access = await memory_store.get_access_token("ya-access-1")
+        assert access is not None
+        assert access.expires_at == clock.now + year
+        assert deadline(memory_store) == clock.now + year + REGISTRATION_IDLE_TTL
+
+        # The day the client first notices its token expired: the refresh
+        # token is long gone, so it is told invalid_grant and signs in again
+        # — with a registration that is still there.
+        clock.advance(year + 60)
+        assert await provider.get_client("client-1") is not None
+        assert await memory_store.get_refresh_token("ya-refresh-1") is None
+
+    async def test_switching_the_expiry_off_clears_an_earlier_window(
         self, memory_store: InMemoryOAuthStore, clock: FakeClock
     ) -> None:
-        provider = make_provider(memory_store, public_client_idle_ttl=None)
-        await provider.register_client(make_public_client())
+        # Registered while the expiry was on, renewed after it was switched
+        # off: "registrations then live indefinitely" has to reach this one.
+        await memory_store.save_client(make_public_client(), ttl=REGISTRATION_IDLE_TTL)
+        provider = make_provider(memory_store, registration_idle_ttl=None)
 
         with aioresponses() as mocked:
             mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
@@ -731,3 +1030,56 @@ class TestRegistrationRenewal:
             )
 
         assert deadline(memory_store) is None
+
+    async def test_switching_the_expiry_off_clears_a_redis_ttl(
+        self, redis_store: RedisOAuthStore
+    ) -> None:
+        # The case that matters: Redis keeps a TTL across restarts, and only
+        # a save without one (a plain SET) takes it off the key.
+        await redis_store.save_client(make_public_client(), ttl=REGISTRATION_IDLE_TTL)
+        provider = make_provider(redis_store, registration_idle_ttl=None)
+
+        with aioresponses() as mocked:
+            mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
+            await provider.exchange_authorization_code(
+                make_public_client(), make_auth_code()
+            )
+
+        redis = redis_store._cache.client  # ty: ignore[unresolved-attribute]
+        assert await redis.ttl("oauth:client:client-1") == -1
+        assert await provider.get_client("client-1") is not None
+
+    async def test_a_failed_renewal_does_not_fail_the_grant(
+        self,
+        provider: YandexOAuthAuthorizationServerProvider,
+        memory_store: InMemoryOAuthStore,
+        clock: FakeClock,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # By the time the renewal runs, the old refresh token is revoked and
+        # the new pair saved. Failing the grant then would hand the client a
+        # 500 instead of tokens it can no longer get any other way.
+        await provider.register_client(make_public_client())
+        await memory_store.save_oauth_token(
+            make_token(access="old-access", refresh="old-refresh"),
+            "client-1",
+            ["wiki:read"],
+            None,
+        )
+        refresh = await memory_store.get_refresh_token("old-refresh")
+        assert refresh is not None
+
+        async def unavailable(*args: Any, **kwargs: Any) -> None:
+            raise ConnectionError("Redis went away")
+
+        monkeypatch.setattr(memory_store, "save_client", unavailable)
+        with aioresponses() as mocked, caplog.at_level("WARNING"):
+            mocked.post(TOKEN_URL, payload=TOKEN_PAYLOAD)
+            token = await provider.exchange_refresh_token(
+                make_public_client(), refresh, scopes=[]
+            )
+
+        assert token.access_token == "ya-access-1"
+        assert await memory_store.get_access_token("ya-access-1") is not None
+        assert "Could not renew the registration of client client-1" in caplog.text

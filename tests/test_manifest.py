@@ -1,7 +1,6 @@
 """How the Claude Desktop bundle launches: manifest.json's `mcp_config`."""
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,6 @@ from packaging.version import Version
 from mcp_wiki.settings import Settings, suspicious_env_keys
 
 ROOT = Path(__file__).resolve().parents[1]
-_SETTINGS_PREFIXES = ("WIKI_", "OAUTH_", "REDIS_", "MCP_", "TOOL_")
 
 
 def _manifest() -> dict[str, Any]:
@@ -99,15 +97,13 @@ def test_every_launch_skips_the_dev_group(platform: str) -> None:
 
 
 @pytest.mark.parametrize("platform", ["base", "win32"])
+@pytest.mark.usefixtures("isolated_env")
 def test_the_bundle_env_starts_the_server(
     platform: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Claude Desktop passes every variable the manifest names, the ones the
     # user left empty as "" — a shape no other test builds Settings from.
     monkeypatch.chdir(tmp_path)  # no stray .env
-    for key in list(os.environ):
-        if key.upper().startswith(_SETTINGS_PREFIXES):
-            monkeypatch.delenv(key)
     env = _resolved(_envs()[platform], wiki_token="token", wiki_org_id="123")
     for name, value in env.items():
         monkeypatch.setenv(name, value)

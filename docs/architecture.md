@@ -139,6 +139,24 @@ precedent).
     loopback and auto-arms DNS rebinding protection, which answers every MCP
     request behind a real hostname with `421` while `/healthz` still says
     `200`.
+  - Both HTTP transports also get `transport_security()`, chosen here rather
+    than left to that auto-arming. Without OAuth the endpoint authenticates
+    nobody, so a web page whose name is re-resolved to `127.0.0.1` could
+    drive it from the operator's browser, same-origin as far as the browser
+    knows; only the `Host` header, which a page cannot forge, gives it away.
+    So without OAuth only loopback names pass (`localhost`, `127.0.0.1`,
+    `[::1]`, on any port) unless `MCP_ALLOWED_HOSTS` lists others — the
+    list replaces that default rather than adding to it — and an
+    Origin, when a browser sends one, has to be on an allowed host too.
+    Under OAuth a bearer token is no credential a browser attaches by
+    itself, so nothing is checked unless `MCP_ALLOWED_HOSTS` is set, and
+    that is said explicitly: left to the SDK, a loopback `HOST` would get
+    its loopback-only check and refuse a same-host proxy's public name. `*`
+    switches the check off. `HOST` itself defaults to `127.0.0.1`, as the
+    MCP spec asks of a local server; the Docker image sets `0.0.0.0`. The
+    startup line logs both, and a rejected request is logged by the SDK
+    with its `Host` (over the legacy SSE transport the SDK then also raises,
+    so uvicorn adds an ERROR traceback per rejection).
   - `server_version()`/`server_description()` read package metadata, so
     `pyproject.toml` stays the single source for both.
 - **`mcp_wiki/mcp/context.py`** — `AppContext`, the lifespan payload: the
@@ -202,27 +220,54 @@ memory store, Fernet-encrypted for Redis.
   `state` is data echoed back on the final redirect, never a key. Breaking
   that rule was CVE-shaped: a predictable key let an attacker overwrite the
   pending record and collect the victim's code, PKCE included. A refusal
-  from Yandex's `/token` (any non-200, on the code exchange or a refresh) is
-  raised as `TokenError(invalid_grant)` carrying Yandex's status and error,
-  and logged as a warning: that is the one exception the SDK's
-  `TokenHandler` turns into a 400 OAuth error, and anything else reaches the
-  client as a bare 500. On the code exchange `invalid_grant` is accurate
-  whatever Yandex's reason, since loading the `mcp_` code already spent it.
+  from Yandex's `/token` (any non-200) is logged as a warning and raised as
+  `TokenError(invalid_grant)` carrying Yandex's status and error: that is
+  the one exception the SDK's `TokenHandler` turns into a 400 OAuth error,
+  and anything else reaches the client as a bare 500. On the code exchange
+  `invalid_grant` is accurate whatever Yandex's reason, since loading the
+  `mcp_` code already spent it. A refresh is the exception: when Yandex is
+  down or rate limiting (5xx, 429) the refresh token is still valid, and
+  `invalid_grant` would tell an RFC 6749 client to discard it, so the
+  provider raises `YandexOAuthUnavailable` instead: the client gets a 500,
+  which blames the server and says nothing about the token, so a client
+  that keeps it can refresh once Yandex is back (both MCP SDK clients still
+  start a sign-in at once). A refusal of our own app (`invalid_client`, a
+  wrong `OAUTH_CLIENT_SECRET`) stays `invalid_grant`: no answer helps the
+  client there, and the warning is what tells the operator. Describing a
+  refusal never fails on its own: a body that is not JSON, does not decode
+  or is cut off mid-read leaves just the status.
 
   The provider also decides how long a dynamic registration lives, since
   `/register` is unauthenticated and whatever it keeps forever can be
-  flooded on purpose. A confidential client goes with its secret: the SDK
-  stamps `client_secret_expires_at` from `OAUTH_CLIENT_SECRET_EXPIRY_SECONDS`,
-  tells the client and refuses the secret past it (`0`, stamped when the
-  expiry is off, is RFC 7591's "never"). A public client
-  (`token_endpoint_auth_method: none`) is issued no secret, so the SDK stamps
-  nothing and checks nothing; the provider gives it the same setting as an
-  idle window, restarted after every successful code exchange or refresh and
-  never shorter than the refresh token just issued. A fixed lifetime would
-  retire registrations in active use without warning — RFC 7591 has no field
-  to announce one — and the SDK's own client answers the resulting
-  `invalid_client` by reopening `/authorize` with the dead `client_id`, which
-  strands the user on a "Client ID not found" page.
+  flooded on purpose. One rule covers every registration, public
+  (`token_endpoint_auth_method: none`) or confidential: it is kept for
+  `OAUTH_REGISTRATION_IDLE_SECONDS` after `/register`, and every successful
+  code exchange or refresh restarts that idle window, counted from the
+  moment the last token that grant issued stops working:
+  the refresh token after 31 days, or the access token if Yandex made it
+  longer, as it commonly does (a year). Bearer requests touch no
+  registration, so a client comes back to `/token` only once its tokens have
+  run out, by its own clock, which starts when the reply reaches it. A
+  window that ended with the tokens would be gone by that visit; counted
+  from their end, the client finds its registration, is told
+  `invalid_grant` and signs in again. Client secrets do not expire on their
+  own: the SDK is told to stamp `client_secret_expires_at` 0, RFC 7591's
+  "never". A deadline there cut confidential clients in daily use off after
+  30 days, a public one has no field to be told a deadline in, and the SDK's
+  own client answers the resulting `invalid_client` by reopening
+  `/authorize` with the dead `client_id`, which strands the user on a
+  "Client ID not found" page; RFC 7591 §5 lets a server retire unused
+  registrations instead, which is what the idle window does. A record from
+  before, stamped with a deadline the SDK would still enforce, is saved with
+  `0` at its first grant. With the expiry off, a renewal saves the
+  registration with no TTL, which also clears one left in Redis from when it
+  was on. A refresh stores the new token pair before it revokes the old
+  refresh token, and revokes that only when Yandex issued a different one
+  (sparing an access token handed back unchanged), so a failed save leaves
+  the client its old token to retry with. The revocation and the renewal
+  after it are best effort: the grant is committed by then, so a store
+  failure is logged rather than turned into a 500 whose tokens the client
+  would never receive.
 - **`store.py`** — the `OAuthStore` protocol and the shared
   `REFRESH_TOKEN_TTL_SECONDS` (31 days, Yandex's refresh-token lifetime).
   `save_client` takes its TTL from the provider, as `save_state` and
@@ -234,9 +279,9 @@ memory store, Fernet-encrypted for Redis.
   twice the surviving size), so abandoned logins cannot grow the process
   without bound. Registrations included: `get_client` refuses an expired one
   itself rather than waiting for the sweep, as Redis has by then dropped the
-  key. The SDK checks no expiry at all on a public client and a confidential
-  one's only at `/token`, so `/authorize` would otherwise send the user
-  through the Yandex login just to be refused at the end.
+  key. The SDK knows nothing of a registration's lifetime — secrets are
+  stamped 0 — so a record returned past its deadline would be accepted
+  everywhere.
 - **`stores/redis.py`** — production store. Only the access, refresh and
   refresh→access mapping keys are SHA-256 hashes; client, state and
   auth-code keys are the raw ids. Field-level encryption (`crypto.py`,
@@ -245,7 +290,7 @@ memory store, Fernet-encrypted for Redis.
   (`serializers.py`), so the pending state and the auth-code record — the
   wrapped `yandex_auth_code` included — are stored in the clear for their
   600 s / 300 s TTLs. TTLs are delegated to Redis, client registrations'
-  included (with `OAUTH_CLIENT_SECRET_EXPIRY_SECONDS` empty a registration
+  included (with `OAUTH_REGISTRATION_IDLE_SECONDS` empty a registration
   gets none). Single-use records — state and auth code — are claimed by the
   `DEL`, not the `GET`: two concurrent redemptions may both read one, but
   only the caller whose `DEL` removed the key gets it.
@@ -287,7 +332,10 @@ then the code exchange, a call with the Bearer and a refresh:
   byte ceiling (resolved from the reply's Content-Type, since the download
   endpoint declares no Content-Length) and a `body_sink` that streams a
   response straight to a caller-supplied consumer instead of memory;
-  `_request()` is the thin bytes-only wrapper the other endpoints use.
+  `_request()` is the thin bytes-only wrapper on top of it, and
+  `_request_parsed()` reads every JSON reply through it, so a 2xx body that
+  does not parse becomes a `WikiResponseError` naming the endpoint; only the
+  upload part and finish steps call `_request()` directly.
   Also owns the multi-step flows: upload sessions (create → parts → finish
   → attach), `page_clone`'s deferred-operation polling, and the atomic
   download-to-disk (`.part` file → fsync → link/replace). That last one
@@ -297,12 +345,17 @@ then the code exchange, a call with the Bearer and a refresh:
   an in-flight open sees the finished state rather than racing it.
 - **`custom/errors.py`** — the taxonomy. `WikiError` → `WikiApiError`
   (HTTP-level, `build_api_error()` picks the subclass; `GridConflict` for the
-  grid lock) plus `PageNotFound`/`GridNotFound`/`AttachmentNotFound` (the
+  grid lock, `WikiRateLimited` for a `429`, both saying the request was not
+  applied and how to resend it) plus `PageNotFound`/`GridNotFound`/`AttachmentNotFound` (the
   last mapped in the client, because the download endpoint answers a miss
   with a placeholder GIF instead of the JSON error envelope),
   `WikiOperationError` (a deferred operation failed *after* every HTTP
   exchange succeeded), `WikiTransportError` (timeouts and connection
   failures, with a non-empty message even for `TimeoutError`),
+  `WikiResponseError` (a 2xx body that does not parse — a proxy's page, an
+  empty body, a renamed field — naming the endpoint, and for a write warning
+  that the change may have been applied; the client reads every JSON reply
+  through `_request_parsed`, which is where it is raised),
   `ResponseTooLarge` (a body past the caller's `max_bytes` ceiling — refused
   on `Content-Length` before reading, or one byte past the ceiling on a
   stream that declared none), `WikiLocalFileError` (a local path the
@@ -320,7 +373,8 @@ then the code exchange, a call with the Bearer and a refresh:
   it — and the MCP layer may not be imported from here.
 - **`custom/slugs.py`** — `normalize_slug()`: full Wiki URL or slug → bare
   slug. Lives here because the client needs it on every page call (see the
-  layering rule).
+  layering rule). A URL `urlparse` cannot split (an unbalanced `[` in the
+  host) is a `WikiArgumentError`, not urllib's own `ValueError`.
 - **`custom/anchors.py`** — the fallback behind `page_append_content`'s
   `anchor`: when the API answers `ANCHOR_NOT_FOUND`, the client inserts
   after the anchor in the raw markup and saves the page with `page_update`.
@@ -351,11 +405,15 @@ The suite runs against mocks at every seam the architecture defines:
 | package ↔ interpreter | `tests/test_imports.py` imports every module in a subprocess |
 | Docker image ↔ CI ↔ uv | `tests/test_dockerfile.py`: the Dockerfile's uv pin is exact, every `setup-uv` step pins the same release except the weekly canary's, which must float to `latest`, `required-version` grows no ceiling (the project sets none), no `uv.toml` overrides it, and the image's `uv sync` skips the `dev` group (see [Toolchain](#toolchain)) |
 | bundle ↔ host | `tests/test_manifest.py`: `Settings` builds from the env the bundle passes (empty strings for what the user left blank), a platform override in `manifest.json` repeats the whole base `env`, every env keeps Python below 3.15, Windows keeps x86_64 Python, and every platform's `uv run` passes `--no-dev` ahead of the script name (see [Toolchain](#toolchain)) |
+| Python range ↔ lock | `tests/test_python_range.py`: `.python-versions` and the manifest's `UV_PYTHON` name the same range, it starts where `requires-python` does, stops before 3.15, and `uv.lock` has a wheel of every compiled package for each minor in it (see [Toolchain](#toolchain)) |
 
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
 `mode="auto"`, i.e. the modern `2026-07-28` negotiation path;
-`create_test_settings`; `make_test_lifespan`) and `tests/aioresponses_utils.py`.
+`create_test_settings`; `make_test_lifespan`), `tests/conftest.py`
+(`isolated_env`, which clears every variable `Settings` reads — any test that
+builds `Settings` from the environment uses it; `load_fixture`) and
+`tests/aioresponses_utils.py`.
 Protocol model fields are snake_case (`structured_content`, `input_schema`);
 camelCase works as a constructor kwarg but not for attribute access.
 
@@ -376,7 +434,10 @@ calls every `WikiClient` method against a real organization and reports
 validation mismatches and undeclared keys. It exists because the search
 endpoint silently changed contract once (back when it was undocumented), and it caught `page_move`
 being a silent no-op before that tool could ship. It **writes** to the wiki
-under the given base slug — use a scratch spot in your personal section. The
+under the given base slug — use a scratch spot in your personal section. A
+grid lock (`409`) or a rate limit (`429`) is waited out rather than reported as
+drift, and a write is read back where it can be, so a change the API accepted
+but ignored fails the run. The
 `api-drift.yml` workflow runs it weekly when `DRIFT_*` secrets are configured;
 findings belong in [api-notes.md](api-notes.md).
 
@@ -398,7 +459,7 @@ findings belong in [api-notes.md](api-notes.md).
   users get. It exists because mcp 2.1.0 changed what a failed tool shows
   the model (see `WikiMCPServer.call_tool` above): 43 tests failed there and
   passed on the lock, and `install` only counts tools.
-- **test** — pytest across the OS × Python matrix (3.11–3.13); coverage
+- **test** — pytest across the OS × Python matrix (3.11–3.14); coverage
   uploaded to Codecov from one matrix entry. The **100% coverage gate is
   enforced on ubuntu only**, as a separate `coverage report --fail-under=100`
   step. Windows and macOS run every test they can, but a few tests — and the
@@ -420,7 +481,8 @@ weekly live sweep.
 
 `uv-canary.yml` runs with the newest uv weekly, by hand, and on a pull request
 that changes how the bundle is built or launched (`manifest.json`,
-`.mcpbignore`, `pyproject.toml`, `uv.lock` or the workflow itself). It is the
+`.mcpbignore`, `pyproject.toml`, `uv.lock`, `.python-versions` or the
+workflow itself). It is the
 one place CI does not use the pinned release. The `bundle` job runs on
 ubuntu, macOS, Windows x64 and Windows ARM64. It packs the MCPB bundle, unpacks it and launches it the way Claude Desktop
 does. It runs the unpacked manifest's own `mcp_config` command, args and env,
@@ -430,8 +492,11 @@ id) and the working directory set to the bundle. stdin is at EOF, and
 makes it a machine with no Python of its own. `UV_NO_BUILD=1` makes a missing
 wheel fail instead of being compiled with the runner's toolchain, which a
 Claude Desktop user does not have. The server must log `mcp_wiki starting`
-and exit 0. The `suite` job runs `uv sync --locked --dev` and the tests on
-ubuntu and macOS, on Python 3.13. The workflow exists because uv 0.13.0 broke the bundle twice
+and exit 0. The `checkout` job is a contributor's checkout on a machine
+with no Python of its own (ubuntu, macOS, Windows): `uv sync --locked --dev`
+with only uv-downloaded Pythons allowed, and the interpreter it picks must
+be in 3.11–3.14. The `suite` job runs `uv sync --locked --dev` and the
+tests on ubuntu and macOS, on Python 3.13. The workflow exists because uv 0.13.0 broke the bundle twice
 and CI saw neither break. `release.yml` validates and packs the bundle but
 never runs it, and Dependabot cannot bump either uv pin (see
 [Toolchain](#toolchain)). Both breaks reproduce against this workflow's
@@ -449,7 +514,7 @@ locally (see [Diagrams](#diagrams)).
 Versions live in **four files plus one tag string**: `pyproject.toml`,
 `uv.lock` (regenerate, do not edit), `manifest.json`, `server.json` (two
 `version` fields **and** the OCI image tag; `check_versions.py` checks all of
-them). The release commit, by convention titled `Release vX.Y.Z`:
+them). The release commit, by convention titled `release: X.Y.Z`:
 
 1. Bump all of the above; run `uv lock`.
 2. Promote `## [Unreleased]` to `## [X.Y.Z] - date` in `CHANGELOG.md`.
@@ -531,7 +596,8 @@ diagrams. Commit the sources, HTML and SVG together.
 `uv` for everything (sync, lock, build, run), `Taskfile.yml` for shortcuts
 (`task` = lock + format + check + test; `task test-cov` = the CI gate plus an
 HTML report), ruff (lint + format), mypy **and** ty (two type checkers — ty
-is the second opinion), pytest + pytest-asyncio. Python 3.11–3.13. The
+is the second opinion), pytest + pytest-asyncio. Python 3.11–3.14, the range
+in `.python-versions` (see below). The
 package ships `py.typed`.
 
 uv's own version is pinned twice and bounded nowhere. The Dockerfile's uv image
@@ -575,11 +641,25 @@ starlette's test client. `tests/test_dockerfile.py` and `tests/test_manifest.py`
 either install drops `--no-dev`. Contributors and CI still get the group from
 `uv sync`, `uv sync --dev` or a plain `uv run`.
 
-The bundle's interpreter is the user's uv's choice, so `manifest.json` bounds
-it with `UV_PYTHON` (3.11–3.14) in `mcp_config.env`. Since 0.13 uv downloads
-Python 3.15 wherever no suitable interpreter exists, and several locked
-packages (`cffi`, `pydantic-core`, `aiohttp`, `rpds-py`) have no 3.15 wheels.
-Raise that bound once the lock does.
+Since 0.13 uv downloads Python 3.15 wherever no suitable interpreter
+exists, and several locked packages (`aiohttp`, `cffi`, `pydantic-core`,
+`rpds-py`, `pywin32`, and `librt` in the dev group) have no 3.15 wheels. The
+range the lock does cover, 3.11–3.14, is written twice:
+
+- `.python-versions` is what uv reads in a checkout — a contributor's
+  `uv sync`, a source build such as glama.ai's — as the project's default
+  request, ahead of `requires-python`. The plural name is deliberate: pyenv
+  and asdf read `.python-version` and cannot parse a range, so a singular
+  file would break their shims in the repo; uv reads either.
+- `UV_PYTHON` in `mcp_config.env` bounds the Claude Desktop bundle, where
+  the user's uv picks the interpreter; it overrides the file.
+
+`tests/test_python_range.py` keeps the two equal, starts the range where
+`requires-python` does, and fails a range with a minor the lock has no
+wheel of every compiled package for. Raise both together once the lock has
+3.15 wheels. `requires-python` itself has no upper bound: one would ship in
+the package metadata, and pip or uv on 3.15 would fall back to older
+releases instead of this one. CI's `test` matrix covers 3.11–3.14.
 
 On Windows the bundle stays on x86_64 Python:
 `mcp_config.platform_overrides.win32` adds `UV_PYTHON_ARCH=x86_64`. uv 0.13

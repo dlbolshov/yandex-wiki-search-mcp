@@ -27,7 +27,7 @@
   },
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "054abf72362586491781e1ef595120696e54bf30"
+   "revision": "6d0d3d45e0d72c4cb9b63bafcf22837d4f4268fb"
   },
   "locale": "ru",
   "translations": {
@@ -480,8 +480,8 @@
    "sources": [
     {
      "path": "README.md",
-     "line": 283,
-     "end_line": 306,
+     "line": 284,
+     "end_line": 307,
      "label": "OAuth-режим и ?orgId= в URL"
     }
    ]
@@ -494,20 +494,20 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 229,
-     "end_line": 294,
+     "line": 294,
+     "end_line": 402,
      "label": "/token: код и refresh, load_access_token"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 125,
-     "end_line": 159,
-     "label": "срок регистрации и продление публичной"
+     "line": 143,
+     "end_line": 208,
+     "label": "окно простоя регистрации и продление"
     },
     {
      "path": "mcp_wiki/mcp/utils.py",
-     "line": 16,
-     "end_line": 43,
+     "line": 17,
+     "end_line": 44,
      "label": "Bearer → YandexAuth, org из ?orgId="
     }
    ]
@@ -533,7 +533,7 @@
     {
      "path": "mcp_wiki/mcp/oauth/stores/redis.py",
      "line": 151,
-     "end_line": 227,
+     "end_line": 240,
      "label": "SET/GET токенов с TTL, ротация refresh"
     }
    ]
@@ -546,14 +546,14 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 203,
-     "end_line": 227,
-     "label": "POST /token; отказ → invalid_grant"
+     "line": 252,
+     "end_line": 292,
+     "label": "/token: отказ → 400, refresh при 5xx/429 → 500"
     },
     {
      "path": "mcp_wiki/settings.py",
-     "line": 58,
-     "end_line": 61,
+     "line": 85,
+     "end_line": 88,
      "label": "URL Яндекса, id и секрет приложения"
     }
    ]
@@ -566,14 +566,14 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 598,
-     "end_line": 633,
+     "line": 662,
+     "end_line": 697,
      "label": "Authorization и X-Org-Id/X-Cloud-Org-Id"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 708,
-     "end_line": 731,
+     "line": 820,
+     "end_line": 843,
      "label": "запрос к Wiki API с этими заголовками"
     }
    ]
@@ -592,8 +592,8 @@
   },
   {
    "from": 564,
-   "to": 779,
-   "label": "Обновление: старые токены удаляются, клиент продлевается"
+   "to": 823,
+   "label": "Обновление: новая пара сохраняется до отзыва старой"
   }
  ],
  "messages": [
@@ -650,9 +650,9 @@
    "id": "m07",
    "from": "server",
    "to": "store",
-   "label": "продлить публ. клиента",
+   "label": "продлить регистрацию",
    "variant": "default",
-   "note": "только публичный: окно простоя заново",
+   "note": "любой клиент: окно простоя заново",
    "y": 334
   },
   {
@@ -756,7 +756,7 @@
    "id": "m20",
    "from": "server",
    "to": "store",
-   "label": "DEL старые, SET новые",
+   "label": "SET новую пару",
    "variant": "default",
    "y": 718
   },
@@ -764,18 +764,27 @@
    "id": "m21",
    "from": "server",
    "to": "store",
-   "label": "продлить публ. клиента",
+   "label": "DEL старую пару",
    "variant": "default",
-   "note": "только публичный: окно простоя заново",
+   "note": "только если Яндекс сменил refresh",
    "y": 746
   },
   {
    "id": "m22",
    "from": "server",
+   "to": "store",
+   "label": "продлить регистрацию",
+   "variant": "default",
+   "note": "любой клиент: окно простоя заново",
+   "y": 790
+  },
+  {
+   "id": "m23",
+   "from": "server",
    "to": "client",
    "label": "200: новая пара",
    "variant": "return",
-   "y": 768
+   "y": 812
   }
  ],
  "cards": [
@@ -801,10 +810,11 @@
    "dot": "amber",
    "title": "Обновление",
    "items": [
-    "После обмена у Яндекса удаляются старые refresh и access",
-    "Старый Bearer после обновления получает 401",
-    "Публичному клиенту регистрация продлевается, но не меньше 31 дня",
-    "Клиенту с секретом не продлевается: живёт до срока секрета, по умолчанию 30 дней с /register"
+    "Новая пара сохраняется до отзыва старого refresh: если сохранить не удалось, старый остаётся рабочим",
+    "Старый refresh отзывается, только если Яндекс выдал другой; иначе он сохраняется заново вместе с новым access",
+    "Старый Bearer после обновления получает 401, если только Яндекс не вернул тот же access-токен",
+    "Любая регистрация, публичная или с секретом, продлевается при каждой выдаче: max(31 день, срок access) + окно простоя (по умолчанию 30 дней)",
+    "Отзыв и продление — по возможности: сбой хранилища даёт warning в логе, а клиент всё равно получает токены"
    ]
   },
   {
@@ -812,7 +822,7 @@
    "title": "Ошибки",
    "items": [
     "Неверный verifier → 400, код уже сожжён — вход заново",
-    "Яндекс отказал на /token → 400 invalid_grant и warning в логе",
+    "Яндекс отказал на /token → 400 invalid_grant; refresh, который он сейчас не может принять (5xx/429) → 500, токен остаётся годным; warning в логе",
     "Нет или истёк Bearer → 401, не хватает scope → 403",
     "Регистрация клиента истекла → 401 invalid_client на /token, нужна новая регистрация",
     "Нет org ни в URL, ни в настройках → isError от инструмента"

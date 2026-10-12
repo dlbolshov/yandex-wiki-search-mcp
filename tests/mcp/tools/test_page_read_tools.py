@@ -21,6 +21,7 @@ from mcp_wiki.mcp.tools.page_read import (
 from mcp_wiki.wiki.custom.errors import (
     ResponseTooLarge,
     WikiArgumentError,
+    WikiResponseError,
     WikiTransportError,
 )
 from mcp_wiki.wiki.proto.types.pages import (
@@ -153,6 +154,20 @@ class TestDrainCursor:
     async def test_failed_page_keeps_what_was_already_fetched(self) -> None:
         first = _tree_page(0, 2, "c1")
         fetch = AsyncMock(side_effect=WikiTransportError("GET", "v1/x", TimeoutError()))
+
+        await _drain_cursor(first, fetch, page_size=2)
+
+        assert [item.id for item in first.results] == [0, 1]
+        assert first.truncated is True
+        assert first.next_cursor == "c1"
+
+    async def test_an_unreadable_page_keeps_what_was_already_fetched(self) -> None:
+        # A 200 that does not parse is a WikiError too, so it stops the walk
+        # the way a failed request does instead of discarding the whole list.
+        first = _tree_page(0, 2, "c1")
+        fetch = AsyncMock(
+            side_effect=WikiResponseError("GET", "v1/x", ValueError("not JSON"))
+        )
 
         await _drain_cursor(first, fetch, page_size=2)
 

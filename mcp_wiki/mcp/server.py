@@ -11,6 +11,7 @@ from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.caching import CacheableMethod, CacheHint
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
@@ -257,10 +258,7 @@ def create_mcp_server(
             server_url=yarl.URL(str(settings.mcp_server_public_url)),
             yandex_oauth_issuer=yarl.URL(str(settings.oauth_server_url)),
             store=oauth_store,
-            # The same setting the SDK stamps on a confidential client below:
-            # a public one has no secret to stamp it on, so it reaches the
-            # provider instead.
-            public_client_idle_ttl=settings.oauth_client_secret_expiry_seconds,
+            registration_idle_ttl=settings.oauth_registration_idle_seconds,
             scopes=scopes,
             use_scopes=settings.oauth_use_scopes,
         )
@@ -273,7 +271,9 @@ def create_mcp_server(
                 enabled=True,
                 valid_scopes=scopes,
                 default_scopes=scopes,
-                client_secret_expiry_seconds=settings.oauth_client_secret_expiry_seconds,
+                # Secrets never expire (the SDK stamps 0); the provider retires
+                # an unused registration instead, after its idle window.
+                client_secret_expiry_seconds=None,
             ),
         )
 
@@ -316,20 +316,89 @@ def create_mcp_server(
     return server
 
 
+# What the MCP endpoint answers to without OAuth when MCP_ALLOWED_HOSTS is
+# unset: the names a client on the same machine reaches it by.
+LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "[::1]")
+
+
+def _allowed_host_entries(settings: Settings) -> list[str] | None:
+    """The Host values the MCP endpoint answers to, or None for any.
+
+    Without OAuth the endpoint authenticates nobody, so a web page the
+    operator opens could drive it by DNS rebinding: its name resolves to
+    127.0.0.1, and a request to its own origin reaches this server with the
+    page's name in `Host`. That header is the one a page cannot forge, so
+    only loopback names pass by default — any other name a client uses (a
+    Compose service, a LAN address, a proxy's hostname) has to be listed.
+    Under OAuth a bearer token is no credential a browser attaches on its
+    own, so nothing is checked unless the operator asks. A configured list
+    replaces the loopback default; it does not add to it.
+    """
+    configured = settings.mcp_allowed_hosts
+    if configured is not None:
+        return None if "*" in configured else configured
+    return None if settings.oauth_enabled else list(LOOPBACK_HOSTS)
+
+
+def _has_port(entry: str) -> bool:
+    return ":" in entry.rsplit("]", 1)[-1]
+
+
+def transport_security(settings: Settings) -> TransportSecuritySettings:
+    """The DNS-rebinding protection both HTTP transports run with.
+
+    Always explicit, never None: given None the SDK arms a loopback-only
+    check by itself whenever `host` is a loopback address — which since
+    HOST defaults to 127.0.0.1 would turn away every request an OAuth
+    server's same-host proxy forwards under the public name. An entry
+    without a port matches the bare name (a proxy on 443 sends no port) and
+    the name on any port. Origins follow from the hosts: a browser client on
+    another port of an allowed host passes, a page served from anywhere else
+    does not, and a client that sends no Origin (every non-browser one) is
+    not asked for it.
+    """
+    entries = _allowed_host_entries(settings)
+    if entries is None:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    hosts: list[str] = []
+    for entry in entries:
+        hosts += [entry] if _has_port(entry) else [entry, f"{entry}:*"]
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=[
+            f"{scheme}://{host}" for scheme in ("http", "https") for host in hosts
+        ],
+    )
+
+
+def allowed_hosts_summary(settings: Settings) -> str:
+    """The Host check in one word for the startup line: names, `*` or `-`."""
+    if settings.transport == "stdio":
+        return "-"
+    entries = _allowed_host_entries(settings)
+    return "*" if entries is None else ",".join(entries)
+
+
 def http_app_options(settings: Settings) -> dict[str, Any]:
     """Keywords for streamable_http_app().
 
-    `host` is load-bearing rather than decorative. mcp 2.x arms DNS rebinding
-    protection automatically when host is 127.0.0.1/localhost/::1 and no
-    transport_security is given — and streamable_http_app() *defaults* host to
-    127.0.0.1. Leave it out and a server behind a real hostname answers every
-    MCP request with 421 Misdirected Request while /healthz keeps returning
-    200, which reads as "up" to every probe that matters.
+    `host` and `transport_security` together decide which requests the MCP
+    endpoint answers. mcp 2.x arms DNS rebinding protection automatically
+    when host is 127.0.0.1/localhost/::1 and no transport_security is given —
+    and streamable_http_app() *defaults* host to 127.0.0.1. Leave both out
+    and a server behind a real hostname answers every MCP request with 421
+    Misdirected Request while /healthz keeps returning 200, which reads as
+    "up" to every probe that matters. So `host` always goes in, and the
+    protection is chosen here, explicitly (see transport_security()). A
+    rejected Host is logged by the SDK at WARNING, naming it; over SSE the
+    SDK then also raises, so uvicorn logs an ERROR traceback per rejection.
     """
     return {
         "host": settings.host,
         "json_response": settings.json_response,
         "stateless_http": settings.stateless_http,
+        "transport_security": transport_security(settings),
     }
 
 
@@ -344,6 +413,10 @@ def run_options(settings: Settings) -> dict[str, Any]:
         case "stdio":
             return {}
         case "sse":
-            return {"host": settings.host, "port": settings.port}
+            return {
+                "host": settings.host,
+                "port": settings.port,
+                "transport_security": transport_security(settings),
+            }
         case _:
             return {"port": settings.port, **http_app_options(settings)}

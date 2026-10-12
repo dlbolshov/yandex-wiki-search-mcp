@@ -27,7 +27,7 @@
   },
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "054abf72362586491781e1ef595120696e54bf30"
+   "revision": "6d0d3d45e0d72c4cb9b63bafcf22837d4f4268fb"
   },
   "locale": "en"
  },
@@ -40,8 +40,8 @@
    "sources": [
     {
      "path": "README.md",
-     "line": 283,
-     "end_line": 306,
+     "line": 284,
+     "end_line": 307,
      "label": "OAuth mode and ?orgId= in URL"
     }
    ]
@@ -54,20 +54,20 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 229,
-     "end_line": 294,
+     "line": 294,
+     "end_line": 402,
      "label": "/token: code and refresh, load_access_token"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 125,
-     "end_line": 159,
-     "label": "registration expiry, public-client renewal"
+     "line": 143,
+     "end_line": 208,
+     "label": "registration idle window, renewed per grant"
     },
     {
      "path": "mcp_wiki/mcp/utils.py",
-     "line": 16,
-     "end_line": 43,
+     "line": 17,
+     "end_line": 44,
      "label": "Bearer → YandexAuth, org from ?orgId="
     }
    ]
@@ -93,7 +93,7 @@
     {
      "path": "mcp_wiki/mcp/oauth/stores/redis.py",
      "line": 151,
-     "end_line": 227,
+     "end_line": 240,
      "label": "token SET/GET with TTL, refresh rotation"
     }
    ]
@@ -106,14 +106,14 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 203,
-     "end_line": 227,
-     "label": "POST /token; refusal → invalid_grant"
+     "line": 252,
+     "end_line": 292,
+     "label": "/token: refusal → 400, refresh 5xx/429 → 500"
     },
     {
      "path": "mcp_wiki/settings.py",
-     "line": 58,
-     "end_line": 61,
+     "line": 85,
+     "end_line": 88,
      "label": "Yandex URL, app id and secret"
     }
    ]
@@ -126,14 +126,14 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 598,
-     "end_line": 633,
+     "line": 662,
+     "end_line": 697,
      "label": "Authorization and X-Org-Id/X-Cloud-Org-Id"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 708,
-     "end_line": 731,
+     "line": 820,
+     "end_line": 843,
      "label": "Wiki API request with these headers"
     }
    ]
@@ -152,8 +152,8 @@
   },
   {
    "from": 564,
-   "to": 779,
-   "label": "Refresh: old tokens deleted, client renewed"
+   "to": 823,
+   "label": "Refresh: new pair saved before the old one is revoked"
   }
  ],
  "messages": [
@@ -210,9 +210,9 @@
    "id": "m07",
    "from": "server",
    "to": "store",
-   "label": "renew public client",
+   "label": "renew registration",
    "variant": "default",
-   "note": "public only: idle window restarts",
+   "note": "every client: idle window restarts",
    "y": 334
   },
   {
@@ -316,7 +316,7 @@
    "id": "m20",
    "from": "server",
    "to": "store",
-   "label": "DEL old, SET new",
+   "label": "SET new pair",
    "variant": "default",
    "y": 718
   },
@@ -324,18 +324,27 @@
    "id": "m21",
    "from": "server",
    "to": "store",
-   "label": "renew public client",
+   "label": "DEL old pair",
    "variant": "default",
-   "note": "public only: idle window restarts",
+   "note": "only if Yandex rotated refresh",
    "y": 746
   },
   {
    "id": "m22",
    "from": "server",
+   "to": "store",
+   "label": "renew registration",
+   "variant": "default",
+   "note": "every client: idle window restarts",
+   "y": 790
+  },
+  {
+   "id": "m23",
+   "from": "server",
    "to": "client",
    "label": "200: new pair",
    "variant": "return",
-   "y": 768
+   "y": 812
   }
  ],
  "cards": [
@@ -361,10 +370,11 @@
    "dot": "amber",
    "title": "Refresh",
    "items": [
-    "Old refresh and access are deleted after the Yandex exchange",
-    "The old Bearer gets 401 after refresh",
-    "Public client: registration renewed, never for less than 31 days",
-    "Not renewed for a client with a secret: lives until secret expiry, default 30 days from /register"
+    "The new pair is saved before the old refresh token is revoked: a failed save leaves the old one usable",
+    "The old refresh token is revoked only if Yandex issued a different one; otherwise it is re-saved with the new access token",
+    "The old Bearer gets 401 after refresh, unless Yandex handed back the same access token",
+    "Every registration, public or with a secret, renewed on each grant: max(31 days, access lifetime) + idle window (30 days by default)",
+    "Revoking and renewing are best effort: a store failure there logs a warning, the client still gets its tokens"
    ]
   },
   {
@@ -372,7 +382,7 @@
    "title": "Errors",
    "items": [
     "Wrong verifier → 400, code already burned: log in again",
-    "Yandex refuses at /token → 400 invalid_grant, warning logged",
+    "Yandex refuses at /token → 400 invalid_grant; a refresh it cannot take now (5xx/429) → 500, token stays valid; warning logged",
     "Missing or expired Bearer → 401, missing scope → 403",
     "Client registration expired → 401 invalid_client at /token, re-register",
     "No org in URL or settings → isError from the tool"

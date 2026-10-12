@@ -14,6 +14,7 @@ from mcp_wiki.wiki.custom.errors import (
     WikiApiError,
     WikiArgumentError,
     WikiOperationError,
+    WikiResponseError,
 )
 from mcp_wiki.wiki.proto.types.pages import (
     GridCreateRequest,
@@ -1249,3 +1250,126 @@ class TestWikiClient:
                 await wiki_client.page_get_descendants("")
 
         assert exc_info.value.status == 404
+
+
+class TestUnreadableResponses:
+    """A success status whose body does not parse is a WikiError.
+
+    pydantic's or json's own exception is no WikiError, so the MCP layer
+    would report it to the model as an anonymous crash, and fetch_all would
+    drop the pages it already had.
+    """
+
+    @pytest.mark.parametrize(
+        "body",
+        ["<html>Moved</html>", "", '{"slug": "no-id"}'],
+        ids=["proxy-page", "empty", "missing-field"],
+    )
+    async def test_a_read_names_the_endpoint(
+        self, wiki_client: WikiClient, body: str
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.get("https://api.wiki.yandex.net/v1/pages/10", body=body)
+            with pytest.raises(WikiResponseError) as raised:
+                await wiki_client.page_get(10)
+
+        message = str(raised.value)
+        assert message.startswith(
+            "GET v1/pages/10 succeeded, but its response could not be read: WikiPage"
+        )
+        assert "may have been applied" not in message
+        assert isinstance(raised.value.cause, ValidationError)
+
+    async def test_a_missing_field_is_named_without_echoing_the_body(
+        self, wiki_client: WikiClient
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/pages/10",
+                payload={"slug": "users/secret-plans"},
+            )
+            with pytest.raises(WikiResponseError) as raised:
+                await wiki_client.page_get(10)
+
+        assert "id: Field required" in str(raised.value)
+        assert "secret-plans" not in str(raised.value)
+
+    async def test_a_write_warns_that_it_may_have_been_applied(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # The POST went through; retrying blind could create the page twice.
+        with aioresponses() as mocked:
+            mocked.post("https://api.wiki.yandex.net/v1/pages", body="<html/>")
+            with pytest.raises(WikiResponseError, match="may have been applied"):
+                await wiki_client.page_create(
+                    slug="users/test/new", title="New", content="text"
+                )
+
+    async def test_a_search_is_a_post_that_changes_nothing(
+        self, wiki_client: WikiClient
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.post("https://api.wiki.yandex.net/v1/search", body="<html/>")
+            with pytest.raises(WikiResponseError, match="POST v1/search") as raised:
+                await wiki_client.page_search("query")
+
+        assert "may have been applied" not in str(raised.value)
+
+    async def test_a_body_the_api_may_leave_empty_still_has_to_be_json(
+        self, wiki_client: WikiClient
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/grids/grid-1/cells",
+                body="<html>Bad Gateway</html>",
+            )
+            with pytest.raises(WikiResponseError, match="POST v1/grids/grid-1/cells"):
+                await wiki_client.grid_update_cells(
+                    "grid-1", cells=[{"row_id": 1, "column_slug": "a", "value": "x"}]
+                )
+
+    async def test_an_acknowledgment_body_that_is_not_json(
+        self, wiki_client: WikiClient
+    ) -> None:
+        with aioresponses() as mocked:
+            mocked.delete("https://api.wiki.yandex.net/v1/grids/grid-1", body="<html/>")
+            with pytest.raises(WikiResponseError, match="DELETE v1/grids/grid-1"):
+                await wiki_client.grid_delete("grid-1")
+
+    async def test_the_anchor_fallback_does_not_swallow_it(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # page_append_content catches WikiApiError for its anchor fallback;
+        # an unreadable 200 is not one and must not trigger it.
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/append-content",
+                body="<html/>",
+            )
+            with pytest.raises(WikiResponseError, match="append-content"):
+                await wiki_client.page_append_content(
+                    10, content="more", anchor="section"
+                )
+
+    async def test_a_clone_whose_status_cannot_be_read_may_exist(
+        self, wiki_client: WikiClient
+    ) -> None:
+        # The status poll is a GET, but the POST before it started the copy.
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/clone",
+                payload={
+                    "operation": {"type": "clone", "id": "op-7"},
+                    "status_url": "/v1/operations/clone/op-7",
+                },
+            )
+            mocked.get(
+                "https://api.wiki.yandex.net/v1/operations/clone/op-7",
+                body="<html/>",
+            )
+            with pytest.raises(
+                WikiOperationError, match="whether the copy was created is unknown"
+            ) as raised:
+                await wiki_client.page_clone(10, target="users/test/copy-7")
+
+        assert isinstance(raised.value.__cause__, WikiResponseError)

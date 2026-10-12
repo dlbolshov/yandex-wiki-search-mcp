@@ -17,6 +17,7 @@ from mcp_wiki.wiki.custom.client import (
 from mcp_wiki.wiki.custom.errors import (
     PageNotFound,
     WikiApiError,
+    WikiRateLimited,
     WikiTransportError,
 )
 
@@ -167,6 +168,27 @@ class TestRetries:
 
             assert request_count(mocked) == 1
         assert exc_info.value.status == 503
+        assert sleep_calls == []
+
+    async def test_a_rate_limited_write_is_not_retried_but_says_what_to_do(
+        self,
+        wiki_client_retrying: WikiClient,
+        sleep_calls: list[float],
+    ) -> None:
+        # A write is the caller's to resend, but the bare status left an agent
+        # to guess whether it had been applied (it was not: 2026-10-12, a
+        # redirect set refused with 429 read back unset).
+        with aioresponses() as mocked:
+            mocked.post(CREATE_URL, status=429)
+
+            with pytest.raises(WikiRateLimited) as exc_info:
+                await wiki_client_retrying.page_create(
+                    slug="a/b", title="T", content="c"
+                )
+
+            assert request_count(mocked) == 1
+        assert exc_info.value.status == 429
+        assert "refused this one without applying it" in str(exc_info.value)
         assert sleep_calls == []
 
     async def test_upload_part_is_retried(

@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import asyncio
+import functools
 import os
 import sys
 import tempfile
@@ -33,6 +34,7 @@ from mcp_wiki.wiki.custom.errors import (
     PageNotFound,
     WikiApiError,
     WikiError,
+    WikiRateLimited,
 )
 from mcp_wiki.wiki.proto.types import pages as page_models
 from mcp_wiki.wiki.proto.types.pages import (
@@ -44,6 +46,9 @@ from mcp_wiki.wiki.proto.types.pages import (
 )
 
 REPORT: list[tuple[str, str, str]] = []
+# One entry per 429 waited out, so the summary can say the API throttled the
+# run even when every call got through in the end.
+THROTTLED: list[float] = []
 
 
 def broken(name: str, detail: str) -> None:
@@ -142,24 +147,55 @@ def extras_of(obj: Any) -> set[str]:
 # The lock clears in about 10s, so back off past that before giving up.
 CONFLICT_ATTEMPTS = 5
 CONFLICT_DELAY = 1.5
+# The write burst that first met a 429 (2026-10-12) went through again within
+# seconds; these add up to about a minute before a call is reported throttled.
+RATE_LIMIT_DELAYS = (2.0, 4.0, 8.0, 16.0, 32.0)
 
 
 async def _await_settled(fn: Callable[[], Awaitable[Any]]) -> Any:
-    """Retry a call while the API reports a conflicting operation.
+    """Retry a call through a grid lock or a rate limit.
 
     Grid mutations are serialized per grid: fire two back to back and the
-    second gets 409 CONFLICTING_OPERATION for about ten seconds. That is a
-    lock, not a contract change, and a weekly job that cries drift over it
-    teaches everyone to ignore it.
+    second gets 409 CONFLICTING_OPERATION for about ten seconds. A burst of
+    writes meets 429 (no Retry-After). Neither is a contract change, and a
+    weekly job that cries drift over them teaches everyone to ignore it.
+    Both refusals leave nothing applied, so sending the call again is safe —
+    a write included. A 429 waited out is recorded in THROTTLED and noted on
+    the call's row; one that outlasts every delay is reported as itself.
     """
-    for attempt in range(1, CONFLICT_ATTEMPTS + 1):
+    conflicts = 0
+    throttles = 0
+    while True:
         try:
             return await fn()
         except GridConflict:
-            if attempt == CONFLICT_ATTEMPTS:
+            conflicts += 1
+            if conflicts == CONFLICT_ATTEMPTS:
                 raise
-            await asyncio.sleep(CONFLICT_DELAY * attempt)
-    raise AssertionError("unreachable")
+            await asyncio.sleep(CONFLICT_DELAY * conflicts)
+        except WikiRateLimited:
+            if throttles == len(RATE_LIMIT_DELAYS):
+                raise
+            delay = RATE_LIMIT_DELAYS[throttles]
+            throttles += 1
+            THROTTLED.append(delay)
+            await asyncio.sleep(delay)
+
+
+def _validation_cause(exc: BaseException) -> ValidationError | None:
+    """The ValidationError somewhere down an exception's cause chain, if any."""
+    cause = exc.__cause__
+    while cause is not None:
+        if isinstance(cause, ValidationError):
+            return cause
+        cause = cause.__cause__
+    return None
+
+
+def _report_model_mismatch(name: str, exc: ValidationError) -> None:
+    first = "; ".join(str(exc).splitlines()[1:3])
+    REPORT.append((name, "MODEL MISMATCH", first[:160]))
+    print(f"  !! {name}: MODEL MISMATCH — {first[:160]}")
 
 
 async def check(
@@ -175,14 +211,21 @@ async def check(
     how drift reaches production. Keys we drop on purpose live in
     KNOWN_DROPPED.
     """
+    throttled_before = len(THROTTLED)
     try:
         result = await _await_settled(fn)
     except ValidationError as exc:
-        first = "; ".join(str(exc).splitlines()[1:3])
-        REPORT.append((name, "MODEL MISMATCH", first[:160]))
-        print(f"  !! {name}: MODEL MISMATCH — {first[:160]}")
+        _report_model_mismatch(name, exc)
         return None
     except WikiError as exc:
+        # The client reports a 2xx body its model cannot read as a
+        # WikiResponseError (and page_clone's unreadable poll as a
+        # WikiOperationError over one); the ValidationError underneath is
+        # still drift in our models, which is what this sweep exists to say.
+        mismatch = _validation_cause(exc)
+        if mismatch is not None:
+            _report_model_mismatch(name, mismatch)
+            return None
         REPORT.append((name, f"API {type(exc).__name__}", str(exc)[:160]))
         print(f"  !! {name}: {type(exc).__name__}: {str(exc)[:160]}")
         return None
@@ -190,6 +233,8 @@ async def check(
     notes = []
     if note_from_result is not None:
         notes.append(note_from_result(result))
+    if waited := len(THROTTLED) - throttled_before:
+        notes.append(f"rate-limited {waited}x, then went through")
     status = "OK"
     if isinstance(result, BaseModel | list):
         ignored = KNOWN_DROPPED - IDENTITY_KEYS if watch_identity else KNOWN_DROPPED
@@ -330,8 +375,13 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
 
     children = []
     for i in range(n_pages):
-        page = await wiki.page_create(
-            slug=f"{base}/p-{i:02d}", title=f"Sweep page {i}", content=f"page {i}"
+        page = await _await_settled(
+            functools.partial(
+                wiki.page_create,
+                slug=f"{base}/p-{i:02d}",
+                title=f"Sweep page {i}",
+                content=f"page {i}",
+            )
         )
         children.append(page)
     REPORT.append((f"page_create x{n_pages} (children)", "OK", ""))
@@ -351,8 +401,10 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
         "page_add_comment",
         lambda: wiki.page_add_comment(root.id, body="sweep comment 1"),
     )
-    await wiki.page_add_comment(root.id, body="sweep comment 2")
-    doomed = await wiki.page_add_comment(root.id, body="sweep comment 3")
+    await _await_settled(lambda: wiki.page_add_comment(root.id, body="sweep comment 2"))
+    doomed = await _await_settled(
+        lambda: wiki.page_add_comment(root.id, body="sweep comment 3")
+    )
     if comment is not None:
         await check(
             "page_add_comment (reply)",
@@ -443,19 +495,41 @@ async def sweep(wiki: WikiClient, base: str, n_pages: int) -> None:
     print(f"\n=== redirect cycle (on {base}/p-00) ===")
     if children:
         target = children[0]
-        await check(
+        # Read back, not just reported: a set the API answered 200 but ignored
+        # is exactly the drift this sweep is for, and printing the value let
+        # one through as "ok" (2026-10-12, after a 429 had refused the set).
+        was_set = await check(
             "page_update (set redirect)",
             lambda: wiki.page_update(target.id, redirect_to_page_id=root.id),
         )
-        await check(
-            "page_get (redirect reads back)",
-            lambda: wiki.page_get(target.id, fields=["redirect"]),
-            note_from_result=lambda r: f"redirect={r.redirect}",
-        )
-        await check(
+        if was_set is None:
+            REPORT.append(("page_get (redirect reads back)", "SKIP", "not set"))
+        else:
+            back = await check(
+                "page_get (redirect reads back)",
+                lambda: wiki.page_get(target.id, fields=["redirect"]),
+                note_from_result=lambda r: f"redirect={r.redirect}",
+            )
+            if back is not None and (back.redirect or {}).get("page_id") != root.id:
+                broken(
+                    "page_update (set redirect) round-trip",
+                    f"set redirect_to_page_id={root.id}, read back {back.redirect!r}",
+                )
+        cleared = await check(
             "page_update (clear redirect)",
             lambda: wiki.page_update(target.id, clear_redirect=True),
         )
+        if cleared is not None:
+            after = await check(
+                "page_get (redirect cleared)",
+                lambda: wiki.page_get(target.id, fields=["redirect"]),
+                note_from_result=lambda r: f"redirect={r.redirect}",
+            )
+            if after is not None and after.redirect is not None:
+                broken(
+                    "page_update (clear redirect) round-trip",
+                    f"cleared it, read back {after.redirect!r}",
+                )
 
     print(f"\n=== page_edit cycle (on {base}/p-01) ===")
     # The page_edit tool is a client-side read-modify-write; the live
@@ -882,7 +956,7 @@ async def cleanup(wiki: WikiClient, base: str) -> None:
     )
     for page in pages:
         try:
-            await wiki.page_delete(page.id)
+            await _await_settled(functools.partial(wiki.page_delete, page.id))
             print(f"  deleted {page.slug} (id={page.id})")
         except WikiError as exc:
             print(f"  FAILED to delete {page.slug}: {exc}")
@@ -939,6 +1013,12 @@ async def main() -> int:
         if status not in ("OK", "SKIP"):
             broken += 1
         print(f"  {marker} {name:44} {status:16} {note}")
+    if THROTTLED:
+        # Not a problem by itself, but worth knowing: the API is throttling.
+        print(
+            f"\nrate-limited {len(THROTTLED)}x (429), waited out "
+            f"{sum(THROTTLED):.0f}s in total"
+        )
     print(f"\n{broken} problem(s) found" if broken else "\nall contracts hold")
     return 1 if broken else 0
 

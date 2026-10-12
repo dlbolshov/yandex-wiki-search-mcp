@@ -186,6 +186,13 @@ class RedisOAuthStore(OAuthStore):
                 ttl=self._refresh_token_ttl,
             )
 
+            # Saved again for a refresh token it already maps (Yandex handed
+            # it back), the access token the mapping pointed at is the one
+            # replaced.
+            previous = await self._cache.get(self._mapping_key(token.refresh_token))
+            if previous and previous != hash_token(token.access_token):
+                await self._cache.delete(f"{self._ACCESS_TOKEN_KEY_PREFIX}{previous}")
+
             # Map refresh token to access token hash for cleanup
             # Store the hash (not raw token) to avoid exposing tokens in Redis
             await self._cache.set(
@@ -209,7 +216,9 @@ class RedisOAuthStore(OAuthStore):
 
         return RefreshToken.model_validate(data)
 
-    async def revoke_refresh_token(self, token: str) -> None:
+    async def revoke_refresh_token(
+        self, token: str, *, keep_access_token: str | None = None
+    ) -> None:
         """Delete a refresh token and its associated mappings."""
         # Get associated access token hash (stored as hash, not raw token)
         access_token_hash = await self._cache.get(self._mapping_key(token))
@@ -220,8 +229,12 @@ class RedisOAuthStore(OAuthStore):
         # Delete mapping
         await self._cache.delete(self._mapping_key(token))
 
-        # Delete associated access token using the stored hash directly
-        if access_token_hash:
+        # Delete associated access token using the stored hash directly,
+        # unless it is the one the caller is keeping.
+        keep_hash = (
+            hash_token(keep_access_token) if keep_access_token is not None else None
+        )
+        if access_token_hash and access_token_hash != keep_hash:
             await self._cache.delete(
                 f"{self._ACCESS_TOKEN_KEY_PREFIX}{access_token_hash}"
             )

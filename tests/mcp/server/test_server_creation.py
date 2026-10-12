@@ -12,6 +12,7 @@ from pydantic import AnyHttpUrl, SecretStr
 from starlette.testclient import TestClient
 
 from mcp_wiki.mcp.context import AppContext
+from mcp_wiki.mcp.oauth.provider import YandexOAuthAuthorizationServerProvider
 from mcp_wiki.mcp.server import (
     _parse_encryption_keys,
     create_mcp_server,
@@ -19,8 +20,10 @@ from mcp_wiki.mcp.server import (
     run_options,
     server_description,
     server_version,
+    transport_security,
 )
 from tests.mcp.conftest import (
+    LOCAL_BASE_URL,
     MCP_HTTP_HEADERS,
     create_test_settings,
     initialize_request,
@@ -252,7 +255,7 @@ class TestLocalFileToolGating:
         )
 
         app = server.streamable_http_app(**http_app_options(settings))
-        with TestClient(app) as client:
+        with TestClient(app, base_url=LOCAL_BASE_URL) as client:
             client.post("/mcp", json=initialize_request(), headers=MCP_HTTP_HEADERS)
             response = client.post(
                 "/mcp",
@@ -408,25 +411,19 @@ class TestClientRegistrationExpiry:
         settings.oauth_client_id = "client-id"
         settings.oauth_client_secret = SecretStr("client-secret")
         settings.mcp_server_public_url = AnyHttpUrl("https://mcp.example.com")
-        settings.oauth_client_secret_expiry_seconds = expiry
+        settings.oauth_registration_idle_seconds = expiry
         return settings
 
-    def test_registrations_are_given_a_lifetime(self) -> None:
-        # Without one, /register — unauthenticated by protocol design —
-        # grows the store without bound, in Redis as well as in memory.
+    @pytest.mark.parametrize("expiry", [30 * 24 * 60 * 60, None])
+    def test_the_provider_decides_the_lifetime_and_secrets_never_expire(
+        self, expiry: int | None
+    ) -> None:
+        # Without a lifetime /register — unauthenticated by protocol design —
+        # grows the store without bound, in Redis as well as in memory. The
+        # provider applies it as an idle window to every registration; the
+        # SDK stamps no deadline on a secret, whatever the setting says.
         server = create_mcp_server(
-            settings=self._oauth_settings(30 * 24 * 60 * 60),
-            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
-        )
-
-        assert server.settings.auth is not None
-        options = server.settings.auth.client_registration_options
-        assert options is not None
-        assert options.client_secret_expiry_seconds == 30 * 24 * 60 * 60
-
-    def test_expiry_can_be_disabled(self) -> None:
-        server = create_mcp_server(
-            settings=self._oauth_settings(None),
+            settings=self._oauth_settings(expiry),
             lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
         )
 
@@ -434,6 +431,9 @@ class TestClientRegistrationExpiry:
         options = server.settings.auth.client_registration_options
         assert options is not None
         assert options.client_secret_expiry_seconds is None
+        provider = server._auth_server_provider
+        assert isinstance(provider, YandexOAuthAuthorizationServerProvider)
+        assert provider._registration_idle_ttl == expiry
 
 
 class TestOAuthCallbackRoute:
@@ -486,13 +486,17 @@ class TestRunOptions:
 
         assert run_options(settings) == {}
 
-    def test_sse_takes_the_binding_only(self) -> None:
+    def test_sse_takes_the_binding_and_the_host_check(self) -> None:
         # json_response/stateless_http are streamable-http concepts; passing
         # them to the SSE transport is a TypeError when it starts.
         settings = create_test_settings()
         settings.transport = "sse"
 
-        assert run_options(settings) == {"host": "0.0.0.0", "port": 8000}
+        assert run_options(settings) == {
+            "host": "0.0.0.0",
+            "port": 8000,
+            "transport_security": transport_security(settings),
+        }
 
     def test_streamable_http_takes_the_binding_and_the_behaviour(self) -> None:
         settings = create_test_settings()
@@ -503,6 +507,7 @@ class TestRunOptions:
             "port": 8000,
             "json_response": True,
             "stateless_http": True,
+            "transport_security": transport_security(settings),
         }
 
 
@@ -514,7 +519,9 @@ class TestHostIsPassedToTheApp:
     defaults `host` to 127.0.0.1. A server built without the setting's host
     therefore rejects every MCP request behind a real hostname with 421 while
     /healthz keeps answering 200, so nothing that watches the health endpoint
-    would notice. These two tests pin both halves.
+    would notice. The protection is chosen explicitly now (see
+    test_transport_security.py); these pin that a listed name is served and
+    that leaving the options out still walks into the trap.
     """
 
     @staticmethod
@@ -524,11 +531,11 @@ class TestHostIsPassedToTheApp:
             lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
         )
 
-    def test_configured_host_serves_a_foreign_host_header(self) -> None:
+    def test_a_listed_host_is_served(self) -> None:
         # TestClient sends `Host: testserver`, which the loopback allowlist
-        # rejects — exactly what a real hostname runs into.
+        # rejects — exactly what a real hostname runs into until it is listed.
         settings = create_test_settings()
-        assert settings.host == "0.0.0.0"
+        settings.mcp_allowed_hosts = ["testserver"]
 
         app = self._server().streamable_http_app(**http_app_options(settings))
         with TestClient(app) as client:

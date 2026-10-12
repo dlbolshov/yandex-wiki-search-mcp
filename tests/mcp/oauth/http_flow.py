@@ -66,7 +66,7 @@ def oauth_app(
     settings.oauth_client_secret = SecretStr("yandex-app-secret")
     settings.oauth_server_url = AnyHttpUrl("https://oauth.yandex.test")
     settings.mcp_server_public_url = AnyHttpUrl("https://mcp.example.test")
-    settings.oauth_client_secret_expiry_seconds = expiry
+    settings.oauth_registration_idle_seconds = expiry
     settings.oauth_store = store
     settings.oauth_encryption_keys = SecretStr(
         base64.b64encode(os.urandom(32)).decode()

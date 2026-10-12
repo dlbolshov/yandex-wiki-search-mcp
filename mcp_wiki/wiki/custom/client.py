@@ -25,6 +25,7 @@ from aiohttp import (
     TraceRequestExceptionParams,
     TraceRequestStartParams,
 )
+from pydantic import BaseModel
 
 from mcp_wiki.wiki.custom.anchors import append_content_to_anchor_source
 from mcp_wiki.wiki.custom.errors import (
@@ -38,6 +39,7 @@ from mcp_wiki.wiki.custom.errors import (
     WikiError,
     WikiLocalFileError,
     WikiOperationError,
+    WikiResponseError,
     WikiTransportError,
     build_api_error,
 )
@@ -119,10 +121,53 @@ DOWNLOAD_STALL_TIMEOUT = ClientTimeout(sock_connect=30, sock_read=60)
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
 def _open_binary(path: Path) -> BinaryIO:
     return path.open("rb")
+
+
+def _open_upload_source(path: Path) -> tuple[BinaryIO, int]:
+    """Open a file to upload, sized through the handle it will be read from.
+
+    The whole local-file phase, so every OSError in it becomes a
+    WikiLocalFileError rather than a bare crash. `Path.is_file()`, which this
+    replaces, re-raised EACCES and ENAMETOOLONG on Python before 3.14 and
+    hid them as "not a file" from 3.14 on. The size comes from fstat on the
+    open handle, not a second lookup of the path, so a file replaced in
+    between (an editor's atomic save) cannot announce one size to the upload
+    session and stream another.
+    """
+    # stat() before open(): opening a FIFO for reading blocks until a writer
+    # appears, and this is what keeps one out.
+    try:
+        mode = path.stat().st_mode
+    except OSError as exc:
+        raise _unreadable(path, exc) from exc
+    if not stat.S_ISREG(mode):
+        raise WikiLocalFileError(f"Not a regular file: {path}")
+    try:
+        handle = _open_binary(path)
+    except OSError as exc:
+        raise _unreadable(path, exc) from exc
+    try:
+        opened = os.fstat(handle.fileno())
+    except OSError as exc:
+        handle.close()
+        raise _unreadable(path, exc) from exc
+    # Again on what was opened: a device swapped in after the stat above
+    # would otherwise stream without end under a size of 0.
+    if not stat.S_ISREG(opened.st_mode):
+        handle.close()
+        raise WikiLocalFileError(f"Not a regular file: {path}")
+    return handle, opened.st_size
+
+
+def _unreadable(path: Path, exc: OSError) -> WikiLocalFileError:
+    if isinstance(exc, FileNotFoundError | NotADirectoryError):
+        return WikiLocalFileError(f"File not found: {path}", cause=exc)
+    return WikiLocalFileError(f"Cannot read {path}", cause=exc)
 
 
 # `.part` name budget: the random tag plus the two dots plus the suffix.
@@ -142,12 +187,21 @@ def local_path(path: str) -> Path:
     methods inside an async function trip ASYNC240 — and the rule is right
     in general, so it is not silenced there.
 
-    Both refusals here are WikiLocalFileError: anything else would reach the
+    Every refusal here is a WikiLocalFileError: anything else would reach the
     model as a bare crash on mcp >=2.1 (a NUL makes every later os call raise
-    ValueError, and `~name` for an unknown user raises RuntimeError).
+    ValueError, a lone surrogate UnicodeEncodeError, and `~name` for an
+    unknown user raises RuntimeError).
     """
     if "\x00" in path:
         raise WikiLocalFileError(f"Cannot use {path!r}: a path cannot contain NUL")
+    try:
+        # A string that has no bytes on this filesystem — a lone surrogate
+        # on POSIX; Windows takes those as they are.
+        os.fsencode(path)
+    except UnicodeEncodeError as exc:
+        raise WikiLocalFileError(
+            f"Cannot use {path!r}: it cannot be encoded as a file name"
+        ) from exc
     try:
         return Path(path).expanduser()
     except RuntimeError as exc:
@@ -676,6 +730,54 @@ class WikiClient(WikiProtocol):
         )
         return reply.content
 
+    async def _request_parsed(
+        self,
+        parse: Callable[[bytes], _T],
+        method: str,
+        path: str,
+        *,
+        auth: YandexAuth | None = None,
+        params: dict[str, Any] | None = None,
+        json_body: Any = None,
+        data: Any = None,
+        content_type: str | None = None,
+        not_found: Callable[[], WikiError] | None = None,
+        timeout: ClientTimeout | None = None,  # noqa: ASYNC109
+        retryable: bool | None = None,
+        writes: bool | None = None,
+    ) -> _T:
+        """Perform a Wiki API request and read its body with ``parse``.
+
+        The parse runs here rather than at the call site because only here are
+        the method and path in hand. A success status whose body does not
+        parse — a page a proxy served with 200, an empty body, a field the API
+        renamed — raises pydantic's or json's own ValueError, which the MCP
+        layer would show the model as an anonymous crash; it becomes a
+        WikiResponseError naming the endpoint instead. ValidationError,
+        JSONDecodeError and UnicodeDecodeError are all ValueErrors.
+
+        ``writes`` says whether the request changes anything, which decides
+        whether that error warns the change may have been applied. It
+        defaults to "anything but a GET"; a POST that only reads passes False.
+        Not ``retryable``: a retryable PUT is idempotent, and still a write.
+        """
+        payload = await self._request(
+            method,
+            path,
+            auth=auth,
+            params=params,
+            json_body=json_body,
+            data=data,
+            content_type=content_type,
+            not_found=not_found,
+            timeout=timeout,
+            retryable=retryable,
+        )
+        try:
+            return parse(payload)
+        except ValueError as exc:
+            raise WikiResponseError(method, path, exc, writes=writes) from exc
+
     async def _request_raw(
         self,
         method: str,
@@ -885,6 +987,11 @@ class WikiClient(WikiProtocol):
             return {}
         return json.loads(payload)
 
+    @classmethod
+    def _model_or_empty(cls, model: type[_ModelT]) -> Callable[[bytes], _ModelT]:
+        """A `_request_parsed` parser for a body the API may send empty."""
+        return lambda payload: model.model_validate(cls._json_or_empty(payload))
+
     async def page_get_by_slug(
         self,
         slug: str,
@@ -897,14 +1004,14 @@ class WikiClient(WikiProtocol):
         if fields:
             params["fields"] = ",".join(fields)
 
-        payload = await self._request(
+        return await self._request_parsed(
+            WikiPage.model_validate_json,
             "GET",
             "v1/pages",
             params=params,
             auth=auth,
             not_found=lambda: PageNotFound(normalized_slug),
         )
-        return WikiPage.model_validate_json(payload)
 
     async def page_get(
         self,
@@ -917,14 +1024,14 @@ class WikiClient(WikiProtocol):
         if fields:
             params["fields"] = ",".join(fields)
 
-        payload = await self._request(
+        return await self._request_parsed(
+            WikiPage.model_validate_json,
             "GET",
             f"v1/pages/{page_id}",
             params=params if params else None,
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        return WikiPage.model_validate_json(payload)
 
     async def page_search(
         self,
@@ -1005,14 +1112,16 @@ class WikiClient(WikiProtocol):
                     "the cursor otherwise, returning page 1 again."
                 )
             body["cursor"] = cursor
-        payload = await self._request(
+        return await self._request_parsed(
+            SearchResponse.model_validate_json,
             "POST",
             "v1/search",
             json_body=body,
             auth=auth,
             retryable=True,
+            # A POST only because the query travels in the body.
+            writes=False,
         )
-        return SearchResponse.model_validate_json(payload)
 
     async def page_get_descendants(
         self,
@@ -1042,7 +1151,8 @@ class WikiClient(WikiProtocol):
         if cursor:
             params["cursor"] = cursor
 
-        payload = await self._request(
+        return await self._request_parsed(
+            DescendantsResponse.model_validate_json,
             "GET",
             "v1/pages/descendants",
             params=params,
@@ -1051,7 +1161,6 @@ class WikiClient(WikiProtocol):
                 (lambda: PageNotFound(normalized_slug)) if normalized_slug else None
             ),
         )
-        return DescendantsResponse.model_validate_json(payload)
 
     async def page_get_comments(
         self,
@@ -1065,14 +1174,14 @@ class WikiClient(WikiProtocol):
         if cursor:
             params["cursor"] = cursor
 
-        payload = await self._request(
+        return await self._request_parsed(
+            CommentsResponse.model_validate_json,
             "GET",
             f"v1/pages/{page_id}/comments",
             params=params,
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        return CommentsResponse.model_validate_json(payload)
 
     async def page_get_resources(
         self,
@@ -1098,14 +1207,14 @@ class WikiClient(WikiProtocol):
         if order_direction:
             params["order_direction"] = order_direction
 
-        payload = await self._request(
+        return await self._request_parsed(
+            ResourcesResponse.model_validate_json,
             "GET",
             f"v1/pages/{page_id}/resources",
             params=params,
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        return ResourcesResponse.model_validate_json(payload)
 
     async def page_get_grids(
         self,
@@ -1125,14 +1234,14 @@ class WikiClient(WikiProtocol):
         if order_direction:
             params["order_direction"] = order_direction
 
-        payload = await self._request(
+        return await self._request_parsed(
+            GridsResponse.model_validate_json,
             "GET",
             f"v1/pages/{page_id}/grids",
             params=params,
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        return GridsResponse.model_validate_json(payload)
 
     async def grid_get(
         self,
@@ -1160,14 +1269,14 @@ class WikiClient(WikiProtocol):
         if sort:
             params["sort"] = sort
 
-        payload = await self._request(
+        return await self._request_parsed(
+            WikiGrid.model_validate_json,
             "GET",
             f"v1/grids/{grid_id}",
             params=params if params else None,
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return WikiGrid.model_validate_json(payload)
 
     async def grid_create(
         self,
@@ -1175,13 +1284,13 @@ class WikiClient(WikiProtocol):
         request: GridCreateRequest,
         auth: YandexAuth | None = None,
     ) -> WikiGrid:
-        payload = await self._request(
+        return await self._request_parsed(
+            WikiGrid.model_validate_json,
             "POST",
             "v1/grids",
             json_body=request.model_dump(exclude_none=True),
             auth=auth,
         )
-        return WikiGrid.model_validate_json(payload)
 
     async def grid_update(
         self,
@@ -1194,14 +1303,14 @@ class WikiClient(WikiProtocol):
         if not request.default_sort:
             body.pop("default_sort", None)
 
-        payload = await self._request(
+        return await self._request_parsed(
+            GridUpdateResponse.model_validate_json,
             "POST",
             f"v1/grids/{grid_id}",
             json_body=body,
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridUpdateResponse.model_validate_json(payload)
 
     async def grid_add_rows(
         self,
@@ -1222,14 +1331,14 @@ class WikiClient(WikiProtocol):
         if after_row_id is not None:
             body["after_row_id"] = after_row_id
 
-        payload = await self._request(
+        return await self._request_parsed(
+            GridMutationResponse.model_validate_json,
             "POST",
             f"v1/grids/{grid_id}/rows",
             json_body=body,
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridMutationResponse.model_validate_json(payload)
 
     async def grid_delete(
         self,
@@ -1237,20 +1346,24 @@ class WikiClient(WikiProtocol):
         *,
         auth: YandexAuth | None = None,
     ) -> GridDeleteResponse:
-        payload = await self._request(
+        def acknowledge(payload: bytes) -> GridDeleteResponse:
+            # The endpoint answers 204 No Content, so the acknowledgment
+            # fields are ours; a future JSON object body still reaches the
+            # model, where the contract sweep watches for undeclared keys. A
+            # non-object body would be dropped here — nothing merges a bare
+            # list into a model.
+            data = self._json_or_empty(payload)
+            body = data if isinstance(data, dict) else {}
+            return GridDeleteResponse.model_validate(
+                {**body, "grid_id": grid_id, "deleted": True}
+            )
+
+        return await self._request_parsed(
+            acknowledge,
             "DELETE",
             f"v1/grids/{grid_id}",
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
-        )
-        # The endpoint answers 204 No Content, so the acknowledgment fields
-        # are ours; a future JSON object body still reaches the model, where
-        # the contract sweep watches for undeclared keys. A non-object body
-        # would be dropped here — nothing merges a bare list into a model.
-        data = self._json_or_empty(payload)
-        body = data if isinstance(data, dict) else {}
-        return GridDeleteResponse.model_validate(
-            {**body, "grid_id": grid_id, "deleted": True}
         )
 
     async def grid_copy(
@@ -1265,14 +1378,14 @@ class WikiClient(WikiProtocol):
         if title is not None:
             body["title"] = title
 
-        payload = await self._request(
+        return await self._request_parsed(
+            self._model_or_empty(GridOperationResponse),
             "POST",
             f"v1/grids/{grid_id}/clone",
             json_body=body,
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridOperationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_update_cells(
         self,
@@ -1281,14 +1394,14 @@ class WikiClient(WikiProtocol):
         cells: list[dict[str, Any]],
         auth: YandexAuth | None = None,
     ) -> GridCellsResponse:
-        payload = await self._request(
+        return await self._request_parsed(
+            self._model_or_empty(GridCellsResponse),
             "POST",
             f"v1/grids/{grid_id}/cells",
             json_body={"cells": cells},
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridCellsResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_delete_rows(
         self,
@@ -1298,14 +1411,14 @@ class WikiClient(WikiProtocol):
         row_ids: list[str],
         auth: YandexAuth | None = None,
     ) -> GridMutationResponse:
-        payload = await self._request(
+        return await self._request_parsed(
+            self._model_or_empty(GridMutationResponse),
             "DELETE",
             f"v1/grids/{grid_id}/rows",
             json_body={"revision": revision, "row_ids": row_ids},
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_add_columns(
         self,
@@ -1323,14 +1436,14 @@ class WikiClient(WikiProtocol):
         if position is not None:
             body["position"] = position
 
-        payload = await self._request(
+        return await self._request_parsed(
+            self._model_or_empty(GridMutationResponse),
             "POST",
             f"v1/grids/{grid_id}/columns",
             json_body=body,
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_delete_columns(
         self,
@@ -1340,14 +1453,14 @@ class WikiClient(WikiProtocol):
         column_slugs: list[str],
         auth: YandexAuth | None = None,
     ) -> GridMutationResponse:
-        payload = await self._request(
+        return await self._request_parsed(
+            self._model_or_empty(GridMutationResponse),
             "DELETE",
             f"v1/grids/{grid_id}/columns",
             json_body={"revision": revision, "column_slugs": column_slugs},
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_move_row(
         self,
@@ -1368,14 +1481,14 @@ class WikiClient(WikiProtocol):
         if after_row_id is not None:
             body["after_row_id"] = after_row_id
 
-        payload = await self._request(
+        return await self._request_parsed(
+            self._model_or_empty(GridMutationResponse),
             "POST",
             f"v1/grids/{grid_id}/rows/move",
             json_body=body,
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def grid_move_column(
         self,
@@ -1386,7 +1499,8 @@ class WikiClient(WikiProtocol):
         position: int,
         auth: YandexAuth | None = None,
     ) -> GridMutationResponse:
-        payload = await self._request(
+        return await self._request_parsed(
+            self._model_or_empty(GridMutationResponse),
             "POST",
             f"v1/grids/{grid_id}/columns/move",
             json_body={
@@ -1397,7 +1511,6 @@ class WikiClient(WikiProtocol):
             auth=auth,
             not_found=lambda: GridNotFound(grid_id),
         )
-        return GridMutationResponse.model_validate(self._json_or_empty(payload))
 
     async def page_get_attachments(
         self,
@@ -1411,14 +1524,14 @@ class WikiClient(WikiProtocol):
         if cursor:
             params["cursor"] = cursor
 
-        payload = await self._request(
+        return await self._request_parsed(
+            AttachmentListResponse.model_validate_json,
             "GET",
             f"v1/pages/{page_id}/attachments",
             params=params,
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        return AttachmentListResponse.model_validate_json(payload)
 
     async def page_create(
         self,
@@ -1433,8 +1546,9 @@ class WikiClient(WikiProtocol):
             "title": title,
             "content": content,
         }
-        payload = await self._request("POST", "v1/pages", json_body=body, auth=auth)
-        return WikiPage.model_validate_json(payload)
+        return await self._request_parsed(
+            WikiPage.model_validate_json, "POST", "v1/pages", json_body=body, auth=auth
+        )
 
     async def page_clone(
         self,
@@ -1459,14 +1573,14 @@ class WikiClient(WikiProtocol):
         if title is not None:
             body["title"] = title
 
-        payload = await self._request(
+        started = await self._request_parsed(
+            self._model_or_empty(GridOperationResponse),
             "POST",
             f"v1/pages/{page_id}/clone",
             json_body=body,
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        started = GridOperationResponse.model_validate(self._json_or_empty(payload))
         if not started.status_url:
             raise WikiOperationError(
                 "clone operation did not return a status_url to poll; "
@@ -1475,12 +1589,20 @@ class WikiClient(WikiProtocol):
 
         deadline = asyncio.get_running_loop().time() + CLONE_POLL_TIMEOUT
         while True:
-            status_payload = await self._request(
-                "GET",
-                started.status_url.lstrip("/"),
-                auth=auth,
-            )
-            progress = PageCloneStatus.model_validate_json(status_payload)
+            # A GET, so its own WikiResponseError would not warn that anything
+            # may have been applied — but the POST above started the copy.
+            try:
+                progress = await self._request_parsed(
+                    PageCloneStatus.model_validate_json,
+                    "GET",
+                    started.status_url.lstrip("/"),
+                    auth=auth,
+                )
+            except WikiResponseError as exc:
+                raise WikiOperationError(
+                    "clone operation started, but its status could not be read; "
+                    f"whether the copy was created is unknown ({exc})"
+                ) from exc
             if progress.status == "success":
                 if progress.result is None or progress.result.page is None:
                     raise WikiOperationError(
@@ -1535,7 +1657,8 @@ class WikiClient(WikiProtocol):
         if is_silent:
             params["is_silent"] = "true"
 
-        payload = await self._request(
+        return await self._request_parsed(
+            WikiPage.model_validate_json,
             "POST",
             f"v1/pages/{page_id}",
             params=params if params else None,
@@ -1543,7 +1666,6 @@ class WikiClient(WikiProtocol):
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        return WikiPage.model_validate_json(payload)
 
     async def page_append_content(
         self,
@@ -1560,8 +1682,12 @@ class WikiClient(WikiProtocol):
         else:
             body["body"] = {"location": location}
 
+        # The endpoint answers with the full updated page, not a status stub
+        # (verified live, docs/api-notes.md) — same shape as the anchor
+        # fallback below, so both paths of this tool agree.
         try:
-            payload = await self._request(
+            return await self._request_parsed(
+                WikiPage.model_validate_json,
                 "POST",
                 f"v1/pages/{page_id}/append-content",
                 json_body=body,
@@ -1588,10 +1714,6 @@ class WikiClient(WikiProtocol):
                         auth=auth,
                     )
             raise
-        # The endpoint answers with the full updated page, not a status stub
-        # (verified live, docs/api-notes.md) — same shape as the anchor
-        # fallback above, so both paths of this tool agree.
-        return WikiPage.model_validate_json(payload)
 
     async def page_add_comment(
         self,
@@ -1608,14 +1730,14 @@ class WikiClient(WikiProtocol):
         if thread_id is not None:
             request_body["thread_id"] = thread_id
 
-        payload = await self._request(
+        return await self._request_parsed(
+            PageComment.model_validate_json,
             "POST",
             f"v1/pages/{page_id}/comments",
             json_body=request_body,
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        return PageComment.model_validate_json(payload)
 
     async def page_delete_comment(
         self,
@@ -1629,21 +1751,25 @@ class WikiClient(WikiProtocol):
         # debug_message says "No Comment matches the given query." for a
         # bogus comment id (probed 2026-08-11). PageNotFound would mislabel
         # that case.
-        payload = await self._request(
+        def acknowledge(payload: bytes) -> DeleteCommentResponse:
+            # The 200 body carries comments_count, but that is the only field
+            # it carries, so an empty body (or a renamed key) would dump to
+            # `{}` once _drop_none runs — a successful call with no evidence
+            # in it. The id pair and `deleted` are built here as the floor,
+            # mirroring page_delete_attachment; the isinstance guard mirrors
+            # grid_delete, so a JSON body that is not an object still counts
+            # as the acknowledgment rather than as an unreadable reply.
+            data = self._json_or_empty(payload)
+            body = data if isinstance(data, dict) else {}
+            return DeleteCommentResponse.model_validate(
+                {**body, "page_id": page_id, "comment_id": comment_id, "deleted": True}
+            )
+
+        return await self._request_parsed(
+            acknowledge,
             "DELETE",
             f"v1/pages/{page_id}/comments/{comment_id}",
             auth=auth,
-        )
-        # The 200 body carries comments_count, but that is the only field it
-        # carries, so an empty body (or a renamed key) would dump to `{}` once
-        # _drop_none runs — a successful call with no evidence in it. The id
-        # pair and `deleted` are built here as the floor, mirroring
-        # page_delete_attachment; the isinstance guard mirrors grid_delete, so
-        # a non-object body cannot raise a bare ValidationError past WikiError.
-        data = self._json_or_empty(payload)
-        body = data if isinstance(data, dict) else {}
-        return DeleteCommentResponse.model_validate(
-            {**body, "page_id": page_id, "comment_id": comment_id, "deleted": True}
         )
 
     async def page_read_attachment_bytes(
@@ -1823,20 +1949,24 @@ class WikiClient(WikiProtocol):
     ) -> AttachmentDeleteResponse:
         # No not_found mapping: the 404 envelope names the culprit itself —
         # "No File matches the given query." (probed 2026-08-11).
-        payload = await self._request(
+        def acknowledge(payload: bytes) -> AttachmentDeleteResponse:
+            # 204 No Content (documented and verified live): the
+            # acknowledgment fields are ours. Merged rather than constructed,
+            # exactly like grid_delete — any JSON object the API starts
+            # sending still reaches the model, where the contract sweep
+            # watches for undeclared keys. Constructing it directly would make
+            # that drift undetectable.
+            data = self._json_or_empty(payload)
+            body = data if isinstance(data, dict) else {}
+            return AttachmentDeleteResponse.model_validate(
+                {**body, "page_id": page_id, "file_id": file_id, "deleted": True}
+            )
+
+        return await self._request_parsed(
+            acknowledge,
             "DELETE",
             f"v1/pages/{page_id}/attachments/{file_id}",
             auth=auth,
-        )
-        # 204 No Content (documented and verified live): the acknowledgment
-        # fields are ours. Merged rather than constructed, exactly like
-        # grid_delete — any JSON object the API starts sending still reaches
-        # the model, where the contract sweep watches for undeclared keys.
-        # Constructing it directly would make that drift undetectable.
-        data = self._json_or_empty(payload)
-        body = data if isinstance(data, dict) else {}
-        return AttachmentDeleteResponse.model_validate(
-            {**body, "page_id": page_id, "file_id": file_id, "deleted": True}
         )
 
     async def user_get_current(
@@ -1844,8 +1974,9 @@ class WikiClient(WikiProtocol):
         *,
         auth: YandexAuth | None = None,
     ) -> WikiCurrentUser:
-        payload = await self._request("GET", "v1/users/me", auth=auth)
-        return WikiCurrentUser.model_validate_json(payload)
+        return await self._request_parsed(
+            WikiCurrentUser.model_validate_json, "GET", "v1/users/me", auth=auth
+        )
 
     async def page_delete(
         self,
@@ -1853,13 +1984,13 @@ class WikiClient(WikiProtocol):
         *,
         auth: YandexAuth | None = None,
     ) -> DeletePageResponse:
-        payload = await self._request(
+        return await self._request_parsed(
+            DeletePageResponse.model_validate_json,
             "DELETE",
             f"v1/pages/{page_id}",
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        return DeletePageResponse.model_validate_json(payload)
 
     async def page_recover(
         self,
@@ -1867,12 +1998,12 @@ class WikiClient(WikiProtocol):
         *,
         auth: YandexAuth | None = None,
     ) -> RecoverPageResponse:
-        payload = await self._request(
+        return await self._request_parsed(
+            RecoverPageResponse.model_validate_json,
             "POST",
             f"v1/recovery_tokens/{recovery_token}/recover",
             auth=auth,
         )
-        return RecoverPageResponse.model_validate_json(payload)
 
     async def upload_session_create(
         self,
@@ -1881,13 +2012,13 @@ class WikiClient(WikiProtocol):
         file_size: int,
         auth: YandexAuth | None = None,
     ) -> UploadSessionResponse:
-        payload = await self._request(
+        return await self._request_parsed(
+            UploadSessionResponse.model_validate_json,
             "POST",
             "v1/upload_sessions",
             json_body={"file_name": file_name, "file_size": file_size},
             auth=auth,
         )
-        return UploadSessionResponse.model_validate_json(payload)
 
     async def _upload_part(
         self,
@@ -1929,14 +2060,14 @@ class WikiClient(WikiProtocol):
         session_ids: list[str],
         auth: YandexAuth | None = None,
     ) -> AttachmentResultsResponse:
-        payload = await self._request(
+        return await self._request_parsed(
+            AttachmentResultsResponse.model_validate_json,
             "POST",
             f"v1/pages/{page_id}/attachments",
             json_body={"upload_sessions": session_ids},
             auth=auth,
             not_found=lambda: PageNotFound(page_id),
         )
-        return AttachmentResultsResponse.model_validate_json(payload)
 
     async def page_upload_attachment(
         self,
@@ -1953,20 +2084,13 @@ class WikiClient(WikiProtocol):
         # fail inside the WikiError hierarchy every caller above already
         # handles.
         path = local_path(file_path)
-        if not await asyncio.to_thread(path.is_file):
-            raise WikiLocalFileError(f"File not found: {path}")
-
         # Opened before the upload session exists, so a file this process
         # cannot read is refused without leaving an orphan session behind.
+        handle, file_size = await asyncio.to_thread(_open_upload_source, path)
         try:
-            handle = await asyncio.to_thread(_open_binary, path)
-        except OSError as exc:
-            raise WikiLocalFileError(f"Cannot read {path}", cause=exc) from exc
-        try:
-            stat_result = await asyncio.to_thread(path.stat)
             upload_session = await self.upload_session_create(
                 file_name=path.name,
-                file_size=stat_result.st_size,
+                file_size=file_size,
                 auth=auth,
             )
             part_number = 1

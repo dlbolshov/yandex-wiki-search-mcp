@@ -2,6 +2,8 @@ import contextlib
 import json
 from typing import Any
 
+from pydantic import ValidationError
+
 
 class WikiError(Exception):
     """Base class for Wiki API errors."""
@@ -57,6 +59,29 @@ class GridConflict(WikiApiError):
         self.args = (f"{self.args[0]}. {self.RECOVERY}",)
 
 
+class WikiRateLimited(WikiApiError):
+    """429 — the Wiki API is throttling this token and refused the request.
+
+    First seen live on 2026-10-12, on a burst of about twenty writes sent back
+    to back; the API sends no Retry-After or X-RateLimit-* header. The
+    refused request is not applied — a redirect set that got 429 read back
+    unset — so it is safe to send again, which the bare "failed with status
+    429" never told anyone. The client retries a 429 by itself only for
+    requests safe to repeat in any case (GETs, search, upload parts); a write
+    is left to the caller, as GridConflict's is, so the advice is appended.
+    """
+
+    RECOVERY = (
+        "The Wiki API is rate-limiting requests and refused this one without "
+        "applying it. Wait a few seconds before retrying, and send writes one "
+        "at a time rather than in a burst."
+    )
+
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+        self.args = (f"{self.args[0]}. {self.RECOVERY}",)
+
+
 class WikiOperationError(WikiError):
     """A deferred Wiki operation failed or never settled.
 
@@ -103,6 +128,54 @@ class WikiTransportError(WikiError):
     def __init__(self, method: str, path: str, cause: BaseException):
         detail = str(cause) or type(cause).__name__
         super().__init__(f"{method} {path} failed before a response: {detail}")
+        self.method = method
+        self.path = path
+        self.cause = cause
+
+
+def _describe_unreadable(cause: ValueError) -> str:
+    """One line on why a body did not parse, without echoing the body itself."""
+    if isinstance(cause, ValidationError):
+        first = cause.errors(include_url=False, include_input=False)[0]
+        where = ".".join(str(part) for part in first["loc"])
+        detail = f"{where}: {first['msg']}" if where else first["msg"]
+        more = cause.error_count() - 1
+        return f"{cause.title} {detail}" + (f" (and {more} more)" if more else "")
+    return str(cause) or type(cause).__name__
+
+
+class WikiResponseError(WikiError):
+    """A success status whose body could not be read.
+
+    The request went through; only the answer is unusable — a page a proxy
+    served with 200, an empty body, a field the API renamed. For a write
+    that means the change may well have been applied, and the message says
+    so: a caller retrying blind could apply it twice. A WikiError rather
+    than the pydantic or json exception underneath, so the MCP layer shows
+    the model what happened instead of a bare crash, and `fetch_all` keeps
+    the pages it already has.
+    """
+
+    def __init__(
+        self,
+        method: str,
+        path: str,
+        cause: ValueError,
+        *,
+        writes: bool | None = None,
+    ) -> None:
+        """`writes` defaults to "anything but a GET"; a POST that only reads,
+        like the search endpoint, says False so as not to warn about it."""
+        message = (
+            f"{method} {path} succeeded, but its response could not be read: "
+            f"{_describe_unreadable(cause)}."
+        )
+        if method != "GET" if writes is None else writes:
+            message += (
+                " The change may have been applied: read the current state "
+                "before retrying."
+            )
+        super().__init__(message)
         self.method = method
         self.path = path
         self.cause = cause
@@ -186,7 +259,10 @@ class WikiLocalFileError(WikiError):
     """
 
     def __init__(self, message: str, *, cause: OSError | None = None) -> None:
-        detail = f"{message} ({cause.strerror})" if cause is not None else message
+        # Not every OSError carries an errno text: io.UnsupportedOperation,
+        # for one, has strerror None.
+        reason = None if cause is None else cause.strerror or str(cause)
+        detail = f"{message} ({reason})" if reason else message
         super().__init__(detail)
         self.cause = cause
 
@@ -204,11 +280,11 @@ def build_api_error(status: int, payload: bytes) -> WikiApiError:
             if isinstance(decoded, dict):
                 details = decoded
     error_code = details.get("error_code") if details else None
-    error_class = (
-        GridConflict
-        if status == 409 and error_code == "CONFLICTING_OPERATION"
-        else WikiApiError
-    )
+    error_class: type[WikiApiError] = WikiApiError
+    if status == 409 and error_code == "CONFLICTING_OPERATION":
+        error_class = GridConflict
+    elif status == 429:
+        error_class = WikiRateLimited
     return error_class(
         status=status,
         error_code=error_code,

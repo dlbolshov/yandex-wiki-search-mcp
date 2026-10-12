@@ -323,3 +323,13 @@ the snippet key was `body`. None of that is true anymore. Current behavior, veri
   `details`, or as a list plus `level`); the client parses both and surfaces the API's
   own message in `WikiApiError`.
 - No rate-limit headers are exposed (`X-RateLimit-*`/`Retry-After` absent).
+- **Writes are rate-limited** (first seen 2026-10-12, by the weekly sweep; every run
+  before passed). A burst of about twenty writes sent back to back — page creates,
+  comments, then an upload and a redirect set — got `429` on two of them, with no
+  JSON envelope and no `Retry-After`; later writes in the same run went through. A
+  refused write is **not applied**: the redirect set that got `429` read back unset.
+  The client retries a `429` only for requests safe to repeat (GETs, search, upload
+  parts) and reports one on a write as `WikiRateLimited`, whose message says it was
+  not applied and to resend later, one write at a time. `scripts/contract_sweep.py`
+  waits a `429` out (2, 4, 8, 16, 32 s) and notes it on the row instead of reporting
+  drift; one that outlasts all five delays is still a failure.

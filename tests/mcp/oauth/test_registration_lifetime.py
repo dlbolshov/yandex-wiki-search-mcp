@@ -1,8 +1,9 @@
-"""Dynamic registrations expire, public ones included — over real HTTP.
+"""Dynamic registrations expire after an idle window — over real HTTP.
 
 What reaches the store depends on what the SDK's /register stamps, and that
 depends on the client: one registered with token_endpoint_auth_method
-"none" is issued no secret, and so no client_secret_expires_at either. Only
+"none" is issued no secret, and so no client_secret_expires_at either; one
+issued a secret is stamped 0, "never", since secrets no longer expire. Only
 a request through the SDK's own handlers pins that, rather than what a
 hand-built record assumes the SDK sends.
 """
@@ -45,14 +46,15 @@ def test_a_public_registration_expires(store: StoreKind) -> None:
     assert EXPIRY - SLACK < remaining <= EXPIRY
 
 
-def test_a_confidential_registration_expires_when_its_client_was_told(
-    store: StoreKind,
-) -> None:
+def test_a_confidential_registration_gets_the_same_window(store: StoreKind) -> None:
     with oauth_app(store) as app:
         body = register(app.http, "client_secret_post")
         remaining = app.remaining(body["client_id"])
 
-    assert body["client_secret_expires_at"] == body["client_id_issued_at"] + EXPIRY
+    # Its secret never expires on its own — a deadline there cut off clients
+    # in daily use — so the client is told 0 and the idle window applies.
+    assert body["client_secret"]
+    assert body["client_secret_expires_at"] == 0
     assert remaining is not None
     assert EXPIRY - SLACK < remaining <= EXPIRY
 
@@ -61,8 +63,8 @@ def test_a_confidential_registration_expires_when_its_client_was_told(
 def test_nothing_expires_with_the_expiry_switched_off(
     store: StoreKind, auth_method: str
 ) -> None:
-    # The SDK stamps a confidential client 0 here, RFC 7591's "never": the
-    # in-memory store once read it as a 1970 deadline and swept the lot.
+    # The SDK stamps a confidential client 0, RFC 7591's "never" — which the
+    # in-memory store once read as a 1970 deadline, sweeping the lot.
     with oauth_app(store, expiry=None) as app:
         body = register(app.http, auth_method)
         remaining = app.remaining(body["client_id"])
@@ -70,9 +72,12 @@ def test_nothing_expires_with_the_expiry_switched_off(
     assert remaining is None
 
 
-def test_a_token_grant_renews_a_public_registration(store: StoreKind) -> None:
+@pytest.mark.parametrize("auth_method", ["none", "client_secret_post"])
+def test_a_token_grant_renews_a_registration(
+    store: StoreKind, auth_method: str
+) -> None:
     with oauth_app(store) as app:
-        registration = register(app.http, "none")
+        registration = register(app.http, auth_method)
         code = authorize(app.http, registration)
         with aioresponses() as yandex:
             yandex.post(YANDEX_TOKEN_URL, payload=YANDEX_TOKENS)
@@ -80,8 +85,30 @@ def test_a_token_grant_renews_a_public_registration(store: StoreKind) -> None:
         remaining = app.remaining(registration["client_id"])
 
     assert token.status_code == 200, token.text
-    # EXPIRY is 30 days, shorter than the refresh token on purpose: a TTL
-    # past it can only have come from the grant, which sets no less than
-    # the refresh token it issued lives.
+    # The window restarts when the grant's last token stops working — here
+    # the 31-day refresh token, the access token lasting an hour — so a
+    # client coming back after both finds its registration and signs in.
+    window = REFRESH_TOKEN_TTL_SECONDS + EXPIRY
     assert remaining is not None
-    assert REFRESH_TOKEN_TTL_SECONDS - SLACK < remaining <= REFRESH_TOKEN_TTL_SECONDS
+    assert window - SLACK < remaining <= window
+
+
+def test_a_registration_outlives_the_access_token_it_was_issued(
+    store: StoreKind,
+) -> None:
+    # Yandex ID tokens commonly last a year, and bearer requests renew
+    # nothing: the client comes back only once the token has expired, so
+    # the registration has to outlast the token by a whole idle window, or
+    # the client finds it gone the day it needs a new one.
+    year = 365 * 24 * 60 * 60
+    with oauth_app(store) as app:
+        registration = register(app.http, "none")
+        code = authorize(app.http, registration)
+        with aioresponses() as yandex:
+            yandex.post(YANDEX_TOKEN_URL, payload={**YANDEX_TOKENS, "expires_in": year})
+            token = redeem_code(app.http, registration, code)
+        remaining = app.remaining(registration["client_id"])
+
+    assert token.status_code == 200, token.text
+    assert remaining is not None
+    assert year + EXPIRY - SLACK < remaining <= year + EXPIRY

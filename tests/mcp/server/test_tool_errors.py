@@ -26,6 +26,8 @@ from mcp_wiki.wiki.custom.errors import (
     PageNotFound,
     WikiArgumentError,
     WikiError,
+    WikiRateLimited,
+    WikiResponseError,
     WikiTransportError,
 )
 from tests.mcp.conftest import get_tool_result_text
@@ -66,8 +68,22 @@ class TestWikiErrorsReachTheModel:
                 "failed before a response: TimeoutError",
             ),
             (WikiArgumentError("target must not be empty."), "target must not be"),
+            # Whether it was applied is what an agent needs to know.
+            (WikiRateLimited(status=429), "refused this one without applying it"),
+            # For a write, the warning not to retry blind is the point.
+            (
+                WikiResponseError("POST", "v1/pages", ValueError("not JSON")),
+                "The change may have been applied",
+            ),
         ],
-        ids=["not-found", "grid-conflict", "transport", "argument"],
+        ids=[
+            "not-found",
+            "grid-conflict",
+            "transport",
+            "argument",
+            "rate-limited",
+            "unreadable",
+        ],
     )
     async def test_its_message_is_the_tool_result(
         self,
@@ -97,6 +113,19 @@ class TestWikiErrorsReachTheModel:
             await client.call_tool("page_get", {"page_id": 42})
 
         assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+    async def test_a_slug_that_is_not_a_url_says_so(
+        self, client: Client, mock_wiki_protocol: AsyncMock
+    ) -> None:
+        # Refused by normalize_slug, which the tool layer shares with the
+        # client: urlparse's ValueError reached the model as a bare crash.
+        result = await client.call_tool(
+            "page_get", {"slug": "https://[wiki.yandex.ru/team/page"}
+        )
+
+        assert result.is_error is True
+        assert "Not a valid page slug or Wiki URL" in get_tool_result_text(result)
+        mock_wiki_protocol.page_get_by_slug.assert_not_awaited()
 
 
 class TestCallTool:

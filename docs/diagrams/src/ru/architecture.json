@@ -7,7 +7,7 @@
   "quality_profile": "showcase",
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "861a7c9784def37bfbc89edb032e0899019d7344"
+   "revision": "6d0d3d45e0d72c4cb9b63bafcf22837d4f4268fb"
   },
   "locale": "ru",
   "translations": {
@@ -475,7 +475,7 @@
     {
      "path": "manifest.json",
      "line": 12,
-     "end_line": 31,
+     "end_line": 46,
      "label": "MCPB: uv run для Claude Desktop"
     },
     {
@@ -503,13 +503,13 @@
     {
      "path": "mcp_wiki/__main__.py",
      "line": 12,
-     "end_line": 63,
+     "end_line": 72,
      "label": "main(): Settings, опечатки, run()"
     },
     {
      "path": "mcp_wiki/settings.py",
-     "line": 116,
-     "end_line": 144,
+     "line": 181,
+     "end_line": 209,
      "label": "валидация auth / org"
     },
     {
@@ -536,15 +536,21 @@
    "sources": [
     {
      "path": "mcp_wiki/settings.py",
-     "line": 38,
-     "end_line": 44,
-     "label": "TRANSPORT · HOST · PORT"
+     "line": 61,
+     "end_line": 69,
+     "label": "TRANSPORT · HOST 127.0.0.1 · PORT"
+    },
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 383,
+     "end_line": 422,
+     "label": "run_options / http_app_options"
     },
     {
      "path": "mcp_wiki/mcp/server.py",
      "line": 319,
-     "end_line": 349,
-     "label": "run_options / http_app_options"
+     "end_line": 372,
+     "label": "transport_security: какие имена Host пускать"
     }
    ]
   },
@@ -689,20 +695,20 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 543,
-     "end_line": 576,
+     "line": 606,
+     "end_line": 639,
      "label": "WikiClient и aiohttp-сессия"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 599,
-     "end_line": 634,
+     "line": 662,
+     "end_line": 697,
      "label": "Authorization и X-Org-Id"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 771,
-     "end_line": 811,
+     "line": 882,
+     "end_line": 922,
      "label": "ретраи и маппинг ошибок"
     }
    ]
@@ -723,20 +729,20 @@
    "sources": [
     {
      "path": "mcp_wiki/settings.py",
-     "line": 46,
-     "end_line": 54,
+     "line": 73,
+     "end_line": 81,
      "label": "WIKI_API_BASE_URL"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 886,
-     "end_line": 918,
+     "line": 1002,
+     "end_line": 1034,
      "label": "GET v1/pages"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 959,
-     "end_line": 1006,
+     "line": 1075,
+     "end_line": 1124,
      "label": "POST v1/search"
     }
    ]
@@ -758,20 +764,20 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 47,
-     "end_line": 78,
-     "label": "YandexOAuth-провайдер"
+     "line": 70,
+     "end_line": 101,
+     "label": "YandexOAuth-провайдер; idle-TTL регистраций"
     },
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 243,
+     "line": 244,
      "end_line": 278,
-     "label": "scopes и AuthSettings"
+     "label": "scopes, AuthSettings; секреты бессрочны"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 80,
-     "end_line": 115,
+     "line": 103,
+     "end_line": 138,
      "label": "/oauth/yandex/callback"
     }
    ]
@@ -792,14 +798,14 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 206,
-     "end_line": 241,
+     "line": 207,
+     "end_line": 242,
      "label": "выбор хранилища"
     },
     {
      "path": "mcp_wiki/mcp/oauth/store.py",
      "line": 13,
-     "end_line": 41,
+     "end_line": 46,
      "label": "протокол OAuthStore, TTL от провайдера"
     },
     {
@@ -826,21 +832,21 @@
    "sources": [
     {
      "path": "mcp_wiki/settings.py",
-     "line": 58,
-     "end_line": 61,
+     "line": 85,
+     "end_line": 88,
      "label": "URL Яндекса, id и секрет приложения"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 194,
-     "end_line": 201,
+     "line": 243,
+     "end_line": 250,
      "label": "редирект на /authorize Яндекса"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 203,
-     "end_line": 227,
-     "label": "POST /token; отказ → invalid_grant"
+     "line": 252,
+     "end_line": 292,
+     "label": "отказ → invalid_grant; refresh 5xx/429 → 500"
     }
    ]
   },
@@ -867,8 +873,8 @@
     {
      "path": "compose.yaml",
      "line": 11,
-     "end_line": 21,
-     "label": "redis:8-alpine"
+     "end_line": 22,
+     "label": "redis:8-alpine, порт только на 127.0.0.1"
     }
    ]
   },
@@ -888,20 +894,20 @@
    "sources": [
     {
      "path": "mcp_wiki/settings.py",
-     "line": 99,
-     "end_line": 114,
+     "line": 164,
+     "end_line": 179,
      "label": "гейт: только stdio и без OAuth"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 1946,
-     "end_line": 1972,
-     "label": "upload: чтение частями"
+     "line": 2086,
+     "end_line": 2112,
+     "label": "upload: сначала открытие, потом чтение частями"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 279,
-     "end_line": 299,
+     "line": 342,
+     "end_line": 362,
      "label": "download: создание .part"
     }
    ]
@@ -1039,7 +1045,8 @@
     "Authorization: токен запроса → WIKI_TOKEN → IAM (Bearer)",
     "?orgId= / ?cloudOrgId= заменяет пару org целиком",
     "Под OAuth Bearer клиента — сам access-токен Yandex",
-    "Без OAuth HTTP-вызов идёт с токеном сервера"
+    "Без OAuth HTTP-вызов идёт с токеном сервера; пропускаются только loopback-имена в Host",
+    "MCP_ALLOWED_HOSTS заменяет этот список (* — выкл.); под OAuth Host проверяется, только если он задан"
    ]
   },
   {
@@ -1048,7 +1055,7 @@
    "items": [
     "Один клиент и одна aiohttp-сессия на lifespan",
     "Ретраи 429/502/503/504 и обрывов: GET (кроме скачивания), search, upload_part",
-    "Сбои → WikiError → ToolError в call_tool → результат is_error",
+    "Сбои → WikiError (нечитаемый ответ 2xx — WikiResponseError) → ToolError → is_error",
     "Загрузка: session → части по 5 МиБ → finish → attach"
    ]
   },
@@ -1058,8 +1065,9 @@
    "items": [
     "PyPI, MCPB, MCP Registry — stdio; образ GHCR — stdio или streamable-http",
     "streamable-http: stateless, JSON-ответы, /healthz",
-    "compose.yaml поднимает только Redis",
-    "Срез кода: 861a7c9"
+    "HOST по умолчанию 127.0.0.1; образ задаёт 0.0.0.0",
+    "compose.yaml поднимает только Redis, порт — на loopback",
+    "Срез кода: 6d0d3d4"
    ]
   }
  ]

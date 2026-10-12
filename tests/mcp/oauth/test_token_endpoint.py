@@ -93,6 +93,38 @@ class TestYandexRefusalIsAnOAuthError:
         }
 
 
+def test_a_refresh_yandex_could_not_take_is_a_500_and_keeps_the_token(
+    http: TestClient,
+) -> None:
+    # A 400 invalid_grant would tell the client to discard a refresh token
+    # that is still valid; a 500 says try again later, and it works then.
+    registration = register(http)
+    code = authorize(http, registration)
+    with aioresponses() as yandex:
+        yandex.post(YANDEX_TOKEN_URL, payload=YANDEX_TOKENS)
+        tokens = redeem_code(http, registration, code)
+    assert tokens.status_code == 200, tokens.text
+    refresh = {
+        "grant_type": "refresh_token",
+        "refresh_token": tokens.json()["refresh_token"],
+        "client_id": registration["client_id"],
+        "client_secret": registration["client_secret"],
+    }
+
+    with aioresponses() as yandex:
+        yandex.post(YANDEX_TOKEN_URL, status=503, body="<html>Unavailable</html>")
+        response = http.post("/token", data=refresh)
+    assert response.status_code == 500
+
+    with aioresponses() as yandex:
+        yandex.post(
+            YANDEX_TOKEN_URL,
+            payload={**YANDEX_TOKENS, "refresh_token": "ya-refresh-2"},
+        )
+        again = http.post("/token", data=refresh)
+    assert again.status_code == 200, again.text
+
+
 def test_a_registration_without_an_expiry_stays_usable() -> None:
     # With the expiry disabled the SDK stamps 0, RFC 7591's "never expires".
     # A store that read 0 as a deadline would refuse the client at once.

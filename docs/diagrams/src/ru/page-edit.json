@@ -8,7 +8,7 @@
   "column_fit": "spread",
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "861a7c9784def37bfbc89edb032e0899019d7344"
+   "revision": "6d0d3d45e0d72c4cb9b63bafcf22837d4f4268fb"
   },
   "legend": {
    "entries": {
@@ -474,9 +474,15 @@
     },
     {
      "path": "tests/mcp/server/test_request_ctx.py",
-     "line": 37,
-     "end_line": 55,
+     "line": 38,
+     "end_line": 56,
      "label": "POST /mcp?… по HTTP (resources/read)"
+    },
+    {
+     "path": "tests/mcp/server/test_transport_security.py",
+     "line": 235,
+     "end_line": 247,
+     "label": "Host не loopback → 421, до инструмента (тест)"
     }
    ]
   },
@@ -489,20 +495,20 @@
     {
      "path": "mcp_wiki/mcp/server.py",
      "line": 319,
-     "end_line": 333,
-     "label": "host · json_response · stateless"
+     "end_line": 340,
+     "label": "Host: только loopback без MCP_ALLOWED_HOSTS"
+    },
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 383,
+     "end_line": 402,
+     "label": "host · transport_security · json_response"
     },
     {
      "path": "mcp_wiki/mcp/server.py",
      "line": 297,
      "end_line": 299,
      "label": "middleware: лог → stash"
-    },
-    {
-     "path": "mcp_wiki/mcp/request_ctx.py",
-     "line": 38,
-     "end_line": 51,
-     "label": "stash запроса в contextvar"
     }
    ]
   },
@@ -514,20 +520,20 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 117,
-     "end_line": 128,
+     "line": 118,
+     "end_line": 129,
      "label": "WikiError → ToolError; прочее решает SDK"
     },
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 111,
-     "end_line": 147,
+     "line": 112,
+     "end_line": 148,
      "label": "call_tool и TOOL_RESULT_TEXT"
     },
     {
      "path": "tests/mcp/server/test_tool_errors.py",
-     "line": 102,
-     "end_line": 122,
+     "line": 121,
+     "end_line": 141,
      "label": "повышение vs скрытый сбой (тест)"
     }
    ]
@@ -541,20 +547,20 @@
     {
      "path": "mcp_wiki/mcp/tools/page_write.py",
      "line": 778,
-     "end_line": 808,
-     "label": "NON_IDEMPOTENT_WRITE, allow_merge=True"
-    },
-    {
-     "path": "mcp_wiki/mcp/tools/page_write.py",
-     "line": 809,
      "end_line": 849,
-     "label": "локатор, auth, чтение, запись, ответ"
+     "label": "NON_IDEMPOTENT_WRITE; локатор, чтение, запись"
     },
     {
      "path": "mcp_wiki/mcp/tools/page_write.py",
      "line": 197,
      "end_line": 227,
      "label": "_apply_replacements: 0 или >1 → ToolError"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/slugs.py",
+     "line": 20,
+     "end_line": 29,
+     "label": "normalize_slug: некорректный URL → WikiError"
     }
    ]
   },
@@ -586,20 +592,20 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 599,
-     "end_line": 634,
+     "line": 662,
+     "end_line": 697,
      "label": "Authorization (WIKI_TOKEN) и select_org"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 723,
-     "end_line": 810,
-     "label": "GET: max_retries+1 попыток, POST: одна"
+     "line": 733,
+     "end_line": 921,
+     "label": "_request_parsed; GET: max_retries+1, POST: одна"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 91,
-     "end_line": 93,
+     "line": 93,
+     "end_line": 95,
      "label": "429/502/503/504, Retry-After ≤ 3 с"
     }
    ]
@@ -612,20 +618,20 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 886,
-     "end_line": 898,
+     "line": 1002,
+     "end_line": 1014,
      "label": "GET v1/pages?slug="
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 1529,
-     "end_line": 1537,
+     "line": 1660,
+     "end_line": 1668,
      "label": "POST v1/pages/{id}"
     },
     {
      "path": "mcp_wiki/settings.py",
-     "line": 46,
-     "end_line": 54,
+     "line": 73,
+     "end_line": 81,
      "label": "WIKI_API_BASE_URL, WIKI_MAX_RETRIES=2"
     }
    ]
@@ -635,7 +641,7 @@
   {
    "from": 150,
    "to": 280,
-   "label": "Приём: tools/call page_edit"
+   "label": "Приём: проверка Host, затем tools/call page_edit"
   },
   {
    "from": 290,
@@ -660,7 +666,7 @@
   {
    "from": 800,
    "to": 915,
-   "label": "Ошибка → isError: до POST (нет совпадения, не текст, сбой GET) или на POST (запись могла пройти)"
+   "label": "Ошибка → isError: до POST (некорректный URL в slug, нет совпадения, не текст, сбой GET) или на POST (запись могла пройти)"
   }
  ],
  "messages": [
@@ -671,7 +677,7 @@
    "y": 170,
    "label": "POST /mcp?orgId=",
    "variant": "emphasis",
-   "note": "tools/call page_edit; без OAuth — без аутентификации"
+   "note": "без OAuth — без аутентификации; Host не loopback → 421"
   },
   {
    "id": "m-dispatch",
@@ -776,7 +782,8 @@
    "to": "tool",
    "y": 650,
    "label": "WikiPage",
-   "variant": "return"
+   "variant": "return",
+   "note": "нечитаемое тело → WikiResponseError"
   },
   {
    "id": "m-response",
@@ -811,7 +818,7 @@
    "y": 820,
    "label": "ToolError · WikiError",
    "variant": "dashed",
-   "note": "отказ: ToolError до POST; WikiError — на GET или на POST"
+   "note": "отказ: ToolError до POST; WikiError — slug, GET или POST"
   },
   {
    "id": "m-error-promote",
@@ -889,6 +896,7 @@
    "items": [
     "TRANSPORT=streamable-http, ответ одним JSON",
     "OAUTH_ENABLED=false, WIKI_READ_ONLY=false",
+    "Host — loopback-имя (MCP_ALLOWED_HOSTS не задан); любое другое — 421",
     "URL эндпоинта с ?orgId=, одна замена, ровно 1 совпадение"
    ]
   },
@@ -898,7 +906,8 @@
    "items": [
     "GET v1/pages?slug=…&fields=content — чтение без отдельного поиска id",
     "POST v1/pages/{id}?allow_merge=true — запись всего текста",
-    "Один YandexAuth на оба запроса, заголовки собираются заново"
+    "Один YandexAuth на оба запроса, заголовки собираются заново",
+    "Оба тела проходят через _request_parsed: нечитаемое → WikiResponseError с именем эндпоинта"
    ]
   },
   {
@@ -914,8 +923,9 @@
    "dot": "rose",
    "title": "Ошибки",
    "items": [
-    "Нет совпадения, их несколько или страница не текст — ошибка до POST",
+    "Некорректный URL в slug, нет совпадения, их несколько или страница не текст — ошибка до POST",
     "Сбой самого POST тоже даёт isError, но запись могла пройти",
+    "Нечитаемый 200 от POST: WikiResponseError предупреждает, что изменение могло примениться",
     "Отказы бросают ToolError; call_tool повышает до него WikiError",
     "Любое другое исключение mcp ≥2.1 скрывает как сбой",
     "Клиент получает HTTP 200, а не JSON-RPC error"

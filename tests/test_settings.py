@@ -1,22 +1,12 @@
-import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import AnyHttpUrl, SecretStr, ValidationError
 
-from mcp_wiki.settings import Settings, suspicious_env_keys
+from mcp_wiki.settings import Settings, renamed_env_keys, suspicious_env_keys
 
-_ENV_PREFIXES = ("WIKI_", "OAUTH_", "REDIS_", "MCP_", "TOOL_")
-_ENV_NAMES = {"HOST", "PORT", "TRANSPORT", "LOG_LEVEL"}
-
-
-@pytest.fixture(autouse=True)
-def isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in list(os.environ):
-        upper = key.upper()
-        if upper.startswith(_ENV_PREFIXES) or upper in _ENV_NAMES:
-            monkeypatch.delenv(key, raising=False)
+pytestmark = pytest.mark.usefixtures("isolated_env")
 
 
 def make_settings(**overrides: Any) -> Settings:
@@ -211,15 +201,86 @@ class TestTypoDetection:
         assert suspicious_env_keys() == {}
 
 
-class TestClientSecretExpiry:
-    """OAUTH_CLIENT_SECRET_EXPIRY_SECONDS: empty is the documented "off"."""
+class TestAllowedHosts:
+    """MCP_ALLOWED_HOSTS: which Host names the HTTP endpoint answers to."""
+
+    @staticmethod
+    def _settings() -> Settings:
+        return make_settings(wiki_token=SecretStr("token"), wiki_org_id="1")
+
+    def test_unset_by_default_and_the_server_listens_on_loopback(self) -> None:
+        settings = self._settings()
+
+        assert settings.mcp_allowed_hosts is None
+        assert settings.host == "127.0.0.1"
+
+    def test_a_comma_list_is_read_trimmed_and_lowercased(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MCP_ALLOWED_HOSTS", " Wiki.Example.com , mcp-wiki:8000,, ")
+
+        assert self._settings().mcp_allowed_hosts == [
+            "wiki.example.com",
+            "mcp-wiki:8000",
+        ]
+
+    def test_an_empty_variable_means_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MCP_ALLOWED_HOSTS", " ")
+
+        assert self._settings().mcp_allowed_hosts is None
+
+    def test_read_from_the_env_file(self, env_dir: Path) -> None:
+        write_env(env_dir, "WIKI_TOKEN=abc\nWIKI_ORG_ID=1\nMCP_ALLOWED_HOSTS=*\n")
+
+        assert Settings().mcp_allowed_hosts == ["*"]
+
+    @pytest.mark.parametrize(
+        "value",
+        ["https://wiki.example.com", "host/path", "::1", '["a", "b"]', "a b"],
+        ids=["url", "path", "bare-ipv6", "json-list", "space"],
+    )
+    def test_what_no_host_header_could_equal_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        # Kept, it would turn every request away with a 421.
+        monkeypatch.setenv("MCP_ALLOWED_HOSTS", value)
+
+        with pytest.raises(ValidationError, match="comma-separated list of host"):
+            self._settings()
+
+    def test_ports_wildcards_and_bracketed_ipv6_are_accepted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "MCP_ALLOWED_HOSTS", "[::1], [::1]:8000, mcp-wiki:*, 10.0.0.5"
+        )
+
+        assert self._settings().mcp_allowed_hosts == [
+            "[::1]",
+            "[::1]:8000",
+            "mcp-wiki:*",
+            "10.0.0.5",
+        ]
+
+    def test_a_misspelling_is_caught(
+        self, monkeypatch: pytest.MonkeyPatch, env_dir: Path
+    ) -> None:
+        monkeypatch.setenv("MCP_ALLOWED_HOST", "mcp-wiki")
+
+        assert suspicious_env_keys() == {"mcp_allowed_host": "mcp_allowed_hosts"}
+
+
+class TestRegistrationIdleWindow:
+    """OAUTH_REGISTRATION_IDLE_SECONDS: empty is the documented "off"."""
 
     @staticmethod
     def _settings() -> Settings:
         return make_settings(wiki_token=SecretStr("token"), wiki_org_id="1")
 
     def test_defaults_to_thirty_days(self) -> None:
-        assert self._settings().oauth_client_secret_expiry_seconds == 30 * 24 * 60 * 60
+        assert self._settings().oauth_registration_idle_seconds == 30 * 24 * 60 * 60
 
     @pytest.mark.parametrize("value", ["", "   "])
     def test_an_empty_variable_disables_it(
@@ -227,26 +288,67 @@ class TestClientSecretExpiry:
     ) -> None:
         # An environment variable cannot carry None; without the validator
         # this was an unparsable integer and the server would not start.
-        monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECONDS", value)
+        monkeypatch.setenv("OAUTH_REGISTRATION_IDLE_SECONDS", value)
 
-        assert self._settings().oauth_client_secret_expiry_seconds is None
+        assert self._settings().oauth_registration_idle_seconds is None
 
     def test_an_empty_env_file_entry_disables_it(self, env_dir: Path) -> None:
         write_env(
             env_dir,
-            "WIKI_TOKEN=abc\nWIKI_ORG_ID=123\nOAUTH_CLIENT_SECRET_EXPIRY_SECONDS=\n",
+            "WIKI_TOKEN=abc\nWIKI_ORG_ID=123\nOAUTH_REGISTRATION_IDLE_SECONDS=\n",
         )
 
-        assert Settings().oauth_client_secret_expiry_seconds is None
+        assert Settings().oauth_registration_idle_seconds is None
 
     def test_a_number_is_seconds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OAUTH_REGISTRATION_IDLE_SECONDS", "3600")
+
+        assert self._settings().oauth_registration_idle_seconds == 3600
+
+    @pytest.mark.parametrize("value", ["3600", ""])
+    def test_its_former_name_is_still_read(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        # OAUTH_CLIENT_SECRET_EXPIRY_SECONDS before secrets stopped expiring;
+        # deployments that set it keep their window, or keep it off.
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECONDS", value)
+
+        expected = int(value) if value else None
+        assert self._settings().oauth_registration_idle_seconds == expected
+        assert renamed_env_keys() == {
+            "oauth_client_secret_expiry_seconds": "oauth_registration_idle_seconds"
+        }
+
+    def test_the_new_name_wins_over_the_former_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OAUTH_REGISTRATION_IDLE_SECONDS", "100")
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECONDS", "200")
+
+        assert self._settings().oauth_registration_idle_seconds == 100
+
+    def test_the_former_name_is_no_typo(
+        self, monkeypatch: pytest.MonkeyPatch, env_dir: Path
+    ) -> None:
         monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECONDS", "3600")
 
-        assert self._settings().oauth_client_secret_expiry_seconds == 3600
+        assert suspicious_env_keys() == {}
+
+    def test_a_slip_on_the_former_name_points_at_the_new_one(
+        self, monkeypatch: pytest.MonkeyPatch, env_dir: Path
+    ) -> None:
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECOND", "3600")
+
+        assert suspicious_env_keys() == {
+            "oauth_client_secret_expiry_second": "oauth_registration_idle_seconds"
+        }
+
+    def test_nothing_is_renamed_by_default(self, env_dir: Path) -> None:
+        assert renamed_env_keys() == {}
 
     def test_zero_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # "Expire at once" or "never"? Too ambiguous to guess at.
-        monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECONDS", "0")
+        monkeypatch.setenv("OAUTH_REGISTRATION_IDLE_SECONDS", "0")
 
         with pytest.raises(ValidationError):
             self._settings()

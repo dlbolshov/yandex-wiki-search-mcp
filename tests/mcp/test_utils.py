@@ -10,6 +10,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 import mcp_wiki.mcp.request_ctx as request_ctx
 from mcp_wiki.mcp.utils import get_yandex_auth, resolve_page_locator
+from mcp_wiki.wiki.custom.errors import WikiArgumentError
 
 
 def make_request(query_params: dict[str, str]) -> Any:
@@ -113,6 +114,15 @@ class TestResolvePageLocator:
     def test_rejects_a_slug_that_normalizes_to_nothing(self) -> None:
         with pytest.raises(ToolError, match="Slug must not be empty"):
             resolve_page_locator(page_id=None, slug=" / ")
+
+    def test_a_url_that_cannot_be_split_is_an_argument_error(self) -> None:
+        # urlparse's own ValueError is no WikiError: on mcp >=2.1 the model
+        # would get a bare "Error executing tool" for its own typo.
+        with pytest.raises(WikiArgumentError, match="Not a valid page slug") as caught:
+            resolve_page_locator(page_id=None, slug="https://[wiki.yandex.ru/team/page")
+
+        assert isinstance(caught.value, ValueError)
+        assert "Invalid IPv6 URL" in str(caught.value)
 
     def test_normalizes_a_full_url(self) -> None:
         page_id, slug = resolve_page_locator(

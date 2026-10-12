@@ -19,6 +19,7 @@ from mcp_wiki.mcp.context import AppContext
 from mcp_wiki.mcp.server import create_mcp_server, http_app_options
 from mcp_wiki.settings import Settings
 from tests.mcp.conftest import (
+    LOCAL_BASE_URL,
     MCP_HTTP_HEADERS,
     create_test_settings,
     initialize_request,
@@ -37,7 +38,7 @@ def build_app(settings: Settings) -> Any:
 def read_configuration(query: str) -> dict[str, Any]:
     """Read wiki-mcp://configuration over HTTP with `query` on the endpoint."""
     settings = create_test_settings()
-    with TestClient(build_app(settings)) as client:
+    with TestClient(build_app(settings), base_url=LOCAL_BASE_URL) as client:
         client.post(
             f"/mcp{query}",
             json=initialize_request(),

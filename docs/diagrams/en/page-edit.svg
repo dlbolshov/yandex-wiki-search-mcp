@@ -479,7 +479,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="108.86666666666666" y="150" width="117.6" height="18" rx="3" class="c-mask"/>
           <text x="167.66666666666666" y="160" class="t-edge-emphasis" font-size="11" text-anchor="middle">POST /mcp?orgId=</text>
         </g>
-        <text x="126" y="188" class="t-dim" font-size="7">tools/call page_edit; OAuth off: no authentication</text>
+        <text x="126" y="188" class="t-dim" font-size="7">OAuth off: no auth; non-loopback Host → 421</text>
         </g>
 
         <g data-edge-from="sdk" data-edge-to="call_tool" data-edge-label="call_tool" data-edge-key="1" data-edge-id="m-dispatch">
@@ -585,6 +585,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="559.9333333333333" y="630" width="64.8" height="18" rx="3" class="c-mask"/>
           <text x="592.3333333333333" y="640" class="t-muted" font-size="11" text-anchor="middle">WikiPage</text>
         </g>
+        <text x="490" y="668" class="t-dim" font-size="7">unreadable body → WikiResponseError</text>
         </g>
 
         <g data-edge-from="tool" data-edge-to="call_tool" data-edge-label="PageEditResponse" data-edge-key="13" data-edge-id="m-response">
@@ -619,7 +620,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="335.0333333333333" y="800" width="150.6" height="18" rx="3" class="c-mask"/>
           <text x="410.3333333333333" y="810" class="t-edge-dashed" font-size="11" text-anchor="middle">ToolError · WikiError</text>
         </g>
-        <text x="368.66666666666663" y="838" class="t-dim" font-size="7">refusal: ToolError before POST; WikiError at GET or POST</text>
+        <text x="368.66666666666663" y="838" class="t-dim" font-size="7">refusal: ToolError before POST; WikiError: slug, GET or POST</text>
         </g>
 
         <g data-edge-from="call_tool" data-edge-to="sdk" data-edge-label="ToolError" data-edge-key="17" data-edge-id="m-error-promote">
@@ -642,8 +643,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <!-- Segment Labels -->
         <g data-graph-role="segment-label" data-segment-id="0">
-          <rect x="56" y="128" width="159.6" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="141" class="t-dim" font-size="9" font-weight="600">Intake: tools/call page_edit</text>
+          <rect x="56" y="128" width="248" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="141" class="t-dim" font-size="9" font-weight="600">Intake: Host check, then tools/call page_edit</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="1">
           <rect x="56" y="268" width="362.40000000000003" height="18" rx="3" class="c-mask"/>
@@ -662,8 +663,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="62" y="671" class="t-dim" font-size="9" font-weight="600">Reply</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="5">
-          <rect x="56" y="778" width="518.4000000000001" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="791" class="t-dim" font-size="9" font-weight="600">Error → isError: before POST (no match, not text, GET failure) or at POST (write may have landed)</text>
+          <rect x="56" y="778" width="622.4" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="791" class="t-dim" font-size="9" font-weight="600">Error → isError: before POST (malformed slug URL, no match, not text, GET failure) or at POST (write may have landed)</text>
         </g>
 
         <!-- Participants -->
