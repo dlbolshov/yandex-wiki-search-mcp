@@ -59,6 +59,29 @@ class GridConflict(WikiApiError):
         self.args = (f"{self.args[0]}. {self.RECOVERY}",)
 
 
+class WikiRateLimited(WikiApiError):
+    """429 — the Wiki API is throttling this token and refused the request.
+
+    First seen live on 2026-10-12, on a burst of about twenty writes sent back
+    to back; the API sends no Retry-After or X-RateLimit-* header. The
+    refused request is not applied — a redirect set that got 429 read back
+    unset — so it is safe to send again, which the bare "failed with status
+    429" never told anyone. The client retries a 429 by itself only for
+    requests safe to repeat in any case (GETs, search, upload parts); a write
+    is left to the caller, as GridConflict's is, so the advice is appended.
+    """
+
+    RECOVERY = (
+        "The Wiki API is rate-limiting requests and refused this one without "
+        "applying it. Wait a few seconds before retrying, and send writes one "
+        "at a time rather than in a burst."
+    )
+
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+        self.args = (f"{self.args[0]}. {self.RECOVERY}",)
+
+
 class WikiOperationError(WikiError):
     """A deferred Wiki operation failed or never settled.
 
@@ -257,11 +280,11 @@ def build_api_error(status: int, payload: bytes) -> WikiApiError:
             if isinstance(decoded, dict):
                 details = decoded
     error_code = details.get("error_code") if details else None
-    error_class = (
-        GridConflict
-        if status == 409 and error_code == "CONFLICTING_OPERATION"
-        else WikiApiError
-    )
+    error_class: type[WikiApiError] = WikiApiError
+    if status == 409 and error_code == "CONFLICTING_OPERATION":
+        error_class = GridConflict
+    elif status == 429:
+        error_class = WikiRateLimited
     return error_class(
         status=status,
         error_code=error_code,

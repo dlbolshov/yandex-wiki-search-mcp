@@ -345,7 +345,8 @@ then the code exchange, a call with the Bearer and a refresh:
   an in-flight open sees the finished state rather than racing it.
 - **`custom/errors.py`** — the taxonomy. `WikiError` → `WikiApiError`
   (HTTP-level, `build_api_error()` picks the subclass; `GridConflict` for the
-  grid lock) plus `PageNotFound`/`GridNotFound`/`AttachmentNotFound` (the
+  grid lock, `WikiRateLimited` for a `429`, both saying the request was not
+  applied and how to resend it) plus `PageNotFound`/`GridNotFound`/`AttachmentNotFound` (the
   last mapped in the client, because the download endpoint answers a miss
   with a placeholder GIF instead of the JSON error envelope),
   `WikiOperationError` (a deferred operation failed *after* every HTTP
@@ -433,7 +434,10 @@ calls every `WikiClient` method against a real organization and reports
 validation mismatches and undeclared keys. It exists because the search
 endpoint silently changed contract once (back when it was undocumented), and it caught `page_move`
 being a silent no-op before that tool could ship. It **writes** to the wiki
-under the given base slug — use a scratch spot in your personal section. The
+under the given base slug — use a scratch spot in your personal section. A
+grid lock (`409`) or a rate limit (`429`) is waited out rather than reported as
+drift, and a write is read back where it can be, so a change the API accepted
+but ignored fails the run. The
 `api-drift.yml` workflow runs it weekly when `DRIFT_*` secrets are configured;
 findings belong in [api-notes.md](api-notes.md).
 

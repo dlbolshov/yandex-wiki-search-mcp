@@ -8,6 +8,7 @@ from mcp_wiki.wiki.custom.errors import (
     GridConflict,
     WikiApiError,
     WikiLocalFileError,
+    WikiRateLimited,
     WikiResponseError,
     build_api_error,
 )
@@ -66,6 +67,17 @@ class TestGridConflict:
         assert "not applied" in message
         assert "re-read the grid" in message
         assert "one at a time" in message
+
+    def test_a_429_is_a_rate_limit_with_its_recovery(self) -> None:
+        # The API sends no Retry-After and no JSON envelope with it.
+        error = build_api_error(429, b"")
+
+        assert isinstance(error, WikiRateLimited)
+        assert isinstance(error, WikiApiError)
+        assert error.status == 429
+        assert str(error) == (
+            f"Wiki API request failed with status 429. {WikiRateLimited.RECOVERY}"
+        )
 
     def test_other_409s_stay_plain(self) -> None:
         error = build_api_error(409, b'{"error_code": "REVISION_MISMATCH"}')

@@ -26,6 +26,7 @@ from mcp_wiki.wiki.custom.errors import (
     PageNotFound,
     WikiArgumentError,
     WikiError,
+    WikiRateLimited,
     WikiResponseError,
     WikiTransportError,
 )
@@ -67,13 +68,22 @@ class TestWikiErrorsReachTheModel:
                 "failed before a response: TimeoutError",
             ),
             (WikiArgumentError("target must not be empty."), "target must not be"),
+            # Whether it was applied is what an agent needs to know.
+            (WikiRateLimited(status=429), "refused this one without applying it"),
             # For a write, the warning not to retry blind is the point.
             (
                 WikiResponseError("POST", "v1/pages", ValueError("not JSON")),
                 "The change may have been applied",
             ),
         ],
-        ids=["not-found", "grid-conflict", "transport", "argument", "unreadable"],
+        ids=[
+            "not-found",
+            "grid-conflict",
+            "transport",
+            "argument",
+            "rate-limited",
+            "unreadable",
+        ],
     )
     async def test_its_message_is_the_tool_result(
         self,
