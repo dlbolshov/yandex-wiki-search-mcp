@@ -186,6 +186,13 @@ class RedisOAuthStore(OAuthStore):
                 ttl=self._refresh_token_ttl,
             )
 
+            # Saved again for a refresh token it already maps (Yandex handed
+            # it back), the access token the mapping pointed at is the one
+            # replaced.
+            previous = await self._cache.get(self._mapping_key(token.refresh_token))
+            if previous and previous != hash_token(token.access_token):
+                await self._cache.delete(f"{self._ACCESS_TOKEN_KEY_PREFIX}{previous}")
+
             # Map refresh token to access token hash for cleanup
             # Store the hash (not raw token) to avoid exposing tokens in Redis
             await self._cache.set(

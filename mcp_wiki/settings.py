@@ -1,5 +1,6 @@
 import difflib
 import os
+import re
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -26,6 +27,10 @@ ENV_FILE = ".env"
 # field is either someone else's variable or our own typo — see
 # suspicious_env_keys().
 SETTINGS_PREFIXES = ("wiki_", "oauth_", "redis_", "mcp_", "tool_")
+
+# One MCP_ALLOWED_HOSTS entry: a host name or a bracketed IPv6 address, with
+# an optional port or `*` for any — the shapes a Host header can match.
+ALLOWED_HOST_ENTRY = re.compile(r"(\[[0-9a-f:.]+\]|[a-z0-9_.-]+)(:(\d+|\*))?")
 
 # Former names of settings, still read and mapped to the field that replaced
 # them. main() warns when one is in use; suspicious_env_keys() leaves them be.
@@ -92,7 +97,9 @@ class Settings(BaseSettings):
     # and the MCP Python SDK client never recovers from that. None disables
     # the expiry; a registration kept with one while it was on loses it at
     # its next grant. An empty variable is how the env file spells None (see
-    # below). Read under its former name too, OAUTH_CLIENT_SECRET_EXPIRY_SECONDS.
+    # below). Read under its former name too, OAUTH_CLIENT_SECRET_EXPIRY_SECONDS:
+    # within one source the new name wins, but as for every setting the
+    # process environment beats .env whichever name it uses.
     oauth_registration_idle_seconds: int | None = Field(
         default=30 * 24 * 60 * 60,
         ge=1,
@@ -103,7 +110,8 @@ class Settings(BaseSettings):
     mcp_server_public_url: AnyHttpUrl | None = None
     # HTTP transports: the Host header values the MCP endpoint answers to,
     # comma-separated — DNS-rebinding protection. Unset means loopback names
-    # only without OAuth, and no check under OAuth; `*` switches it off.
+    # only without OAuth, and no check under OAuth; a list replaces the
+    # loopback default rather than adding to it; `*` switches it off.
     # NoDecode: a comma list, not the JSON pydantic-settings expects of a list.
     mcp_allowed_hosts: Annotated[list[str] | None, NoDecode] = None
     oauth_encryption_keys: SecretStr | None = None
@@ -119,8 +127,9 @@ class Settings(BaseSettings):
     def split_allowed_hosts(cls, value: object) -> object:
         """Read `a, B:8000` as ["a", "b:8000"]; an empty value as unset.
 
-        A URL is refused rather than kept: `https://wiki.example.com` would
-        never equal a Host header, and every request would get a 421.
+        An entry no Host header could ever equal is refused rather than
+        kept, since every request would get a 421: a URL, an IPv6 address
+        without brackets, a JSON list where a comma list is expected.
         """
         if isinstance(value, str):
             value = value.split(",")
@@ -129,10 +138,11 @@ class Settings(BaseSettings):
         entries = [str(entry).strip().lower() for entry in value]
         entries = [entry for entry in entries if entry]
         for entry in entries:
-            if "/" in entry:
+            if entry != "*" and not ALLOWED_HOST_ENTRY.fullmatch(entry):
                 raise ValueError(
-                    f"MCP_ALLOWED_HOSTS takes host names, optionally with a "
-                    f"port (wiki.example.com, mcp-wiki:8000), not {entry!r}"
+                    "MCP_ALLOWED_HOSTS is a comma-separated list of host names, "
+                    "each optionally with a port (wiki.example.com, "
+                    f"mcp-wiki:8000, [::1]), or `*`; {entry!r} is none of these"
                 )
         return entries or None
 
@@ -238,7 +248,8 @@ def suspicious_env_keys() -> dict[str, str]:
     for key in candidates:
         close = difflib.get_close_matches(key, known, n=1, cutoff=TYPO_SIMILARITY)
         if close:
-            suspects[key] = close[0]
+            # A slip on a former name points at the name that replaced it.
+            suspects[key] = RENAMED_SETTINGS.get(close[0], close[0])
     return suspects
 
 

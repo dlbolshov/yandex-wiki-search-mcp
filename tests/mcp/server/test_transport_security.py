@@ -8,15 +8,18 @@ does nothing about that; the Host check does. Over real HTTP through the
 SDK's app, because the SDK is what enforces it, on both protocol eras.
 """
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.shared.auth import OAuthToken
 from pydantic import AnyHttpUrl, SecretStr
 from starlette.testclient import TestClient
 
 from mcp_wiki.mcp.context import AppContext
+from mcp_wiki.mcp.oauth.provider import YandexOAuthAuthorizationServerProvider
 from mcp_wiki.mcp.server import (
     allowed_hosts_summary,
     create_mcp_server,
@@ -92,10 +95,15 @@ class TestTheRule:
             plain_http(mcp_allowed_hosts=hosts)
         ) == TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
-    def test_oauth_leaves_it_to_the_sdk(self) -> None:
+    @pytest.mark.parametrize("host", ["0.0.0.0", "127.0.0.1"])
+    def test_oauth_checks_nothing_unless_asked(self, host: str) -> None:
         # A bearer token is no credential a browser attaches by itself, and
         # an OAuth deployment sits behind a proxy whose Host may be rewritten.
-        assert transport_security(with_oauth(plain_http())) is None
+        # Explicitly off, not None: given None the SDK would arm its own
+        # loopback-only check for a loopback bind.
+        assert transport_security(
+            with_oauth(plain_http(host=host))
+        ) == TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
     def test_oauth_honours_an_explicit_list(self) -> None:
         settings = with_oauth(plain_http(mcp_allowed_hosts=["mcp.example.com"]))
@@ -114,10 +122,10 @@ class TestTheStartupLine:
             (plain_http(), "localhost,127.0.0.1,[::1]"),
             (plain_http(mcp_allowed_hosts=["mcp-wiki"]), "mcp-wiki"),
             (plain_http(mcp_allowed_hosts=["*"]), "*"),
-            # Under OAuth with nothing listed the SDK checks only a loopback
-            # bind; on 0.0.0.0 nothing is checked.
+            # Under OAuth with nothing listed nothing is checked, whatever
+            # the bind.
             (with_oauth(plain_http()), "*"),
-            (with_oauth(plain_http(host="127.0.0.1")), "localhost,127.0.0.1,[::1]"),
+            (with_oauth(plain_http(host="127.0.0.1")), "*"),
         ],
         ids=["stdio", "default", "listed", "off", "oauth", "oauth-loopback"],
     )
@@ -144,10 +152,85 @@ def tools_call() -> dict[str, Any]:
     }
 
 
+MODERN_META = {
+    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+    "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "1"},
+    "io.modelcontextprotocol/clientCapabilities": {},
+}
+
+
+def modern(
+    method: str, name: str | None = None
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """A 2026-07-28 request: no handshake, the method in a header too."""
+    params: dict[str, Any] = {"_meta": MODERN_META}
+    headers = {
+        **MCP_HTTP_HEADERS,
+        "MCP-Protocol-Version": "2026-07-28",
+        "Mcp-Method": method,
+    }
+    if name is not None:
+        params |= {"name": name, "arguments": {}}
+        headers["Mcp-Name"] = name
+    return {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, headers
+
+
 class TestOverHttp:
     @pytest.fixture
     def wiki(self) -> AsyncMock:
         return AsyncMock()
+
+    def test_the_modern_era_is_checked_too(self, wiki: AsyncMock) -> None:
+        # A different handler in the SDK from the 2025-era one; a page needs
+        # no handshake here either.
+        body, headers = modern("tools/call", "user_get_current")
+        with TestClient(
+            serve(plain_http(), wiki), base_url="http://attacker.example:8000"
+        ) as client:
+            refused = client.post("/mcp", json=body, headers=headers)
+        listing, list_headers = modern("tools/list")
+        with TestClient(
+            serve(plain_http(), wiki), base_url="http://localhost:8000"
+        ) as client:
+            served = client.post("/mcp", json=listing, headers=list_headers)
+
+        assert refused.status_code == 421
+        wiki.user_get_current.assert_not_awaited()
+        assert served.status_code == 200, served.text
+
+    def test_an_oauth_server_on_loopback_serves_its_public_name(self) -> None:
+        # The deployment behind a same-host proxy: bound to 127.0.0.1 (the
+        # default), reached as wiki.example.com, with a valid token. Given no
+        # transport_security, the SDK would arm its loopback-only check for
+        # that bind and turn every such request away with a 421.
+        settings = with_oauth(plain_http(host="127.0.0.1"))
+        settings.oauth_use_scopes = False
+        server = create_mcp_server(
+            settings=settings,
+            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
+        )
+        provider = server._auth_server_provider
+        assert isinstance(provider, YandexOAuthAuthorizationServerProvider)
+        store = provider._store
+        asyncio.run(
+            store.save_oauth_token(
+                OAuthToken(
+                    access_token="bearer-1", token_type="Bearer", expires_in=3600
+                ),
+                "client-1",
+                [],
+                None,
+            )
+        )
+        app = server.streamable_http_app(**http_app_options(settings))
+        with TestClient(app, base_url="https://wiki.example.com") as client:
+            response = client.post(
+                "/mcp",
+                json=initialize_request(),
+                headers={**MCP_HTTP_HEADERS, "Authorization": "Bearer bearer-1"},
+            )
+
+        assert response.status_code == 200, response.text
 
     def test_a_rebound_page_is_refused_before_any_tool_runs(
         self, wiki: AsyncMock

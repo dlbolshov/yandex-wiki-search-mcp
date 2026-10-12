@@ -269,7 +269,7 @@ More verified API behavior (scopes, 403 semantics, error envelopes, limits): [do
 | `WIKI_READ_ONLY` | no | `false` | `true` disables all write tools server-side |
 | `TRANSPORT` | no | `stdio` | `stdio` \| `sse` \| `streamable-http` |
 | `HOST` / `PORT` | no | `127.0.0.1` / `8000` | HTTP transports only. The Docker image sets `HOST=0.0.0.0`, the address a published port reaches; natively, set it only to serve other machines |
-| `MCP_ALLOWED_HOSTS` | no | loopback without OAuth | HTTP transports only: comma-separated `Host` names the MCP endpoint answers, each with or without a port (`wiki.example.com,mcp-wiki:8000`). Unset, a server without OAuth answers only `localhost`, `127.0.0.1` and `[::1]`, which keeps a web page from driving it through DNS rebinding; list any other name clients use — a Compose service name, a LAN address, a reverse proxy's hostname — or they get `421`. Under OAuth nothing is checked unless this is set. `*` switches the check off |
+| `MCP_ALLOWED_HOSTS` | no | loopback without OAuth | HTTP transports only: comma-separated `Host` names the MCP endpoint answers, each with or without a port (`wiki.example.com,mcp-wiki:8000`). Unset, a server without OAuth answers only `localhost`, `127.0.0.1` and `[::1]`, which keeps a web page from driving it through DNS rebinding; list any other name clients use — a Compose service name, a LAN address, a reverse proxy's hostname — or they get `421`. A list replaces the loopback default, so keep `localhost` and `127.0.0.1` in it if local clients still connect. Under OAuth nothing is checked unless this is set. `*` switches the check off |
 | `STATELESS_HTTP` / `JSON_RESPONSE` | no | `true` / `true` | `streamable-http` only: keep no per-session state / answer with JSON instead of SSE |
 | `LOG_LEVEL` | no | `INFO` | Logs go to stderr; `DEBUG` additionally logs Wiki API requests (method, path, status, duration — never headers or bodies) |
 | `WIKI_API_BASE_URL` | no | `https://api.wiki.yandex.net` | Wiki API endpoint |
@@ -363,7 +363,7 @@ services:
       - WIKI_ORG_ID=${WIKI_ORG_ID}
       - TRANSPORT=streamable-http
       # Only if another container reaches it as http://mcp-wiki:8000:
-      # - MCP_ALLOWED_HOSTS=localhost,mcp-wiki
+      # - MCP_ALLOWED_HOSTS=localhost,127.0.0.1,mcp-wiki
     logging:
       driver: json-file
       options:

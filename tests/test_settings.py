@@ -236,15 +236,33 @@ class TestAllowedHosts:
 
         assert Settings().mcp_allowed_hosts == ["*"]
 
-    @pytest.mark.parametrize("value", ["https://wiki.example.com", "host/path"])
-    def test_a_url_is_refused(
+    @pytest.mark.parametrize(
+        "value",
+        ["https://wiki.example.com", "host/path", "::1", '["a", "b"]', "a b"],
+        ids=["url", "path", "bare-ipv6", "json-list", "space"],
+    )
+    def test_what_no_host_header_could_equal_is_refused(
         self, monkeypatch: pytest.MonkeyPatch, value: str
     ) -> None:
-        # It would never equal a Host header: every request would get a 421.
+        # Kept, it would turn every request away with a 421.
         monkeypatch.setenv("MCP_ALLOWED_HOSTS", value)
 
-        with pytest.raises(ValidationError, match="takes host names"):
+        with pytest.raises(ValidationError, match="comma-separated list of host"):
             self._settings()
+
+    def test_ports_wildcards_and_bracketed_ipv6_are_accepted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "MCP_ALLOWED_HOSTS", "[::1], [::1]:8000, mcp-wiki:*, 10.0.0.5"
+        )
+
+        assert self._settings().mcp_allowed_hosts == [
+            "[::1]",
+            "[::1]:8000",
+            "mcp-wiki:*",
+            "10.0.0.5",
+        ]
 
     def test_a_misspelling_is_caught(
         self, monkeypatch: pytest.MonkeyPatch, env_dir: Path
@@ -315,6 +333,15 @@ class TestRegistrationIdleWindow:
         monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECONDS", "3600")
 
         assert suspicious_env_keys() == {}
+
+    def test_a_slip_on_the_former_name_points_at_the_new_one(
+        self, monkeypatch: pytest.MonkeyPatch, env_dir: Path
+    ) -> None:
+        monkeypatch.setenv("OAUTH_CLIENT_SECRET_EXPIRY_SECOND", "3600")
+
+        assert suspicious_env_keys() == {
+            "oauth_client_secret_expiry_second": "oauth_registration_idle_seconds"
+        }
 
     def test_nothing_is_renamed_by_default(self, env_dir: Path) -> None:
         assert renamed_env_keys() == {}

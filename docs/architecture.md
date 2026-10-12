@@ -145,14 +145,18 @@ precedent).
     drive it from the operator's browser, same-origin as far as the browser
     knows; only the `Host` header, which a page cannot forge, gives it away.
     So without OAuth only loopback names pass (`localhost`, `127.0.0.1`,
-    `[::1]`, on any port) unless `MCP_ALLOWED_HOSTS` lists others, and an
+    `[::1]`, on any port) unless `MCP_ALLOWED_HOSTS` lists others — the
+    list replaces that default rather than adding to it — and an
     Origin, when a browser sends one, has to be on an allowed host too.
     Under OAuth a bearer token is no credential a browser attaches by
-    itself, so nothing is checked unless `MCP_ALLOWED_HOSTS` is set. `*`
+    itself, so nothing is checked unless `MCP_ALLOWED_HOSTS` is set, and
+    that is said explicitly: left to the SDK, a loopback `HOST` would get
+    its loopback-only check and refuse a same-host proxy's public name. `*`
     switches the check off. `HOST` itself defaults to `127.0.0.1`, as the
     MCP spec asks of a local server; the Docker image sets `0.0.0.0`. The
     startup line logs both, and a rejected request is logged by the SDK
-    with its `Host`.
+    with its `Host` (over the legacy SSE transport the SDK then also raises,
+    so uvicorn adds an ERROR traceback per rejection).
   - `server_version()`/`server_description()` read package metadata, so
     `pyproject.toml` stays the single source for both.
 - **`mcp_wiki/mcp/context.py`** — `AppContext`, the lifespan payload: the
@@ -275,9 +279,9 @@ memory store, Fernet-encrypted for Redis.
   twice the surviving size), so abandoned logins cannot grow the process
   without bound. Registrations included: `get_client` refuses an expired one
   itself rather than waiting for the sweep, as Redis has by then dropped the
-  key. The SDK checks no expiry at all on a public client and a confidential
-  one's only at `/token`, so `/authorize` would otherwise send the user
-  through the Yandex login just to be refused at the end.
+  key. The SDK knows nothing of a registration's lifetime — secrets are
+  stamped 0 — so a record returned past its deadline would be accepted
+  everywhere.
 - **`stores/redis.py`** — production store. Only the access, refresh and
   refresh→access mapping keys are SHA-256 hashes; client, state and
   auth-code keys are the raw ids. Field-level encryption (`crypto.py`,
@@ -451,7 +455,7 @@ findings belong in [api-notes.md](api-notes.md).
   users get. It exists because mcp 2.1.0 changed what a failed tool shows
   the model (see `WikiMCPServer.call_tool` above): 43 tests failed there and
   passed on the lock, and `install` only counts tools.
-- **test** — pytest across the OS × Python matrix (3.11–3.13); coverage
+- **test** — pytest across the OS × Python matrix (3.11–3.14); coverage
   uploaded to Codecov from one matrix entry. The **100% coverage gate is
   enforced on ubuntu only**, as a separate `coverage report --fail-under=100`
   step. Windows and macOS run every test they can, but a few tests — and the
@@ -588,7 +592,8 @@ diagrams. Commit the sources, HTML and SVG together.
 `uv` for everything (sync, lock, build, run), `Taskfile.yml` for shortcuts
 (`task` = lock + format + check + test; `task test-cov` = the CI gate plus an
 HTML report), ruff (lint + format), mypy **and** ty (two type checkers — ty
-is the second opinion), pytest + pytest-asyncio. Python 3.11–3.13. The
+is the second opinion), pytest + pytest-asyncio. Python 3.11–3.14, the range
+in `.python-versions` (see below). The
 package ships `py.typed`.
 
 uv's own version is pinned twice and bounded nowhere. The Dockerfile's uv image

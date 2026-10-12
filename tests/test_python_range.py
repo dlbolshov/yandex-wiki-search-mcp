@@ -17,6 +17,8 @@ inside the repo, while uv reads both. And no upper bound on
 
 import json
 import re
+import shutil
+import subprocess  # noqa: S404
 import tomllib
 from pathlib import Path
 
@@ -26,9 +28,10 @@ from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parents[1]
 MINORS = range(8, 30)
-# A wheel built for one CPython minor (`-cp314-`), or for the stable ABI from
-# one minor on (`-cp311-abi3-`).
-CPYTHON_TAG = re.compile(r"-cp3(?P<minor>\d+)-(?P<abi>abi3|cp3\d+t?)-")
+# A wheel built for one CPython minor (`-cp314-cp314-`), or for the stable ABI
+# from one minor on (`-cp311-abi3-`). Not a free-threaded one (`cp314t`): uv
+# installs the default build, which cannot load it.
+CPYTHON_TAG = re.compile(r"-cp3(?P<minor>\d+)-(?P<abi>abi3|cp3\d+)-")
 
 
 def _range() -> SpecifierSet:
@@ -104,6 +107,17 @@ def test_the_bundle_carries_the_same_range() -> None:
     assert [SpecifierSet(env["UV_PYTHON"]) for env in envs] == [_range()] * len(envs)
 
 
-def test_there_is_no_singular_pin() -> None:
-    # pyenv and asdf would read it, and choke on a range.
-    assert not (ROOT / ".python-version").exists()
+def test_there_is_no_singular_pin_in_the_repository() -> None:
+    # pyenv and asdf would read it, and choke on a range. A personal one —
+    # `pyenv local`, `uv python pin` — is the developer's business and stays
+    # untracked (.gitignore); only a committed one would reach everybody.
+    git = shutil.which("git") or pytest.skip("git is not installed")
+    tracked = subprocess.run(  # noqa: S603
+        [git, "ls-files", "--error-unmatch", ".python-version"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if b"not a git repository" in tracked.stderr:
+        pytest.skip("not a git checkout")
+    assert tracked.returncode != 0, ".python-version is committed"

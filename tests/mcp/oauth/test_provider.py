@@ -536,6 +536,60 @@ class TestRefreshOrdering:
         assert await memory_store.get_refresh_token("old-refresh") is not None
         assert await memory_store.get_access_token("ya-access-1") is not None
 
+    @pytest.mark.parametrize("store_kind", ["memory", "redis"])
+    @pytest.mark.parametrize(
+        ("new_refresh", "new_access"),
+        [
+            ("ya-refresh-1", "ya-access-1"),
+            ("old-refresh", "ya-access-1"),
+            (None, "ya-access-1"),
+            ("ya-refresh-1", "old-access"),
+        ],
+        ids=["both-new", "refresh-handed-back", "no-refresh", "access-handed-back"],
+    )
+    async def test_every_shape_of_answer_leaves_one_live_pair(
+        self,
+        memory_store: InMemoryOAuthStore,
+        redis_store: RedisOAuthStore,
+        client_info: OAuthClientInformationFull,
+        store_kind: str,
+        new_refresh: str | None,
+        new_access: str,
+    ) -> None:
+        # Whatever Yandex hands back, the replaced access token stops working
+        # and the refresh token the client now holds leads to the new one —
+        # so revoking it later takes the new access token with it.
+        store: OAuthStore = memory_store if store_kind == "memory" else redis_store
+        provider = make_provider(store, registration_idle_ttl=REGISTRATION_IDLE_TTL)
+        await store.save_oauth_token(
+            make_token(access="old-access", refresh="old-refresh"),
+            "client-1",
+            ["wiki:read"],
+            None,
+        )
+        refresh = await store.get_refresh_token("old-refresh")
+        assert refresh is not None
+        payload: dict[str, Any] = {**TOKEN_PAYLOAD, "access_token": new_access}
+        if new_refresh is None:
+            del payload["refresh_token"]
+        else:
+            payload["refresh_token"] = new_refresh
+
+        with aioresponses() as mocked:
+            mocked.post(TOKEN_URL, payload=payload)
+            await provider.exchange_refresh_token(client_info, refresh, scopes=[])
+
+        held = new_refresh or "old-refresh"
+        assert await store.get_access_token(new_access) is not None
+        assert await store.get_refresh_token(held) is not None
+        if new_access != "old-access":
+            assert await store.get_access_token("old-access") is None
+        if held != "old-refresh":
+            assert await store.get_refresh_token("old-refresh") is None
+
+        await store.revoke_refresh_token(held)
+        assert await store.get_access_token(new_access) is None
+
     async def test_a_failed_revoke_does_not_fail_the_grant(
         self,
         provider: YandexOAuthAuthorizationServerProvider,
@@ -752,7 +806,7 @@ class TestRegistrationLifetime:
 
 
 class TestRegistrationRenewal:
-    """A token grant restarts a public registration's idle window.
+    """A token grant restarts a registration's idle window.
 
     A fixed lifetime would retire a registration in active use: the next
     refresh gets invalid_client, and the SDK's own client then reopens

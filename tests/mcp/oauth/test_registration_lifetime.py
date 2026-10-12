@@ -63,8 +63,8 @@ def test_a_confidential_registration_gets_the_same_window(store: StoreKind) -> N
 def test_nothing_expires_with_the_expiry_switched_off(
     store: StoreKind, auth_method: str
 ) -> None:
-    # The SDK stamps a confidential client 0 here, RFC 7591's "never": the
-    # in-memory store once read it as a 1970 deadline and swept the lot.
+    # The SDK stamps a confidential client 0, RFC 7591's "never" — which the
+    # in-memory store once read as a 1970 deadline, sweeping the lot.
     with oauth_app(store, expiry=None) as app:
         body = register(app.http, auth_method)
         remaining = app.remaining(body["client_id"])

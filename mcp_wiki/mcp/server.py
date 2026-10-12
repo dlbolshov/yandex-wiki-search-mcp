@@ -319,9 +319,6 @@ def create_mcp_server(
 # What the MCP endpoint answers to without OAuth when MCP_ALLOWED_HOSTS is
 # unset: the names a client on the same machine reaches it by.
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "[::1]")
-# The hosts the SDK arms its own loopback check for when given no
-# transport_security (mcp/server/lowlevel/server.py, sse_app()).
-_SDK_LOOPBACK_BINDS = ("127.0.0.1", "localhost", "::1")
 
 
 def _allowed_host_entries(settings: Settings) -> list[str] | None:
@@ -334,33 +331,32 @@ def _allowed_host_entries(settings: Settings) -> list[str] | None:
     only loopback names pass by default — any other name a client uses (a
     Compose service, a LAN address, a proxy's hostname) has to be listed.
     Under OAuth a bearer token is no credential a browser attaches on its
-    own, so nothing is checked unless the operator asks; the SDK still arms
-    its loopback check for a loopback `HOST`.
+    own, so nothing is checked unless the operator asks. A configured list
+    replaces the loopback default; it does not add to it.
     """
     configured = settings.mcp_allowed_hosts
     if configured is not None:
         return None if "*" in configured else configured
-    if not settings.oauth_enabled or settings.host in _SDK_LOOPBACK_BINDS:
-        return list(LOOPBACK_HOSTS)
-    return None
+    return None if settings.oauth_enabled else list(LOOPBACK_HOSTS)
 
 
 def _has_port(entry: str) -> bool:
     return ":" in entry.rsplit("]", 1)[-1]
 
 
-def transport_security(settings: Settings) -> TransportSecuritySettings | None:
+def transport_security(settings: Settings) -> TransportSecuritySettings:
     """The DNS-rebinding protection both HTTP transports run with.
 
-    None only under OAuth with MCP_ALLOWED_HOSTS unset, which leaves the
-    choice to the SDK. An entry without a port matches the bare name (a
-    proxy on 443 sends no port) and the name on any port. Origins follow
-    from the hosts: a browser client on another port of an allowed host
-    passes, a page served from anywhere else does not, and a client that
-    sends no Origin (every non-browser one) is not asked for it.
+    Always explicit, never None: given None the SDK arms a loopback-only
+    check by itself whenever `host` is a loopback address — which since
+    HOST defaults to 127.0.0.1 would turn away every request an OAuth
+    server's same-host proxy forwards under the public name. An entry
+    without a port matches the bare name (a proxy on 443 sends no port) and
+    the name on any port. Origins follow from the hosts: a browser client on
+    another port of an allowed host passes, a page served from anywhere else
+    does not, and a client that sends no Origin (every non-browser one) is
+    not asked for it.
     """
-    if settings.oauth_enabled and settings.mcp_allowed_hosts is None:
-        return None
     entries = _allowed_host_entries(settings)
     if entries is None:
         return TransportSecuritySettings(enable_dns_rebinding_protection=False)
@@ -395,7 +391,8 @@ def http_app_options(settings: Settings) -> dict[str, Any]:
     Misdirected Request while /healthz keeps returning 200, which reads as
     "up" to every probe that matters. So `host` always goes in, and the
     protection is chosen here, explicitly (see transport_security()). A
-    rejected Host is logged by the SDK at WARNING, naming it.
+    rejected Host is logged by the SDK at WARNING, naming it; over SSE the
+    SDK then also raises, so uvicorn logs an ERROR traceback per rejection.
     """
     return {
         "host": settings.host,

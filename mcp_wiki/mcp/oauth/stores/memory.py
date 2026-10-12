@@ -231,7 +231,12 @@ class InMemoryOAuthStore(OAuthStore):
                 expires_at=int(time.time()) + REFRESH_TOKEN_TTL_SECONDS,
             )
 
-            # Map refresh token hash to access token hash for cleanup
+            # Map refresh token hash to access token hash for cleanup. Saved
+            # again for a refresh token it already maps (Yandex handed it
+            # back), the access token it pointed at is the one replaced.
+            previous = self._refresh2access_tokens.get(refresh_token_hash)
+            if previous is not None and previous != access_token_hash:
+                self._tokens.pop(previous, None)
             self._refresh2access_tokens[refresh_token_hash] = access_token_hash
 
     async def get_access_token(self, token: str) -> AccessToken | None:

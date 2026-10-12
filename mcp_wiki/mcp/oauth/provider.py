@@ -184,15 +184,17 @@ class YandexOAuthAuthorizationServerProvider(
         expiry off has to reach the registrations made while it was on.
 
         Best effort. It runs after the grant is committed — the new tokens
-        saved, an old refresh token already revoked — so a store failure here
+        saved, the old refresh token retired if Yandex replaced it — so a
+        store failure here
         must not turn that grant into a 500 whose tokens the client never
         receives. A miss leaves the previous deadline until the next grant.
 
         A confidential registration made before secrets stopped expiring
         still carries the deadline it was stamped with, and the SDK refuses
         the secret past it whatever the store keeps. Saving it with
-        client_secret_expires_at 0 lifts that too, so a client still in use
-        moves to the idle rule at its first grant.
+        client_secret_expires_at 0 lifts that at its first grant. One whose
+        client sends no grant before that deadline — a year-long access
+        token needs none — still expires on it, as it always would have.
         """
         if client.client_secret_expires_at:
             client = client.model_copy(update={"client_secret_expires_at": 0})
@@ -349,17 +351,26 @@ class YandexOAuthAuthorizationServerProvider(
 
         if client.client_id is None:
             raise ValueError("client_id must be provided")
+        # No new refresh token means the client keeps using the old one
+        # (RFC 6749 §6), so it is stored as that token's pair: the old access
+        # token it pointed at is dropped, and revoking it later reaches the
+        # new one. The client still gets Yandex's answer as it came.
+        stored = (
+            token
+            if token.refresh_token is not None
+            else token.model_copy(update={"refresh_token": refresh_token.token})
+        )
         # The new pair first. Until it is stored the old refresh token is the
         # client's only way back in: revoked first, a failed save here left
         # the client with a 500, no new tokens and an old one that no longer
         # worked either.
         await self._store.save_oauth_token(
-            token=token,
+            token=stored,
             client_id=client.client_id,
             scopes=refresh_token.scopes,
             resource=None,
         )
-        await self._retire_refresh_token(refresh_token.token, replaced_by=token)
+        await self._retire_refresh_token(refresh_token.token, replaced_by=stored)
         await self._renew_registration(client, token)
         return token
 
@@ -367,16 +378,16 @@ class YandexOAuthAuthorizationServerProvider(
         """Revoke the refresh token a successful refresh traded in.
 
         Only when Yandex issued a different one. The same token handed back
-        is the record just saved, and revoking it would delete it. No new
-        token at all leaves the old one in force: RFC 6749 §6 has the client
-        keep using it then, so revoking it would end the client's session.
-        The access token the new pair carries is spared too, in case Yandex
-        handed that one back unchanged.
+        (or none, which the caller stores as the same) is the record just
+        saved, and revoking it would delete it; saving it again already
+        dropped the access token it used to point at. The access token the
+        new pair carries is spared too, in case Yandex handed that one back
+        unchanged.
 
         Best effort, like the renewal: the grant is already stored, and a
         failed cleanup only leaves the old refresh token to run out its TTL.
         """
-        if replaced_by.refresh_token is None or replaced_by.refresh_token == old:
+        if replaced_by.refresh_token == old:
             return
         try:
             await self._store.revoke_refresh_token(
