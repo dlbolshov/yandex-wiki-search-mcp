@@ -479,7 +479,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="108.86666666666666" y="150" width="117.6" height="18" rx="3" class="c-mask"/>
           <text x="167.66666666666666" y="160" class="t-edge-emphasis" font-size="11" text-anchor="middle">POST /mcp?orgId=</text>
         </g>
-        <text x="126" y="188" class="t-dim" font-size="7">tools/call page_edit; без OAuth — без аутентификации</text>
+        <text x="126" y="188" class="t-dim" font-size="7">без OAuth — без аутентификации; Host не loopback → 421</text>
         </g>
 
         <g data-edge-from="sdk" data-edge-to="call_tool" data-edge-label="call_tool" data-edge-key="1" data-edge-id="m-dispatch">
@@ -585,6 +585,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="559.9333333333333" y="630" width="64.8" height="18" rx="3" class="c-mask"/>
           <text x="592.3333333333333" y="640" class="t-muted" font-size="11" text-anchor="middle">WikiPage</text>
         </g>
+        <text x="490" y="668" class="t-dim" font-size="7">нечитаемое тело → WikiResponseError</text>
         </g>
 
         <g data-edge-from="tool" data-edge-to="call_tool" data-edge-label="PageEditResponse" data-edge-key="13" data-edge-id="m-response">
@@ -619,7 +620,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="335.0333333333333" y="800" width="150.6" height="18" rx="3" class="c-mask"/>
           <text x="410.3333333333333" y="810" class="t-edge-dashed" font-size="11" text-anchor="middle">ToolError · WikiError</text>
         </g>
-        <text x="368.66666666666663" y="838" class="t-dim" font-size="7">отказ: ToolError до POST; WikiError — на GET или на POST</text>
+        <text x="368.66666666666663" y="838" class="t-dim" font-size="7">отказ: ToolError до POST; WikiError — slug, GET или POST</text>
         </g>
 
         <g data-edge-from="call_tool" data-edge-to="sdk" data-edge-label="ToolError" data-edge-key="17" data-edge-id="m-error-promote">
@@ -642,8 +643,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <!-- Segment Labels -->
         <g data-graph-role="segment-label" data-segment-id="0">
-          <rect x="56" y="128" width="154.4" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="141" class="t-dim" font-size="9" font-weight="600">Приём: tools/call page_edit</text>
+          <rect x="56" y="128" width="263.6" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="141" class="t-dim" font-size="9" font-weight="600">Приём: проверка Host, затем tools/call page_edit</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="1">
           <rect x="56" y="268" width="398.8" height="18" rx="3" class="c-mask"/>
@@ -662,8 +663,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="62" y="671" class="t-dim" font-size="9" font-weight="600">Ответ</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="5">
-          <rect x="56" y="778" width="513.2" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="791" class="t-dim" font-size="9" font-weight="600">Ошибка → isError: до POST (нет совпадения, не текст, сбой GET) или на POST (запись могла пройти)</text>
+          <rect x="56" y="778" width="643.2" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="791" class="t-dim" font-size="9" font-weight="600">Ошибка → isError: до POST (некорректный URL в slug, нет совпадения, не текст, сбой GET) или на POST (запись могла пройти)</text>
         </g>
 
         <!-- Participants -->

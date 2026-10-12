@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 920 877" data-sequence-column-fit="spread" data-reader-fit="intrinsic-height" role="img" lang="ru" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="width: 920px; height: 877px; min-width: 0px;" width="920" height="877" xmlns="http://www.w3.org/2000/svg"><style>
+<svg viewBox="0 0 920 921" data-sequence-column-fit="spread" data-reader-fit="intrinsic-height" role="img" lang="ru" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="width: 920px; height: 921px; min-width: 0px;" width="920" height="921" xmlns="http://www.w3.org/2000/svg"><style>
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
 These fixed bytes are shared by the viewer and its SVG/raster exports.
@@ -407,7 +407,7 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
 svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #d9dee5; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #94a3b8; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; }
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --canvas-dot: rgba(148, 163, 184, 0.16); --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
-</style><rect x="0" y="0" width="920" height="877" class="c-bg-rect"/>
+</style><rect x="0" y="0" width="920" height="921" class="c-bg-rect"/>
         <title id="archify-diagram-title">OAuth 2/2: токены, вызов и обновление</title>
         <desc id="archify-diagram-description">Диаграмма последовательности, созданная в Archify.</desc>
         <!-- Definitions -->
@@ -437,14 +437,14 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="1" x="48" y="386" width="824" height="159" rx="10" class="c-lane" stroke-width="1"/>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="2" x="48" y="564" width="824" height="215" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="2" x="48" y="564" width="824" height="259" rx="10" class="c-lane" stroke-width="1"/>
 
         <!-- Lifelines -->
-        <path d="M 129.5 142 L 129.5 781" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
-        <path d="M 300.25 142 L 300.25 781" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
-        <path d="M 471 142 L 471 781" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
-        <path d="M 641.75 142 L 641.75 781" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
-        <path d="M 812.5 142 L 812.5 781" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 129.5 142 L 129.5 825" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 300.25 142 L 300.25 825" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 471 142 L 471 825" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 641.75 142 L 641.75 825" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
+        <path d="M 812.5 142 L 812.5 825" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
 
         <!-- Activations -->
 
@@ -499,13 +499,13 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
         </g>
 
-        <g data-edge-from="server" data-edge-to="store" data-edge-label="продлить публ. клиента" data-edge-key="6" data-edge-id="m07">
+        <g data-edge-from="server" data-edge-to="store" data-edge-label="продлить регистрацию" data-edge-key="6" data-edge-id="m07">
           <path data-composition-edge-from="server" data-composition-edge-to="store" data-composition-edge-id="m07" data-composition-points="307.25,334;464,334" d="M 307.25 334 L 464 334" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
-          <rect x="307.025" y="314" width="157.2" height="18" rx="3" class="c-mask"/>
-          <text x="385.625" y="324" class="t-muted" font-size="11" text-anchor="middle">продлить публ. клиента</text>
+          <rect x="313.625" y="314" width="144" height="18" rx="3" class="c-mask"/>
+          <text x="385.625" y="324" class="t-muted" font-size="11" text-anchor="middle">продлить регистрацию</text>
         </g>
-        <text x="319.25" y="352" class="t-dim" font-size="7">только публичный: окно простоя заново</text>
+        <text x="319.25" y="352" class="t-dim" font-size="7">любой клиент: окно простоя заново</text>
         </g>
 
         <g data-edge-from="server" data-edge-to="client" data-edge-label="200: токены Яндекса" data-edge-key="7" data-edge-id="m08">
@@ -605,28 +605,37 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
         </g>
 
-        <g data-edge-from="server" data-edge-to="store" data-edge-label="DEL старые, SET новые" data-edge-key="19" data-edge-id="m20">
+        <g data-edge-from="server" data-edge-to="store" data-edge-label="SET новую пару" data-edge-key="19" data-edge-id="m20">
           <path data-composition-edge-from="server" data-composition-edge-to="store" data-composition-edge-id="m20" data-composition-points="307.25,718;464,718" d="M 307.25 718 L 464 718" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
-          <rect x="310.325" y="698" width="150.6" height="18" rx="3" class="c-mask"/>
-          <text x="385.625" y="708" class="t-muted" font-size="11" text-anchor="middle">DEL старые, SET новые</text>
+          <rect x="333.425" y="698" width="104.39999999999999" height="18" rx="3" class="c-mask"/>
+          <text x="385.625" y="708" class="t-muted" font-size="11" text-anchor="middle">SET новую пару</text>
         </g>
         </g>
 
-        <g data-edge-from="server" data-edge-to="store" data-edge-label="продлить публ. клиента" data-edge-key="20" data-edge-id="m21">
+        <g data-edge-from="server" data-edge-to="store" data-edge-label="DEL старую пару" data-edge-key="20" data-edge-id="m21">
           <path data-composition-edge-from="server" data-composition-edge-to="store" data-composition-edge-id="m21" data-composition-points="307.25,746;464,746" d="M 307.25 746 L 464 746" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
-          <rect x="307.025" y="726" width="157.2" height="18" rx="3" class="c-mask"/>
-          <text x="385.625" y="736" class="t-muted" font-size="11" text-anchor="middle">продлить публ. клиента</text>
+          <rect x="330.125" y="726" width="111" height="18" rx="3" class="c-mask"/>
+          <text x="385.625" y="736" class="t-muted" font-size="11" text-anchor="middle">DEL старую пару</text>
         </g>
-        <text x="319.25" y="764" class="t-dim" font-size="7">только публичный: окно простоя заново</text>
+        <text x="319.25" y="764" class="t-dim" font-size="7">только если Яндекс сменил refresh</text>
         </g>
 
-        <g data-edge-from="server" data-edge-to="client" data-edge-label="200: новая пара" data-edge-key="21" data-edge-id="m22">
-          <path data-composition-edge-from="server" data-composition-edge-to="client" data-composition-edge-id="m22" data-composition-points="293.25,768;136.5,768" d="M 293.25 768 L 136.5 768" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
+        <g data-edge-from="server" data-edge-to="store" data-edge-label="продлить регистрацию" data-edge-key="21" data-edge-id="m22">
+          <path data-composition-edge-from="server" data-composition-edge-to="store" data-composition-edge-id="m22" data-composition-points="307.25,790;464,790" d="M 307.25 790 L 464 790" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
-          <rect x="159.375" y="748" width="111" height="18" rx="3" class="c-mask"/>
-          <text x="214.875" y="758" class="t-muted" font-size="11" text-anchor="middle">200: новая пара</text>
+          <rect x="313.625" y="770" width="144" height="18" rx="3" class="c-mask"/>
+          <text x="385.625" y="780" class="t-muted" font-size="11" text-anchor="middle">продлить регистрацию</text>
+        </g>
+        <text x="319.25" y="808" class="t-dim" font-size="7">любой клиент: окно простоя заново</text>
+        </g>
+
+        <g data-edge-from="server" data-edge-to="client" data-edge-label="200: новая пара" data-edge-key="22" data-edge-id="m23">
+          <path data-composition-edge-from="server" data-composition-edge-to="client" data-composition-edge-id="m23" data-composition-points="293.25,812;136.5,812" d="M 293.25 812 L 136.5 812" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
+        <g>
+          <rect x="159.375" y="792" width="111" height="18" rx="3" class="c-mask"/>
+          <text x="214.875" y="802" class="t-muted" font-size="11" text-anchor="middle">200: новая пара</text>
         </g>
         </g>
 
@@ -640,8 +649,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="62" y="377" class="t-dim" font-size="9" font-weight="600">Вызов: Bearer — сам токен Яндекса, org из ?orgId=</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="2">
-          <rect x="56" y="542" width="305.2" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="555" class="t-dim" font-size="9" font-weight="600">Обновление: старые токены удаляются, клиент продлевается</text>
+          <rect x="56" y="542" width="279.2" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="555" class="t-dim" font-size="9" font-weight="600">Обновление: новая пара сохраняется до отзыва старой</text>
         </g>
 
         <!-- Participants -->
@@ -706,18 +715,18 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <!-- Legend -->
         <g data-legend="">
-          <text x="40" y="803" class="t-primary" font-size="12" font-weight="650">Легенда</text>
-          <g data-legend-semantic-kind="return" data-legend-x="40" data-legend-baseline="823" data-legend-width="68">
-            <path d="M 40 820 L 74 820" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
-            <text x="83" y="823" class="t-muted" font-size="10" font-weight="500">ответ</text>
+          <text x="40" y="847" class="t-primary" font-size="12" font-weight="650">Легенда</text>
+          <g data-legend-semantic-kind="return" data-legend-x="40" data-legend-baseline="867" data-legend-width="68">
+            <path d="M 40 864 L 74 864" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
+            <text x="83" y="867" class="t-muted" font-size="10" font-weight="500">ответ</text>
           </g>
-          <g data-legend-semantic-kind="security" data-legend-x="130" data-legend-baseline="823" data-legend-width="108">
-            <path d="M 130 820 L 164 820" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-            <text x="173" y="823" class="t-muted" font-size="10" font-weight="500">код или токен</text>
+          <g data-legend-semantic-kind="security" data-legend-x="130" data-legend-baseline="867" data-legend-width="108">
+            <path d="M 130 864 L 164 864" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+            <text x="173" y="867" class="t-muted" font-size="10" font-weight="500">код или токен</text>
           </g>
-          <g data-legend-semantic-kind="default" data-legend-x="260" data-legend-baseline="823" data-legend-width="182">
-            <path d="M 260 820 L 294 820" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-            <text x="303" y="823" class="t-muted" font-size="10" font-weight="500">хранилище (SET — без ответа)</text>
+          <g data-legend-semantic-kind="default" data-legend-x="260" data-legend-baseline="867" data-legend-width="182">
+            <path d="M 260 864 L 294 864" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+            <text x="303" y="867" class="t-muted" font-size="10" font-weight="500">хранилище (SET — без ответа)</text>
           </g>
         </g>
       </svg>

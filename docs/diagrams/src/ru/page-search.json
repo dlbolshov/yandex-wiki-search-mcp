@@ -7,7 +7,7 @@
   "quality_profile": "showcase",
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "861a7c9784def37bfbc89edb032e0899019d7344"
+   "revision": "6d0d3d45e0d72c4cb9b63bafcf22837d4f4268fb"
   },
   "legend": {
    "entries": {
@@ -590,8 +590,8 @@
     },
     {
      "path": "mcp_wiki/wiki/custom/slugs.py",
-     "line": 4,
-     "end_line": 16,
+     "line": 6,
+     "end_line": 29,
      "label": "normalize_slug"
     }
    ],
@@ -608,20 +608,20 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 959,
-     "end_line": 987,
+     "line": 1075,
+     "end_line": 1103,
      "label": "тело, фильтры, highlight"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 966,
-     "end_line": 975,
+     "line": 1082,
+     "end_line": 1091,
      "label": "cluster: normalize_slug + lower()"
     },
     {
      "path": "tests/wiki/custom/test_client.py",
-     "line": 173,
-     "end_line": 194,
+     "line": 174,
+     "end_line": 195,
      "label": "URL → 'tech-doc/ml' (тест)"
     }
    ],
@@ -637,14 +637,14 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 986,
-     "end_line": 998,
+     "line": 1102,
+     "end_line": 1114,
      "label": "отказ: cursor без highlight"
     },
     {
      "path": "tests/wiki/custom/test_client.py",
-     "line": 161,
-     "end_line": 171,
+     "line": 162,
+     "end_line": 172,
      "label": "отказ без обращения к сети (тест)"
     }
    ],
@@ -661,20 +661,20 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 999,
-     "end_line": 1006,
-     "label": "POST v1/search, retryable=True"
+     "line": 1115,
+     "end_line": 1124,
+     "label": "_request_parsed: с повторами, writes=False"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 91,
-     "end_line": 93,
+     "line": 93,
+     "end_line": 95,
      "label": "RETRY_STATUSES, Retry-After ≤ 3 с"
     },
     {
      "path": "mcp_wiki/settings.py",
-     "line": 54,
-     "end_line": 54,
+     "line": 81,
+     "end_line": 81,
      "label": "WIKI_MAX_RETRIES=2 по умолч. → до 3 попыток"
     }
    ],
@@ -691,8 +691,8 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 936,
-     "end_line": 948,
+     "line": 1052,
+     "end_line": 1064,
      "label": "highlight — переключатель режима"
     },
     {
@@ -726,8 +726,8 @@
     },
     {
      "path": "mcp_wiki/settings.py",
-     "line": 47,
-     "end_line": 47,
+     "line": 74,
+     "end_line": 74,
      "label": "WIKI_WEB_BASE_URL: по умолч. wiki.yandex.ru"
     },
     {
@@ -755,7 +755,7 @@
     },
     {
      "path": "CLAUDE.md",
-     "line": 252,
+     "line": 258,
      "label": "листание зависит от режима"
     }
    ],
@@ -790,8 +790,8 @@
    "sources": [
     {
      "path": "tests/mcp/tools/test_page_read_tools.py",
-     "line": 291,
-     "end_line": 305,
+     "line": 306,
+     "end_line": 320,
      "label": "cursor 0 / 501 → isError (тест)"
     }
    ],
@@ -802,17 +802,29 @@
    "lane": "err",
    "col": 1,
    "type": "security",
-   "label": "Пустой slug_prefix",
-   "sublabel": "ToolError, без HTTP",
+   "label": "Неверный slug_prefix",
+   "sublabel": "пусто или битый URL, без HTTP",
    "sources": [
     {
      "path": "tests/mcp/tools/test_page_read_tools.py",
-     "line": 406,
-     "end_line": 422,
+     "line": 421,
+     "end_line": 437,
      "label": "'/', '///' → isError (тест)"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/slugs.py",
+     "line": 21,
+     "end_line": 26,
+     "label": "urlparse не разобрал → WikiArgumentError"
+    },
+    {
+     "path": "tests/mcp/server/test_tool_errors.py",
+     "line": 107,
+     "end_line": 118,
+     "label": "тот же отказ для slug в page_get (тест)"
     }
    ],
-   "width": 128
+   "width": 144
   },
   {
    "id": "e_cursor",
@@ -824,14 +836,14 @@
    "sources": [
     {
      "path": "tests/mcp/tools/test_page_read_tools.py",
-     "line": 307,
-     "end_line": 326,
+     "line": 322,
+     "end_line": 341,
      "label": "отказ доходит как isError (тест)"
     },
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 117,
-     "end_line": 128,
+     "line": 118,
+     "end_line": 129,
      "label": "call_tool повышает до ToolError"
     }
    ],
@@ -842,26 +854,26 @@
    "lane": "err",
    "col": 4,
    "type": "security",
-   "label": "WikiApiError",
-   "sublabel": "или WikiTransportError",
+   "label": "WikiError",
+   "sublabel": "Api · Transport · Response",
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 771,
-     "end_line": 779,
+     "line": 882,
+     "end_line": 890,
      "label": "нет ответа / таймаут → WikiTransportError"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 795,
-     "end_line": 810,
+     "line": 906,
+     "end_line": 921,
      "label": "повторы по статусу, затем WikiApiError"
     },
     {
      "path": "tests/wiki/custom/test_client.py",
-     "line": 242,
-     "end_line": 264,
-     "label": "тело ошибки → WikiApiError (тест)"
+     "line": 1308,
+     "end_line": 1316,
+     "label": "нечитаемый 200 → WikiResponseError (тест)"
     }
    ],
    "width": 128
@@ -901,7 +913,7 @@
    "id": "slug-err",
    "from": "slug",
    "to": "e_slug",
-   "label": "пусто",
+   "label": "пусто · битый URL",
    "variant": "security",
    "role": "error"
   },
@@ -937,7 +949,7 @@
    "id": "api-err",
    "from": "api",
    "to": "e_api",
-   "label": "4xx/5xx · нет ответа",
+   "label": "4xx/5xx · нет ответа · нечитаемый 2xx",
    "variant": "security",
    "role": "error"
   },
@@ -1003,7 +1015,7 @@
    "items": [
     "cursor без highlight API молча игнорирует и снова отдаёт стр. 1",
     "cluster сравнивается буквально: регистр или «/» дают 0 результатов",
-    "POST, но с повторами: поиск безопасно повторить"
+    "POST только на чтение: с повторами; нечитаемый ответ — без оговорки о записи"
    ]
   },
   {

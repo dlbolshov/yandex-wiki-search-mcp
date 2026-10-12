@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 962 1000" data-reader-fit="intrinsic-height" data-layout-contract="readable-v2" role="img" lang="ru" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="width: 962px; height: 1000px; min-width: 0px;" width="962" height="1000" xmlns="http://www.w3.org/2000/svg"><style>
+<svg viewBox="0 0 970 1000" data-reader-fit="intrinsic-height" data-layout-contract="readable-v2" role="img" lang="ru" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="width: 970px; height: 1000px; min-width: 0px;" width="970" height="1000" xmlns="http://www.w3.org/2000/svg"><style>
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
 These fixed bytes are shared by the viewer and its SVG/raster exports.
@@ -407,7 +407,7 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
 svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #d9dee5; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #94a3b8; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; }
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --canvas-dot: rgba(148, 163, 184, 0.16); --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
-</style><rect x="0" y="0" width="962" height="1000" class="c-bg-rect"/>
+</style><rect x="0" y="0" width="970" height="1000" class="c-bg-rect"/>
         <title id="archify-diagram-title">page_search: проверки, режимы и листание</title>
         <desc id="archify-diagram-description">Диаграмма рабочего процесса, созданная в Archify.</desc>
         <!-- Definitions -->
@@ -433,51 +433,51 @@ rect.c-bg-rect { fill: var(--bg); }
         <rect width="100%" height="100%" fill="url(#grid)"/>
 
         <!-- Swimlanes -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="894" height="200" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="902" height="200" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / Агент (MCP-клиент)</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="272" width="894" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="272" width="902" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="294" class="t-dim" font-size="10" font-weight="600">02 / MCP SDK</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="396" width="894" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="396" width="902" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="418" class="t-dim" font-size="10" font-weight="600">03 / Инструмент page_search</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="520" width="894" height="106" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="520" width="902" height="106" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="542" class="t-dim" font-size="10" font-weight="600">04 / WikiClient</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-4" x="40" y="646" width="894" height="106" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-4" x="40" y="646" width="902" height="106" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="668" class="t-dim" font-size="10" font-weight="600">05 / Yandex Wiki API</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-5" x="40" y="772" width="894" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="exception-lane" data-composition-frame-id="lane-5-exception" x="46" y="778" width="882" height="92" rx="8" class="c-security-group" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-5" x="40" y="772" width="902" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="exception-lane" data-composition-frame-id="lane-5-exception" x="46" y="778" width="890" height="92" rx="8" class="c-security-group" stroke-width="1"/>
         <text x="54" y="794" class="t-security" font-size="10" font-weight="600">EX / Ошибка → isError=true</text>
 
         <!-- Phase headers -->
-        <line x1="84.39999999999998" y1="35" x2="602.4" y2="35" class="a-security" stroke-width="1.1"/>
-        <rect x="84.39999999999998" y="27" width="518" height="16" rx="4" class="c-mask"/>
-        <text x="343.4" y="39" class="t-security" font-size="8" font-weight="600" text-anchor="middle">Проверки без сети</text>
-        <line x1="684.4" y1="35" x2="896.4" y2="35" class="a-emphasis" stroke-width="1.1"/>
-        <rect x="684.4" y="27" width="212" height="16" rx="4" class="c-mask"/>
-        <text x="790.4" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">Запрос и листание</text>
+        <line x1="84.39999999999998" y1="35" x2="610.4" y2="35" class="a-security" stroke-width="1.1"/>
+        <rect x="84.39999999999998" y="27" width="526" height="16" rx="4" class="c-mask"/>
+        <text x="347.4" y="39" class="t-security" font-size="8" font-weight="600" text-anchor="middle">Проверки без сети</text>
+        <line x1="692.4" y1="35" x2="904.4" y2="35" class="a-emphasis" stroke-width="1.1"/>
+        <rect x="692.4" y="27" width="212" height="16" rx="4" class="c-mask"/>
+        <text x="798.4" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">Запрос и листание</text>
 
         <!-- Workflow groups -->
 
 
         <!-- Edge paths -->
-        <path data-edge-from="api" data-edge-to="e_api" data-edge-label="4xx/5xx · нет ответа" data-edge-key="0" data-edge-id="api-err" data-composition-routing="workflow-v2-auto" data-edge-role="error" data-composition-points="730.4,748;730.4,813" d="M 730.4 748 L 730.4 813" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="api" data-edge-to="absolutize" data-edge-label="SearchResponse" data-edge-key="1" data-edge-id="api-tool" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="798.4,714;814.4,714;814.4,574;850.4,574;850.4,489" d="M 798.4 714 L 814.4 714 L 814.4 574 L 850.4 574 L 850.4 489" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="body" data-edge-to="cursor" data-edge-key="2" data-edge-id="body-cursor" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="450.4,588;478.4,588" d="M 450.4 588 L 478.4 588" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="api" data-edge-to="e_api" data-edge-label="4xx/5xx · нет ответа · нечитаемый 2xx" data-edge-key="0" data-edge-id="api-err" data-composition-routing="workflow-v2-auto" data-edge-role="error" data-composition-points="738.4,748;738.4,813" d="M 738.4 748 L 738.4 813" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="api" data-edge-to="absolutize" data-edge-label="SearchResponse" data-edge-key="1" data-edge-id="api-tool" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="806.4,714;822.4,714;822.4,574;858.4,574;858.4,489" d="M 806.4 714 L 822.4 714 L 822.4 574 L 858.4 574 L 858.4 489" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="body" data-edge-to="cursor" data-edge-key="2" data-edge-id="body-cursor" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="458.4,588;486.4,588" d="M 458.4 588 L 486.4 588" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="a_call" data-edge-to="schema" data-edge-label="аргументы" data-edge-key="3" data-edge-id="call-schema" data-edge-role="" data-composition-points="130.4,193;130.4,313" d="M 130.4 193 L 130.4 313" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="cursor" data-edge-to="e_cursor" data-edge-label="да" data-edge-key="4" data-edge-id="cursor-err" data-composition-routing="workflow-v2-auto" data-edge-role="error" data-composition-points="556.4,614;556.4,813" d="M 556.4 614 L 556.4 813" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="cursor" data-edge-to="post" data-edge-label="нет" data-edge-key="5" data-edge-id="cursor-post" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="634.4,588;672.4,588" d="M 634.4 588 L 672.4 588" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="more" data-edge-to="done" data-edge-label="стоп" data-edge-key="6" data-edge-id="more-done" data-edge-role="branch" data-composition-points="850.4,138;850.4,196" d="M 850.4 138 L 850.4 196" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="more" data-edge-to="a_call" data-edge-label="highlight, cursor = № стр." data-edge-key="7" data-edge-id="more-next" data-edge-role="return" data-composition-points="788.4,112;490.4,112;490.4,167;192.4,167" d="M 788.4 112 L 490.4 112 L 490.4 167 L 192.4 167" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="post" data-edge-to="api" data-edge-label="JSON" data-edge-key="8" data-edge-id="post-api" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="730.4,622;730.4,680" d="M 730.4 622 L 730.4 680" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="cursor" data-edge-to="e_cursor" data-edge-label="да" data-edge-key="4" data-edge-id="cursor-err" data-composition-routing="workflow-v2-auto" data-edge-role="error" data-composition-points="564.4,614;564.4,813" d="M 564.4 614 L 564.4 813" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="cursor" data-edge-to="post" data-edge-label="нет" data-edge-key="5" data-edge-id="cursor-post" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="642.4,588;680.4,588" d="M 642.4 588 L 680.4 588" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="more" data-edge-to="done" data-edge-label="стоп" data-edge-key="6" data-edge-id="more-done" data-edge-role="branch" data-composition-points="858.4,138;858.4,196" d="M 858.4 138 L 858.4 196" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="more" data-edge-to="a_call" data-edge-label="highlight, cursor = № стр." data-edge-key="7" data-edge-id="more-next" data-edge-role="return" data-composition-points="796.4,112;494.4,112;494.4,167;192.4,167" d="M 796.4 112 L 494.4 112 L 494.4 167 L 192.4 167" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="post" data-edge-to="api" data-edge-label="JSON" data-edge-key="8" data-edge-id="post-api" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="738.4,622;738.4,680" d="M 738.4 622 L 738.4 680" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="schema" data-edge-to="e_schema" data-edge-label="нет" data-edge-key="9" data-edge-id="schema-err" data-composition-routing="workflow-v2-auto" data-edge-role="error" data-composition-points="66.4,339;20,339;20,839;66.4,839" d="M 66.4 339 L 20 339 L 20 839 L 66.4 839" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="schema" data-edge-to="slug" data-edge-key="10" data-edge-id="schema-slug" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="194.4,339;266.4,339;266.4,437" d="M 194.4 339 L 266.4 339 L 266.4 437" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="slug" data-edge-to="body" data-edge-key="11" data-edge-id="slug-body" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="273.4,489;273.4,588;322.4,588" d="M 273.4 489 L 273.4 588 L 322.4 588" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="slug" data-edge-to="e_slug" data-edge-label="пусто" data-edge-key="12" data-edge-id="slug-err" data-composition-routing="workflow-v2-auto" data-edge-role="error" data-composition-points="254.39999999999998,489;254.39999999999998,636;346.4,636;346.4,839;330.4,839" d="M 254.39999999999998 489 L 254.39999999999998 636 L 346.4 636 L 346.4 839 L 330.4 839" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="absolutize" data-edge-to="more" data-edge-key="13" data-edge-id="tool-more" data-edge-role="" data-composition-points="925.4,463;946,463;946,112;912.4,112" d="M 925.4 463 L 946 463 L 946 112 L 912.4 112" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="schema" data-edge-to="slug" data-edge-key="10" data-edge-id="schema-slug" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="194.4,339;274.4,339;274.4,437" d="M 194.4 339 L 274.4 339 L 274.4 437" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="slug" data-edge-to="body" data-edge-key="11" data-edge-id="slug-body" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="281.4,489;281.4,588;330.4,588" d="M 281.4 489 L 281.4 588 L 330.4 588" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="slug" data-edge-to="e_slug" data-edge-label="пусто · битый URL" data-edge-key="12" data-edge-id="slug-err" data-composition-routing="workflow-v2-auto" data-edge-role="error" data-composition-points="210.39999999999998,463;194.39999999999998,463;194.39999999999998,636;274.4,636;274.4,813" d="M 210.39999999999998 463 L 194.39999999999998 463 L 194.39999999999998 636 L 274.4 636 L 274.4 813" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="absolutize" data-edge-to="more" data-edge-key="13" data-edge-id="tool-more" data-edge-role="" data-composition-points="933.4,463;954,463;954,112;920.4,112" d="M 933.4 463 L 954 463 L 954 112 L 920.4 112" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
 
         <!-- Nodes -->
         <g id="node-a_call" data-node-id="a_call" data-node-label="tools/call" tabindex="0" role="button" aria-label="Фокус: tools/call, page_search(query, …), Агент (MCP-клиент) › Проверки без сети" aria-pressed="false" data-node-kind="external" data-node-sublabel="page_search(query, …)" data-node-context="Агент (MCP-клиент) › Проверки без сети">
@@ -494,26 +494,26 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-done" data-node-id="done" data-node-label="page_get по slug" tabindex="0" role="button" aria-label="Фокус: page_get по slug, читать страницу, Агент (MCP-клиент) › Запрос и листание" aria-pressed="false" data-node-kind="external" data-node-sublabel="читать страницу" data-node-context="Агент (MCP-клиент) › Запрос и листание">
           <title>page_get по slug · читать страницу · Агент (MCP-клиент) › Запрос и листание</title>
-          <rect x="788.4" y="196" width="124" height="52" rx="6" class="c-mask"/>
-          <rect x="788.4" y="196" width="124" height="52" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(794.4 202) scale(0.6875)">
+          <rect x="796.4" y="196" width="124" height="52" rx="6" class="c-mask"/>
+          <rect x="796.4" y="196" width="124" height="52" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(802.4 202) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" x="850.4" y="228" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">page_get по slug</text>
-          <text x="850.4" y="240.3" class="t-muted" font-size="8" text-anchor="middle">читать страницу</text>
+          <text data-node-label="" x="858.4" y="228" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">page_get по slug</text>
+          <text x="858.4" y="240.3" class="t-muted" font-size="8" text-anchor="middle">читать страницу</text>
         </g>
 
         <g id="node-more" data-node-id="more" data-node-label="Нужно ещё?" tabindex="0" role="button" aria-label="Фокус: Нужно ещё?, стоп-условие, Агент (MCP-клиент) › Запрос и листание" aria-pressed="false" data-node-kind="external" data-node-sublabel="стоп-условие" data-node-context="Агент (MCP-клиент) › Запрос и листание">
           <title>Нужно ещё? · стоп-условие · Агент (MCP-клиент) › Запрос и листание</title>
-          <rect x="788.4" y="86" width="124" height="52" rx="6" class="c-mask"/>
-          <rect x="788.4" y="86" width="124" height="52" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(794.4 92) scale(0.6875)">
+          <rect x="796.4" y="86" width="124" height="52" rx="6" class="c-mask"/>
+          <rect x="796.4" y="86" width="124" height="52" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(802.4 92) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" x="850.4" y="118" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Нужно ещё?</text>
-          <text x="850.4" y="130.3" class="t-muted" font-size="8" text-anchor="middle">стоп-условие</text>
+          <text data-node-label="" x="858.4" y="118" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Нужно ещё?</text>
+          <text x="858.4" y="130.3" class="t-muted" font-size="8" text-anchor="middle">стоп-условие</text>
         </g>
 
         <g id="node-schema" data-node-id="schema" data-node-label="Схема аргументов" tabindex="0" role="button" aria-label="Фокус: Схема аргументов, limit 1–50 · cursor 1–500, MCP SDK › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="limit 1–50 · cursor 1–500" data-node-context="MCP SDK › Проверки без сети">
@@ -530,73 +530,73 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-slug" data-node-id="slug" data-node-label="slug_prefix" tabindex="0" role="button" aria-label="Фокус: slug_prefix, не пуст после нормализации, Инструмент page_search › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="не пуст после нормализации" data-node-context="Инструмент page_search › Проверки без сети">
           <title>slug_prefix · не пуст после нормализации · Инструмент page_search › Проверки без сети</title>
-          <rect x="202.39999999999998" y="437" width="128" height="52" rx="6" class="c-mask"/>
-          <rect x="202.39999999999998" y="437" width="128" height="52" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(208.39999999999998 443) scale(0.6875)">
+          <rect x="210.39999999999998" y="437" width="128" height="52" rx="6" class="c-mask"/>
+          <rect x="210.39999999999998" y="437" width="128" height="52" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(216.39999999999998 443) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="266.4" y="469" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">slug_prefix</text>
-          <text x="266.4" y="480.9" class="t-muted" font-size="7.6" text-anchor="middle">не пуст после нормализации</text>
+          <text data-node-label="" x="274.4" y="469" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">slug_prefix</text>
+          <text x="274.4" y="480.9" class="t-muted" font-size="7.6" text-anchor="middle">не пуст после нормализации</text>
         </g>
 
         <g id="node-absolutize" data-node-id="absolutize" data-node-label="URL → полный адрес" tabindex="0" role="button" aria-label="Фокус: URL → полный адрес, '/…' + WIKI_WEB_BASE_URL, Инструмент page_search › Запрос и листание" aria-pressed="false" data-node-kind="backend" data-node-sublabel="'/…' + WIKI_WEB_BASE_URL" data-node-context="Инструмент page_search › Запрос и листание">
           <title>URL → полный адрес · '/…' + WIKI_WEB_BASE_URL · Инструмент page_search › Запрос и листание</title>
-          <rect x="775.4" y="437" width="150" height="52" rx="6" class="c-mask"/>
-          <rect x="775.4" y="437" width="150" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(781.4 443) scale(0.6875)">
+          <rect x="783.4" y="437" width="150" height="52" rx="6" class="c-mask"/>
+          <rect x="783.4" y="437" width="150" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(789.4 443) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="850.4" y="469" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">URL → полный адрес</text>
-          <text x="850.4" y="481.3" class="t-muted" font-size="8" text-anchor="middle">'/…' + WIKI_WEB_BASE_URL</text>
+          <text data-node-label="" x="858.4" y="469" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">URL → полный адрес</text>
+          <text x="858.4" y="481.3" class="t-muted" font-size="8" text-anchor="middle">'/…' + WIKI_WEB_BASE_URL</text>
         </g>
 
         <g id="node-body" data-node-id="body" data-node-label="Тело запроса" tabindex="0" role="button" aria-label="Фокус: Тело запроса, cluster: normalize + lower, WikiClient › Проверки без сети" aria-pressed="false" data-node-kind="backend" data-node-sublabel="cluster: normalize + lower" data-node-tag="limit ≤ 50" data-node-context="WikiClient › Проверки без сети">
           <title>Тело запроса · cluster: normalize + lower · WikiClient › Проверки без сети · limit ≤ 50</title>
-          <rect x="322.4" y="554" width="128" height="68" rx="6" class="c-mask"/>
-          <rect x="322.4" y="554" width="128" height="68" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(328.4 560) scale(0.6875)">
+          <rect x="330.4" y="554" width="128" height="68" rx="6" class="c-mask"/>
+          <rect x="330.4" y="554" width="128" height="68" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(336.4 560) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="386.4" y="588.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Тело запроса</text>
-          <text x="386.4" y="602.7" class="t-muted" font-size="7.6" text-anchor="middle">cluster: normalize + lower</text>
-        <text x="386.4" y="615.4" class="t-backend" font-size="7" text-anchor="middle">limit ≤ 50</text>
+          <text data-node-label="" x="394.4" y="588.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Тело запроса</text>
+          <text x="394.4" y="602.7" class="t-muted" font-size="7.6" text-anchor="middle">cluster: normalize + lower</text>
+        <text x="394.4" y="615.4" class="t-backend" font-size="7" text-anchor="middle">limit ≤ 50</text>
         </g>
 
         <g id="node-cursor" data-node-id="cursor" data-node-label="cursor без highlight?" tabindex="0" role="button" aria-label="Фокус: cursor без highlight?, проверка до HTTP, WikiClient › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="проверка до HTTP" data-node-context="WikiClient › Проверки без сети">
           <title>cursor без highlight? · проверка до HTTP · WikiClient › Проверки без сети</title>
-          <rect x="478.4" y="562" width="156" height="52" rx="6" class="c-mask"/>
-          <rect x="478.4" y="562" width="156" height="52" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(484.4 568) scale(0.6875)">
+          <rect x="486.4" y="562" width="156" height="52" rx="6" class="c-mask"/>
+          <rect x="486.4" y="562" width="156" height="52" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(492.4 568) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="556.4" y="594" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">cursor без highlight?</text>
-          <text x="556.4" y="606.3" class="t-muted" font-size="8" text-anchor="middle">проверка до HTTP</text>
+          <text data-node-label="" x="564.4" y="594" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">cursor без highlight?</text>
+          <text x="564.4" y="606.3" class="t-muted" font-size="8" text-anchor="middle">проверка до HTTP</text>
         </g>
 
         <g id="node-post" data-node-id="post" data-node-label="POST v1/search" tabindex="0" role="button" aria-label="Фокус: POST v1/search, до 3 попыток, WikiClient › Запрос и листание" aria-pressed="false" data-node-kind="backend" data-node-sublabel="до 3 попыток" data-node-tag="429/502/503/504" data-node-context="WikiClient › Запрос и листание">
           <title>POST v1/search · до 3 попыток · WikiClient › Запрос и листание · 429/502/503/504</title>
-          <rect x="672.4" y="554" width="116" height="68" rx="6" class="c-mask"/>
-          <rect x="672.4" y="554" width="116" height="68" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(678.4 560) scale(0.6875)">
+          <rect x="680.4" y="554" width="116" height="68" rx="6" class="c-mask"/>
+          <rect x="680.4" y="554" width="116" height="68" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(686.4 560) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="730.4" y="588.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">POST v1/search</text>
-          <text x="730.4" y="603.1" class="t-muted" font-size="8" text-anchor="middle">до 3 попыток</text>
-        <text x="730.4" y="615.9" class="t-backend" font-size="7" text-anchor="middle">429/502/503/504</text>
+          <text data-node-label="" x="738.4" y="588.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">POST v1/search</text>
+          <text x="738.4" y="603.1" class="t-muted" font-size="8" text-anchor="middle">до 3 попыток</text>
+        <text x="738.4" y="615.9" class="t-backend" font-size="7" text-anchor="middle">429/502/503/504</text>
         </g>
 
         <g id="node-api" data-node-id="api" data-node-label="Режим по highlight" tabindex="0" role="button" aria-label="Фокус: Режим по highlight, ≤10 на стр. или ≤limit, Yandex Wiki API › Запрос и листание" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="≤10 на стр. или ≤limit" data-node-tag="замеры 2026-08" data-node-context="Yandex Wiki API › Запрос и листание">
           <title>Режим по highlight · ≤10 на стр. или ≤limit · Yandex Wiki API › Запрос и листание · замеры 2026-08</title>
-          <rect x="662.4" y="680" width="136" height="68" rx="6" class="c-mask"/>
-          <rect x="662.4" y="680" width="136" height="68" rx="6" class="c-cloud" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(668.4 686) scale(0.6875)">
+          <rect x="670.4" y="680" width="136" height="68" rx="6" class="c-mask"/>
+          <rect x="670.4" y="680" width="136" height="68" rx="6" class="c-cloud" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(676.4 686) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
-          <text data-node-label="" x="730.4" y="714.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Режим по highlight</text>
-          <text x="730.4" y="729.1" class="t-muted" font-size="8" text-anchor="middle">≤10 на стр. или ≤limit</text>
-        <text x="730.4" y="741.9" class="t-cloud" font-size="7" text-anchor="middle">замеры 2026-08</text>
+          <text data-node-label="" x="738.4" y="714.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Режим по highlight</text>
+          <text x="738.4" y="729.1" class="t-muted" font-size="8" text-anchor="middle">≤10 на стр. или ≤limit</text>
+        <text x="738.4" y="741.9" class="t-cloud" font-size="7" text-anchor="middle">замеры 2026-08</text>
         </g>
 
         <g id="node-e_schema" data-node-id="e_schema" data-node-label="Неверные аргументы" tabindex="0" role="button" aria-label="Фокус: Неверные аргументы, до вызова инструмента, Ошибка → isError=true › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="до вызова инструмента" data-node-context="Ошибка → isError=true › Проверки без сети">
@@ -611,50 +611,50 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="130.4" y="857.3" class="t-muted" font-size="8" text-anchor="middle">до вызова инструмента</text>
         </g>
 
-        <g id="node-e_slug" data-node-id="e_slug" data-node-label="Пустой slug_prefix" tabindex="0" role="button" aria-label="Фокус: Пустой slug_prefix, ToolError, без HTTP, Ошибка → isError=true › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="ToolError, без HTTP" data-node-context="Ошибка → isError=true › Проверки без сети">
-          <title>Пустой slug_prefix · ToolError, без HTTP · Ошибка → isError=true › Проверки без сети</title>
-          <rect x="202.39999999999998" y="813" width="128" height="52" rx="6" class="c-mask"/>
-          <rect x="202.39999999999998" y="813" width="128" height="52" rx="6" class="c-security" stroke-width="1.5"/>
+        <g id="node-e_slug" data-node-id="e_slug" data-node-label="Неверный slug_prefix" tabindex="0" role="button" aria-label="Фокус: Неверный slug_prefix, пусто или битый URL, без HTTP, Ошибка → isError=true › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="пусто или битый URL, без HTTP" data-node-context="Ошибка → isError=true › Проверки без сети">
+          <title>Неверный slug_prefix · пусто или битый URL, без HTTP · Ошибка → isError=true › Проверки без сети</title>
+          <rect x="202.39999999999998" y="813" width="144" height="52" rx="6" class="c-mask"/>
+          <rect x="202.39999999999998" y="813" width="144" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(208.39999999999998 819) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="266.4" y="845" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Пустой slug_prefix</text>
-          <text x="266.4" y="857.3" class="t-muted" font-size="8" text-anchor="middle">ToolError, без HTTP</text>
+          <text data-node-label="" x="274.4" y="845" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Неверный slug_prefix</text>
+          <text x="274.4" y="857.1" class="t-muted" font-size="7.8" text-anchor="middle">пусто или битый URL, без HTTP</text>
         </g>
 
         <g id="node-e_cursor" data-node-id="e_cursor" data-node-label="cursor без highlight" tabindex="0" role="button" aria-label="Фокус: cursor без highlight, WikiArgumentError, без HTTP, Ошибка → isError=true › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="WikiArgumentError, без HTTP" data-node-context="Ошибка → isError=true › Проверки без сети">
           <title>cursor без highlight · WikiArgumentError, без HTTP · Ошибка → isError=true › Проверки без сети</title>
-          <rect x="488.4" y="813" width="136" height="52" rx="6" class="c-mask"/>
-          <rect x="488.4" y="813" width="136" height="52" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(494.4 819) scale(0.6875)">
+          <rect x="496.4" y="813" width="136" height="52" rx="6" class="c-mask"/>
+          <rect x="496.4" y="813" width="136" height="52" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(502.4 819) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="556.4" y="844.6" class="t-primary" font-size="10.6" font-weight="600" text-anchor="middle">cursor без highlight</text>
-          <text x="556.4" y="856.7" class="t-muted" font-size="7.9" text-anchor="middle">WikiArgumentError, без HTTP</text>
+          <text data-node-label="" x="564.4" y="844.6" class="t-primary" font-size="10.6" font-weight="600" text-anchor="middle">cursor без highlight</text>
+          <text x="564.4" y="856.7" class="t-muted" font-size="7.9" text-anchor="middle">WikiArgumentError, без HTTP</text>
         </g>
 
-        <g id="node-e_api" data-node-id="e_api" data-node-label="WikiApiError" tabindex="0" role="button" aria-label="Фокус: WikiApiError, или WikiTransportError, Ошибка → isError=true › Запрос и листание" aria-pressed="false" data-node-kind="security" data-node-sublabel="или WikiTransportError" data-node-context="Ошибка → isError=true › Запрос и листание">
-          <title>WikiApiError · или WikiTransportError · Ошибка → isError=true › Запрос и листание</title>
-          <rect x="666.4" y="813" width="128" height="52" rx="6" class="c-mask"/>
-          <rect x="666.4" y="813" width="128" height="52" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(672.4 819) scale(0.6875)">
+        <g id="node-e_api" data-node-id="e_api" data-node-label="WikiError" tabindex="0" role="button" aria-label="Фокус: WikiError, Api · Transport · Response, Ошибка → isError=true › Запрос и листание" aria-pressed="false" data-node-kind="security" data-node-sublabel="Api · Transport · Response" data-node-context="Ошибка → isError=true › Запрос и листание">
+          <title>WikiError · Api · Transport · Response · Ошибка → isError=true › Запрос и листание</title>
+          <rect x="674.4" y="813" width="128" height="52" rx="6" class="c-mask"/>
+          <rect x="674.4" y="813" width="128" height="52" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(680.4 819) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="730.4" y="845" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">WikiApiError</text>
-          <text x="730.4" y="857.3" class="t-muted" font-size="8" text-anchor="middle">или WikiTransportError</text>
+          <text data-node-label="" x="730.6999999999999" y="834" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">WikiError</text>
+          <text x="738.4" y="851" class="t-muted" font-size="7.6" text-anchor="middle">Api · Transport · Response</text>
         </g>
 
         <!-- Edge labels -->
-        <g data-edge-from="api" data-edge-to="e_api" data-edge-label="4xx/5xx · нет ответа" data-edge-key="0" data-edge-id="api-err">
-          <rect x="677.4" y="770.5" width="106" height="14" rx="3" class="c-mask"/>
-          <text x="730.4" y="780.5" class="t-edge-security" font-size="8" text-anchor="middle">4xx/5xx · нет ответа</text>
+        <g data-edge-from="api" data-edge-to="e_api" data-edge-label="4xx/5xx · нет ответа · нечитаемый 2xx" data-edge-key="0" data-edge-id="api-err">
+          <rect x="644.6" y="770.5" width="187.6" height="14" rx="3" class="c-mask"/>
+          <text x="738.4" y="780.5" class="t-edge-security" font-size="8" text-anchor="middle">4xx/5xx · нет ответа · нечитаемый 2xx</text>
         </g>
         <g data-edge-from="api" data-edge-to="absolutize" data-edge-label="SearchResponse" data-edge-key="1" data-edge-id="api-tool">
-          <rect x="793.8" y="554" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="832.4" y="564" class="t-edge-emphasis" font-size="8" text-anchor="middle">SearchResponse</text>
+          <rect x="801.8" y="554" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="840.4" y="564" class="t-edge-emphasis" font-size="8" text-anchor="middle">SearchResponse</text>
         </g>
 
         <g data-edge-from="a_call" data-edge-to="schema" data-edge-label="аргументы" data-edge-key="3" data-edge-id="call-schema">
@@ -662,24 +662,24 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="130.4" y="253" class="t-edge-emphasis" font-size="8" text-anchor="middle">аргументы</text>
         </g>
         <g data-edge-from="cursor" data-edge-to="e_cursor" data-edge-label="да" data-edge-key="4" data-edge-id="cursor-err">
-          <rect x="541.4" y="703.5" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="556.4" y="713.5" class="t-edge-security" font-size="8" text-anchor="middle">да</text>
+          <rect x="549.4" y="703.5" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="564.4" y="713.5" class="t-edge-security" font-size="8" text-anchor="middle">да</text>
         </g>
         <g data-edge-from="cursor" data-edge-to="post" data-edge-label="нет" data-edge-key="5" data-edge-id="cursor-post">
-          <rect x="638.4" y="568" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="653.4" y="578" class="t-edge-emphasis" font-size="8" text-anchor="middle">нет</text>
+          <rect x="646.4" y="568" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="661.4" y="578" class="t-edge-emphasis" font-size="8" text-anchor="middle">нет</text>
         </g>
         <g data-edge-from="more" data-edge-to="done" data-edge-label="стоп" data-edge-key="6" data-edge-id="more-done">
-          <rect x="835.4" y="157" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="850.4" y="167" class="t-edge-default" font-size="8" text-anchor="middle">стоп</text>
+          <rect x="843.4" y="157" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="858.4" y="167" class="t-edge-default" font-size="8" text-anchor="middle">стоп</text>
         </g>
         <g data-edge-from="more" data-edge-to="a_call" data-edge-label="highlight, cursor = № стр." data-edge-key="7" data-edge-id="more-next">
-          <rect x="572" y="92" width="134.8" height="14" rx="3" class="c-mask"/>
-          <text x="639.4" y="102" class="t-edge-dashed" font-size="8" text-anchor="middle">highlight, cursor = № стр.</text>
+          <rect x="578" y="92" width="134.8" height="14" rx="3" class="c-mask"/>
+          <text x="645.4" y="102" class="t-edge-dashed" font-size="8" text-anchor="middle">highlight, cursor = № стр.</text>
         </g>
         <g data-edge-from="post" data-edge-to="api" data-edge-label="JSON" data-edge-key="8" data-edge-id="post-api">
-          <rect x="715.4" y="641" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="730.4" y="651" class="t-edge-emphasis" font-size="8" text-anchor="middle">JSON</text>
+          <rect x="723.4" y="641" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="738.4" y="651" class="t-edge-emphasis" font-size="8" text-anchor="middle">JSON</text>
         </g>
         <g data-edge-from="schema" data-edge-to="e_schema" data-edge-label="нет" data-edge-key="9" data-edge-id="schema-err">
           <rect x="28.200000000000003" y="319" width="30" height="14" rx="3" class="c-mask"/>
@@ -687,9 +687,9 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
 
-        <g data-edge-from="slug" data-edge-to="e_slug" data-edge-label="пусто" data-edge-key="12" data-edge-id="slug-err">
-          <rect x="283.4" y="616" width="34" height="14" rx="3" class="c-mask"/>
-          <text x="300.4" y="626" class="t-edge-security" font-size="8" text-anchor="middle">пусто</text>
+        <g data-edge-from="slug" data-edge-to="e_slug" data-edge-label="пусто · битый URL" data-edge-key="12" data-edge-id="slug-err">
+          <rect x="188.59999999999997" y="616" width="91.6" height="14" rx="3" class="c-mask"/>
+          <text x="234.39999999999998" y="626" class="t-edge-security" font-size="8" text-anchor="middle">пусто · битый URL</text>
         </g>
 
 

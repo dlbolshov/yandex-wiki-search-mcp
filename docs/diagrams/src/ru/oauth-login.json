@@ -27,7 +27,7 @@
   },
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "054abf72362586491781e1ef595120696e54bf30"
+   "revision": "6d0d3d45e0d72c4cb9b63bafcf22837d4f4268fb"
   },
   "locale": "ru",
   "translations": {
@@ -480,8 +480,8 @@
    "sources": [
     {
      "path": "README.md",
-     "line": 283,
-     "end_line": 306,
+     "line": 284,
+     "end_line": 307,
      "label": "OAuth-режим и ?orgId= в URL"
     }
    ]
@@ -494,14 +494,14 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 194,
-     "end_line": 201,
+     "line": 243,
+     "end_line": 250,
      "label": "URL Yandex /authorize"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 104,
-     "end_line": 115,
+     "line": 127,
+     "end_line": 138,
      "label": "302 на redirect_uri клиента"
     }
    ]
@@ -514,20 +514,20 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 233,
-     "end_line": 257,
-     "label": "провайдер и AuthSettings: DCR, TTL"
+     "line": 255,
+     "end_line": 278,
+     "label": "провайдер, DCR: TTL простоя, секреты бессрочны"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 161,
-     "end_line": 201,
+     "line": 210,
+     "end_line": 250,
      "label": "authorize: свой state на 600 с"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 80,
-     "end_line": 115,
+     "line": 103,
+     "end_line": 138,
      "label": "callback: state → код mcp_ на 300 с"
     }
    ]
@@ -540,8 +540,8 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 120,
-     "end_line": 159,
+     "line": 143,
+     "end_line": 208,
      "label": "срок регистрации и продление простоя"
     },
     {
@@ -566,14 +566,14 @@
    "sources": [
     {
      "path": "mcp_wiki/settings.py",
-     "line": 58,
-     "end_line": 61,
+     "line": 85,
+     "end_line": 88,
      "label": "URL Яндекса, id и секрет приложения"
     },
     {
      "path": "mcp_wiki/mcp/oauth/provider.py",
-     "line": 194,
-     "end_line": 201,
+     "line": 243,
+     "end_line": 250,
      "label": "редирект на /authorize Яндекса"
     }
    ]
@@ -782,9 +782,9 @@
    "dot": "violet",
    "title": "Срок регистрации",
    "items": [
-    "Клиент с секретом живёт до срока секрета (30 дней), он его знает",
-    "Публичный клиент: 30 дней от регистрации; каждый обмен кода или обновление на /token (часть 2) продлевает срок — не меньше 31 дня",
-    "Пустой OAUTH_CLIENT_SECRET_EXPIRY_SECONDS — без срока"
+    "Публичная или с секретом — правило одно: регистрация хранится OAUTH_REGISTRATION_IDLE_SECONDS (по умолчанию 30 дней) после /register; пусто — без срока",
+    "Каждый обмен кода или обновление на /token (часть 2) продлевает её: max(31 день, срок access-токена) + это окно",
+    "Секрет бессрочен (client_secret_expires_at 0); срок, проставленный прежней версией, снимается при первой выдаче токенов"
    ]
   },
   {
