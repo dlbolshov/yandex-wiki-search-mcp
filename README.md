@@ -392,6 +392,9 @@ uv run yandex-wiki-search-mcp   # run locally
 uv run pytest                   # tests
 ```
 
+uv picks an interpreter from Python 3.11–3.14, the range `uv.lock` has wheels for
+(`.python-versions`), and downloads one if the machine has none.
+
 Before committing, run the full verification set from [CONTRIBUTING.md](CONTRIBUTING.md).
 How the server is put together — the layers, the code map, testing seams, CI and the
 release process — is described in [docs/architecture.md](docs/architecture.md).

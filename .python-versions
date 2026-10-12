@@ -1,0 +1,2 @@
+# The CPython range uv.lock has wheels for; see tests/test_python_range.py.
+>=3.11, <3.15

@@ -28,6 +28,7 @@ on:
       - .mcpbignore
       - pyproject.toml
       - uv.lock
+      - .python-versions
       - .github/workflows/uv-canary.yml
 
 concurrency:
@@ -161,6 +162,39 @@ jobs:
           started = "mcp_wiki starting" in stderr.read_text(encoding="utf-8", errors="replace")
           assert started, "the server never started"
           PY
+
+  # A checkout on a machine with no Python of its own: a contributor's
+  # `uv sync`, or a source build such as glama.ai's. `.python-versions` has
+  # to keep the newest uv inside the range uv.lock has wheels for; without
+  # it uv 0.13 picks 3.15, which the bundle job cannot see, since the
+  # manifest's UV_PYTHON overrides the file there.
+  checkout:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest  # uv-canary: floats on purpose; tests/test_dockerfile.py
+          enable-cache: false
+
+      - name: Sync with only uv-downloaded Pythons
+        shell: bash
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+          UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/uv-python
+        run: |
+          uv sync --locked --dev
+          uv run python -c "import sys; print(sys.version); assert (3, 11) <= sys.version_info[:2] < (3, 15)"
 
   suite:
     strategy:

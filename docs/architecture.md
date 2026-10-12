@@ -400,6 +400,7 @@ The suite runs against mocks at every seam the architecture defines:
 | package ↔ interpreter | `tests/test_imports.py` imports every module in a subprocess |
 | Docker image ↔ CI ↔ uv | `tests/test_dockerfile.py`: the Dockerfile's uv pin is exact, every `setup-uv` step pins the same release except the weekly canary's, which must float to `latest`, `required-version` grows no ceiling (the project sets none), no `uv.toml` overrides it, and the image's `uv sync` skips the `dev` group (see [Toolchain](#toolchain)) |
 | bundle ↔ host | `tests/test_manifest.py`: `Settings` builds from the env the bundle passes (empty strings for what the user left blank), a platform override in `manifest.json` repeats the whole base `env`, every env keeps Python below 3.15, Windows keeps x86_64 Python, and every platform's `uv run` passes `--no-dev` ahead of the script name (see [Toolchain](#toolchain)) |
+| Python range ↔ lock | `tests/test_python_range.py`: `.python-versions` and the manifest's `UV_PYTHON` name the same range, it starts where `requires-python` does, stops before 3.15, and `uv.lock` has a wheel of every compiled package for each minor in it (see [Toolchain](#toolchain)) |
 
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
@@ -472,7 +473,8 @@ weekly live sweep.
 
 `uv-canary.yml` runs with the newest uv weekly, by hand, and on a pull request
 that changes how the bundle is built or launched (`manifest.json`,
-`.mcpbignore`, `pyproject.toml`, `uv.lock` or the workflow itself). It is the
+`.mcpbignore`, `pyproject.toml`, `uv.lock`, `.python-versions` or the
+workflow itself). It is the
 one place CI does not use the pinned release. The `bundle` job runs on
 ubuntu, macOS, Windows x64 and Windows ARM64. It packs the MCPB bundle, unpacks it and launches it the way Claude Desktop
 does. It runs the unpacked manifest's own `mcp_config` command, args and env,
@@ -482,8 +484,11 @@ id) and the working directory set to the bundle. stdin is at EOF, and
 makes it a machine with no Python of its own. `UV_NO_BUILD=1` makes a missing
 wheel fail instead of being compiled with the runner's toolchain, which a
 Claude Desktop user does not have. The server must log `mcp_wiki starting`
-and exit 0. The `suite` job runs `uv sync --locked --dev` and the tests on
-ubuntu and macOS, on Python 3.13. The workflow exists because uv 0.13.0 broke the bundle twice
+and exit 0. The `checkout` job is a contributor's checkout on a machine
+with no Python of its own (ubuntu, macOS, Windows): `uv sync --locked --dev`
+with only uv-downloaded Pythons allowed, and the interpreter it picks must
+be in 3.11–3.14. The `suite` job runs `uv sync --locked --dev` and the
+tests on ubuntu and macOS, on Python 3.13. The workflow exists because uv 0.13.0 broke the bundle twice
 and CI saw neither break. `release.yml` validates and packs the bundle but
 never runs it, and Dependabot cannot bump either uv pin (see
 [Toolchain](#toolchain)). Both breaks reproduce against this workflow's
@@ -627,11 +632,25 @@ starlette's test client. `tests/test_dockerfile.py` and `tests/test_manifest.py`
 either install drops `--no-dev`. Contributors and CI still get the group from
 `uv sync`, `uv sync --dev` or a plain `uv run`.
 
-The bundle's interpreter is the user's uv's choice, so `manifest.json` bounds
-it with `UV_PYTHON` (3.11–3.14) in `mcp_config.env`. Since 0.13 uv downloads
-Python 3.15 wherever no suitable interpreter exists, and several locked
-packages (`cffi`, `pydantic-core`, `aiohttp`, `rpds-py`) have no 3.15 wheels.
-Raise that bound once the lock does.
+Since 0.13 uv downloads Python 3.15 wherever no suitable interpreter
+exists, and several locked packages (`aiohttp`, `cffi`, `pydantic-core`,
+`rpds-py`, `pywin32`, and `librt` in the dev group) have no 3.15 wheels. The
+range the lock does cover, 3.11–3.14, is written twice:
+
+- `.python-versions` is what uv reads in a checkout — a contributor's
+  `uv sync`, a source build such as glama.ai's — as the project's default
+  request, ahead of `requires-python`. The plural name is deliberate: pyenv
+  and asdf read `.python-version` and cannot parse a range, so a singular
+  file would break their shims in the repo; uv reads either.
+- `UV_PYTHON` in `mcp_config.env` bounds the Claude Desktop bundle, where
+  the user's uv picks the interpreter; it overrides the file.
+
+`tests/test_python_range.py` keeps the two equal, starts the range where
+`requires-python` does, and fails a range with a minor the lock has no
+wheel of every compiled package for. Raise both together once the lock has
+3.15 wheels. `requires-python` itself has no upper bound: one would ship in
+the package metadata, and pip or uv on 3.15 would fall back to older
+releases instead of this one. CI's `test` matrix covers 3.11–3.14.
 
 On Windows the bundle stays on x86_64 Python:
 `mcp_config.platform_overrides.win32` adds `UV_PYTHON_ARCH=x86_64`. uv 0.13

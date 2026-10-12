@@ -397,6 +397,9 @@ uv run yandex-wiki-search-mcp   # локальный запуск
 uv run pytest                   # тесты
 ```
 
+uv выбирает интерпретатор из Python 3.11–3.14 — диапазона, под который в `uv.lock` есть
+колёса (`.python-versions`), — и скачивает его, если на машине такого нет.
+
 Перед коммитом прогоните полный набор проверок из [CONTRIBUTING.md](CONTRIBUTING.md).
 Как сервер устроен — слои, карта кода, швы тестирования, CI и процесс релиза —
 описано в [docs/architecture_ru.md](docs/architecture_ru.md).
