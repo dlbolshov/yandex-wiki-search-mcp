@@ -8,7 +8,7 @@ from mcp_wiki.mcp.oauth.types import YandexOauthAuthorizationCode, YandexOAuthSt
 CLIENT_REDIRECT_URI = "http://localhost:3000/callback"
 # Shorter than REFRESH_TOKEN_TTL_SECONDS on purpose, so a test can tell the
 # window a registration starts with from the one a token grant renews it to.
-PUBLIC_CLIENT_IDLE_TTL = 24 * 60 * 60
+REGISTRATION_IDLE_TTL = 24 * 60 * 60
 
 
 def make_state(client_state: str | None = "state-1") -> YandexOAuthState:

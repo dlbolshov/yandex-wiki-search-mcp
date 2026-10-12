@@ -1,8 +1,9 @@
-"""Dynamic registrations expire, public ones included — over real HTTP.
+"""Dynamic registrations expire after an idle window — over real HTTP.
 
 What reaches the store depends on what the SDK's /register stamps, and that
 depends on the client: one registered with token_endpoint_auth_method
-"none" is issued no secret, and so no client_secret_expires_at either. Only
+"none" is issued no secret, and so no client_secret_expires_at either; one
+issued a secret is stamped 0, "never", since secrets no longer expire. Only
 a request through the SDK's own handlers pins that, rather than what a
 hand-built record assumes the SDK sends.
 """
@@ -45,14 +46,15 @@ def test_a_public_registration_expires(store: StoreKind) -> None:
     assert EXPIRY - SLACK < remaining <= EXPIRY
 
 
-def test_a_confidential_registration_expires_when_its_client_was_told(
-    store: StoreKind,
-) -> None:
+def test_a_confidential_registration_gets_the_same_window(store: StoreKind) -> None:
     with oauth_app(store) as app:
         body = register(app.http, "client_secret_post")
         remaining = app.remaining(body["client_id"])
 
-    assert body["client_secret_expires_at"] == body["client_id_issued_at"] + EXPIRY
+    # Its secret never expires on its own — a deadline there cut off clients
+    # in daily use — so the client is told 0 and the idle window applies.
+    assert body["client_secret"]
+    assert body["client_secret_expires_at"] == 0
     assert remaining is not None
     assert EXPIRY - SLACK < remaining <= EXPIRY
 
@@ -70,9 +72,12 @@ def test_nothing_expires_with_the_expiry_switched_off(
     assert remaining is None
 
 
-def test_a_token_grant_renews_a_public_registration(store: StoreKind) -> None:
+@pytest.mark.parametrize("auth_method", ["none", "client_secret_post"])
+def test_a_token_grant_renews_a_registration(
+    store: StoreKind, auth_method: str
+) -> None:
     with oauth_app(store) as app:
-        registration = register(app.http, "none")
+        registration = register(app.http, auth_method)
         code = authorize(app.http, registration)
         with aioresponses() as yandex:
             yandex.post(YANDEX_TOKEN_URL, payload=YANDEX_TOKENS)

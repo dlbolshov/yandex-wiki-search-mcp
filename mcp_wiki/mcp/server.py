@@ -257,10 +257,7 @@ def create_mcp_server(
             server_url=yarl.URL(str(settings.mcp_server_public_url)),
             yandex_oauth_issuer=yarl.URL(str(settings.oauth_server_url)),
             store=oauth_store,
-            # The same setting the SDK stamps on a confidential client below:
-            # a public one has no secret to stamp it on, so it reaches the
-            # provider instead.
-            public_client_idle_ttl=settings.oauth_client_secret_expiry_seconds,
+            registration_idle_ttl=settings.oauth_registration_idle_seconds,
             scopes=scopes,
             use_scopes=settings.oauth_use_scopes,
         )
@@ -273,7 +270,9 @@ def create_mcp_server(
                 enabled=True,
                 valid_scopes=scopes,
                 default_scopes=scopes,
-                client_secret_expiry_seconds=settings.oauth_client_secret_expiry_seconds,
+                # Secrets never expire (the SDK stamps 0); the provider retires
+                # an unused registration instead, after its idle window.
+                client_secret_expiry_seconds=None,
             ),
         )
 

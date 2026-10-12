@@ -126,11 +126,13 @@ class InMemoryOAuthStore(OAuthStore):
         self._sweep_expired()
         self._sweep_threshold = max(SWEEP_MIN_ENTRIES, self._entry_count() * 2)
 
-    def _forget_refresh_token(self, token_hash: str) -> None:
+    def _forget_refresh_token(
+        self, token_hash: str, *, keep_access_hash: str | None = None
+    ) -> None:
         """Drop a refresh token and the access token it points at."""
         self._refresh_tokens.pop(token_hash, None)
         access_token_hash = self._refresh2access_tokens.pop(token_hash, None)
-        if access_token_hash is not None:
+        if access_token_hash is not None and access_token_hash != keep_access_hash:
             self._tokens.pop(access_token_hash, None)
 
     async def save_client(
@@ -147,11 +149,10 @@ class InMemoryOAuthStore(OAuthStore):
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         """Get a client if it exists and its registration hasn't expired.
 
-        Refused here, not left for the sweep: the SDK checks no deadline at
-        all on a public client, which has no secret to expire, and checks a
-        confidential one only at /token — after /authorize has walked the
-        user through the whole Yandex login. Redis has dropped the key by
-        then, and the two stores must give the same answer.
+        Refused here, not left for the sweep: the SDK knows nothing of a
+        registration's lifetime — the provider decides it — so a record
+        returned past its deadline would be accepted everywhere. Redis has
+        dropped the key by then, and the two stores must give the same answer.
         """
         entry = self._dynamic_clients.get(client_id)
         if entry is None:
@@ -259,9 +260,16 @@ class InMemoryOAuthStore(OAuthStore):
 
         return ref_token
 
-    async def revoke_refresh_token(self, token: str) -> None:
+    async def revoke_refresh_token(
+        self, token: str, *, keep_access_token: str | None = None
+    ) -> None:
         """Delete a refresh token, its mapping and the access token it issued."""
-        self._forget_refresh_token(hash_token(token))
+        self._forget_refresh_token(
+            hash_token(token),
+            keep_access_hash=(
+                hash_token(keep_access_token) if keep_access_token is not None else None
+            ),
+        )
 
     async def revoke_access_token(self, token: str) -> None:
         """Delete an access token; the refresh token (if any) stays valid."""

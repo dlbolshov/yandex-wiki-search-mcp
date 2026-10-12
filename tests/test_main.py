@@ -63,6 +63,26 @@ def test_unrelated_env_file_key_does_not_stop_startup(env_dir: Path) -> None:
     server.run.assert_called_once_with("stdio")
 
 
+def test_a_setting_under_its_former_name_is_flagged(
+    env_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    write_env(
+        env_dir,
+        "WIKI_TOKEN=abc\nWIKI_ORG_ID=123\nOAUTH_CLIENT_SECRET_EXPIRY_SECONDS=3600\n",
+    )
+
+    with (
+        caplog.at_level(logging.WARNING, logger="mcp_wiki"),
+        patch("mcp_wiki.__main__.create_mcp_server", return_value=MagicMock()),
+    ):
+        main()
+
+    assert (
+        "OAUTH_CLIENT_SECRET_EXPIRY_SECONDS is deprecated and still read; "
+        "rename it to OAUTH_REGISTRATION_IDLE_SECONDS"
+    ) in caplog.text
+
+
 @pytest.mark.parametrize(
     ("env", "expected_auth"),
     [

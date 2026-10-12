@@ -221,30 +221,35 @@ memory store, Fernet-encrypted for Redis.
 
   The provider also decides how long a dynamic registration lives, since
   `/register` is unauthenticated and whatever it keeps forever can be
-  flooded on purpose. A confidential client goes with its secret: the SDK
-  stamps `client_secret_expires_at` from `OAUTH_CLIENT_SECRET_EXPIRY_SECONDS`,
-  tells the client and refuses the secret past it (`0`, stamped when the
-  expiry is off, is RFC 7591's "never"). A public client
-  (`token_endpoint_auth_method: none`) is issued no secret, so the SDK stamps
-  nothing and checks nothing; the provider gives it the same setting as an
-  idle window, restarted after every successful code exchange or refresh and
-  counted from the moment the last token that grant issued stops working:
+  flooded on purpose. One rule covers every registration, public
+  (`token_endpoint_auth_method: none`) or confidential: it is kept for
+  `OAUTH_REGISTRATION_IDLE_SECONDS` after `/register`, and every successful
+  code exchange or refresh restarts that idle window, counted from the
+  moment the last token that grant issued stops working:
   the refresh token after 31 days, or the access token if Yandex made it
   longer, as it commonly does (a year). Bearer requests touch no
   registration, so a client comes back to `/token` only once its tokens have
   run out, by its own clock, which starts when the reply reaches it. A
   window that ended with the tokens would be gone by that visit; counted
   from their end, the client finds its registration, is told
-  `invalid_grant` and signs in again. A fixed lifetime
-  would retire registrations in active use without warning — RFC 7591 has no
-  field to announce one — and the SDK's own client answers the resulting
-  `invalid_client` by reopening `/authorize` with the dead `client_id`, which
-  strands the user on a "Client ID not found" page. With the expiry off, a
-  renewal saves the registration with no TTL, which also clears one left in
-  Redis from when it was on. The renewal is best effort: it runs after the
-  grant is committed (new tokens saved, an old refresh token revoked), so a
-  store failure is logged rather than turned into a 500 whose tokens the
-  client would never receive.
+  `invalid_grant` and signs in again. Client secrets do not expire on their
+  own: the SDK is told to stamp `client_secret_expires_at` 0, RFC 7591's
+  "never". A deadline there cut confidential clients in daily use off after
+  30 days, a public one has no field to be told a deadline in, and the SDK's
+  own client answers the resulting `invalid_client` by reopening
+  `/authorize` with the dead `client_id`, which strands the user on a
+  "Client ID not found" page; RFC 7591 §5 lets a server retire unused
+  registrations instead, which is what the idle window does. A record from
+  before, stamped with a deadline the SDK would still enforce, is saved with
+  `0` at its first grant. With the expiry off, a renewal saves the
+  registration with no TTL, which also clears one left in Redis from when it
+  was on. A refresh stores the new token pair before it revokes the old
+  refresh token, and revokes that only when Yandex issued a different one
+  (sparing an access token handed back unchanged), so a failed save leaves
+  the client its old token to retry with. The revocation and the renewal
+  after it are best effort: the grant is committed by then, so a store
+  failure is logged rather than turned into a 500 whose tokens the client
+  would never receive.
 - **`store.py`** — the `OAuthStore` protocol and the shared
   `REFRESH_TOKEN_TTL_SECONDS` (31 days, Yandex's refresh-token lifetime).
   `save_client` takes its TTL from the provider, as `save_state` and
@@ -267,7 +272,7 @@ memory store, Fernet-encrypted for Redis.
   (`serializers.py`), so the pending state and the auth-code record — the
   wrapped `yandex_auth_code` included — are stored in the clear for their
   600 s / 300 s TTLs. TTLs are delegated to Redis, client registrations'
-  included (with `OAUTH_CLIENT_SECRET_EXPIRY_SECONDS` empty a registration
+  included (with `OAUTH_REGISTRATION_IDLE_SECONDS` empty a registration
   gets none). Single-use records — state and auth code — are claimed by the
   `DEL`, not the `GET`: two concurrent redemptions may both read one, but
   only the caller whose `DEL` removed the key gets it.

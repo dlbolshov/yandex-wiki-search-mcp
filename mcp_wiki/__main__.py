@@ -4,7 +4,7 @@ import sys
 from pydantic import ValidationError
 
 from mcp_wiki.mcp.server import create_mcp_server, run_options
-from mcp_wiki.settings import Settings, suspicious_env_keys
+from mcp_wiki.settings import Settings, renamed_env_keys, suspicious_env_keys
 
 logger = logging.getLogger("mcp_wiki")
 
@@ -37,6 +37,13 @@ def main() -> None:
         stream=sys.stderr,
         format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
     )
+    for old, new in renamed_env_keys().items():
+        logger.warning(
+            "%s is deprecated and still read; rename it to %s",
+            old.upper(),
+            new.upper(),
+        )
+
     token_mode: str | None = None
     if settings.wiki_token:
         token_mode = "token"  # noqa: S105

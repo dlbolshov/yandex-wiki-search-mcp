@@ -12,6 +12,7 @@ from pydantic import AnyHttpUrl, SecretStr
 from starlette.testclient import TestClient
 
 from mcp_wiki.mcp.context import AppContext
+from mcp_wiki.mcp.oauth.provider import YandexOAuthAuthorizationServerProvider
 from mcp_wiki.mcp.server import (
     _parse_encryption_keys,
     create_mcp_server,
@@ -408,25 +409,19 @@ class TestClientRegistrationExpiry:
         settings.oauth_client_id = "client-id"
         settings.oauth_client_secret = SecretStr("client-secret")
         settings.mcp_server_public_url = AnyHttpUrl("https://mcp.example.com")
-        settings.oauth_client_secret_expiry_seconds = expiry
+        settings.oauth_registration_idle_seconds = expiry
         return settings
 
-    def test_registrations_are_given_a_lifetime(self) -> None:
-        # Without one, /register — unauthenticated by protocol design —
-        # grows the store without bound, in Redis as well as in memory.
+    @pytest.mark.parametrize("expiry", [30 * 24 * 60 * 60, None])
+    def test_the_provider_decides_the_lifetime_and_secrets_never_expire(
+        self, expiry: int | None
+    ) -> None:
+        # Without a lifetime /register — unauthenticated by protocol design —
+        # grows the store without bound, in Redis as well as in memory. The
+        # provider applies it as an idle window to every registration; the
+        # SDK stamps no deadline on a secret, whatever the setting says.
         server = create_mcp_server(
-            settings=self._oauth_settings(30 * 24 * 60 * 60),
-            lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
-        )
-
-        assert server.settings.auth is not None
-        options = server.settings.auth.client_registration_options
-        assert options is not None
-        assert options.client_secret_expiry_seconds == 30 * 24 * 60 * 60
-
-    def test_expiry_can_be_disabled(self) -> None:
-        server = create_mcp_server(
-            settings=self._oauth_settings(None),
+            settings=self._oauth_settings(expiry),
             lifespan=make_test_lifespan(AppContext(wiki=AsyncMock())),
         )
 
@@ -434,6 +429,9 @@ class TestClientRegistrationExpiry:
         options = server.settings.auth.client_registration_options
         assert options is not None
         assert options.client_secret_expiry_seconds is None
+        provider = server._auth_server_provider
+        assert isinstance(provider, YandexOAuthAuthorizationServerProvider)
+        assert provider._registration_idle_ttl == expiry
 
 
 class TestOAuthCallbackRoute:

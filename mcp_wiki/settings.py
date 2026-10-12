@@ -2,7 +2,14 @@ import difflib
 import os
 from typing import Literal
 
-from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    AnyHttpUrl,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
 
 # Shared so the server cannot widen it back to str and silently accept a typo.
@@ -14,6 +21,12 @@ ENV_FILE = ".env"
 # field is either someone else's variable or our own typo — see
 # suspicious_env_keys().
 SETTINGS_PREFIXES = ("wiki_", "oauth_", "redis_", "mcp_", "tool_")
+
+# Former names of settings, still read and mapped to the field that replaced
+# them. main() warns when one is in use; suspicious_env_keys() leaves them be.
+RENAMED_SETTINGS = {
+    "oauth_client_secret_expiry_seconds": "oauth_registration_idle_seconds",
+}
 
 # How close an unknown key must be to a real field to be called a typo rather
 # than an unrelated variable. 0.8 keeps WIKI_READ_ONL (0.96 against
@@ -61,20 +74,22 @@ class Settings(BaseSettings):
     oauth_client_secret: SecretStr | None = None
     # Dynamic client registration is unauthenticated by protocol design, so
     # registrations that never expire accumulate without bound — in Redis as
-    # well as in memory. A confidential client gets this as its secret's
-    # lifetime: the SDK stamps it at /register, tells the client and refuses
-    # the secret past it. A public one has no secret, so the provider applies
-    # it as an idle window instead, restarted by every token grant and
-    # counted from the moment the last token that grant issued stops working
-    # (the refresh token after 31 days, or a longer-lived access token).
-    # Both stores drop a
-    # registration when its time is up. None disables the expiry, and
-    # registrations made from then on live indefinitely; a public one kept
-    # with a TTL while it was on loses it at its next grant, a confidential
-    # one keeps its secret's deadline. An empty variable is how the env file
-    # spells None (see below).
-    oauth_client_secret_expiry_seconds: int | None = Field(
-        default=30 * 24 * 60 * 60, ge=1
+    # well as in memory. A registration nobody signs in with is dropped this
+    # long after /register; every token grant restarts the window, counted
+    # from the moment the last token that grant issued stops working (the
+    # refresh token after 31 days, or a longer-lived access token). Both
+    # stores drop a registration when its time is up. Client secrets do not
+    # expire on their own: a deadline on them cut off clients in daily use,
+    # and the MCP Python SDK client never recovers from that. None disables
+    # the expiry; a registration kept with one while it was on loses it at
+    # its next grant. An empty variable is how the env file spells None (see
+    # below). Read under its former name too, OAUTH_CLIENT_SECRET_EXPIRY_SECONDS.
+    oauth_registration_idle_seconds: int | None = Field(
+        default=30 * 24 * 60 * 60,
+        ge=1,
+        validation_alias=AliasChoices(
+            "oauth_registration_idle_seconds", "oauth_client_secret_expiry_seconds"
+        ),
     )
     mcp_server_public_url: AnyHttpUrl | None = None
     oauth_encryption_keys: SecretStr | None = None
@@ -85,10 +100,10 @@ class Settings(BaseSettings):
     redis_password: SecretStr | None = None
     redis_pool_max_size: int = 10
 
-    @field_validator("oauth_client_secret_expiry_seconds", mode="before")
+    @field_validator("oauth_registration_idle_seconds", mode="before")
     @classmethod
     def empty_expiry_disables_it(cls, value: object) -> object:
-        """Read an empty OAUTH_CLIENT_SECRET_EXPIRY_SECONDS as None.
+        """Read an empty OAUTH_REGISTRATION_IDLE_SECONDS as None.
 
         Empty is the documented way to switch the expiry off, but an
         environment variable cannot carry None — pydantic sees the empty
@@ -164,7 +179,9 @@ def _configured_keys() -> set[str]:
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
     )
-    keys |= {name.lower() for name in source()}
+    # env_vars, the file's own keys, not source(): that maps a key read under
+    # an alias (a setting's former name) to the field's name, hiding it.
+    keys |= {name.lower() for name in source.env_vars}
     return keys
 
 
@@ -176,7 +193,7 @@ def suspicious_env_keys() -> dict[str, str]:
     variable — so a misspelled setting is caught in either channel while a
     REDIS_URL belonging to something else passes untouched.
     """
-    known = set(Settings.model_fields)
+    known = set(Settings.model_fields) | set(RENAMED_SETTINGS)
     candidates = sorted(
         key for key in _configured_keys() - known if key.startswith(SETTINGS_PREFIXES)
     )
@@ -187,3 +204,9 @@ def suspicious_env_keys() -> dict[str, str]:
         if close:
             suspects[key] = close[0]
     return suspects
+
+
+def renamed_env_keys() -> dict[str, str]:
+    """Configured keys that still use a setting's former name: old -> new."""
+    configured = _configured_keys()
+    return {old: new for old, new in RENAMED_SETTINGS.items() if old in configured}

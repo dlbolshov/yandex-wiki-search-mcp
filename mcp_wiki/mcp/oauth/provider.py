@@ -80,23 +80,23 @@ class YandexOAuthAuthorizationServerProvider(
         server_url: yarl.URL,
         yandex_oauth_issuer: yarl.URL,
         store: OAuthStore,
-        public_client_idle_ttl: int | None,
+        registration_idle_ttl: int | None,
         scopes: list[str] | None = None,
         use_scopes: bool = True,
     ):
-        """`public_client_idle_ttl` has no default on purpose.
+        """`registration_idle_ttl` has no default on purpose.
 
-        It is how long a public registration lives without a token grant,
-        None for never — and never is exactly the unbounded growth a flood
-        of unauthenticated /register calls would exploit, so every caller
-        has to choose it.
+        It is how long a registration lives without a token grant, None for
+        never — and never is exactly the unbounded growth a flood of
+        unauthenticated /register calls would exploit, so every caller has
+        to choose it.
         """
         self._client_id = client_id
         self._client_secret = client_secret
         self._server_url = server_url
         self._yandex_oauth_issuer = yandex_oauth_issuer
         self._store = store
-        self._public_client_idle_ttl = public_client_idle_ttl
+        self._registration_idle_ttl = registration_idle_ttl
         self._scopes = scopes
         self._use_scopes = use_scopes
 
@@ -141,30 +141,18 @@ class YandexOAuthAuthorizationServerProvider(
         return await self._store.get_client(client_id)
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
-        await self._store.save_client(
-            client_info, ttl=self._registration_ttl(client_info)
-        )
-
-    def _registration_ttl(self, client: OAuthClientInformationFull) -> int | None:
-        """How long a new registration lives, or None if it never expires."""
-        if client.client_secret:
-            # Confidential: the SDK stamped the secret's deadline at
-            # /register, told the client in the response and refuses the
-            # secret past it, so the record goes with it. 0 is RFC 7591's
-            # "never expires" — what the SDK stamps when
-            # client_secret_expiry_seconds is unset — not a date in 1970.
-            deadline = client.client_secret_expires_at
-            if not deadline:
-                return None
-            return max(deadline - int(time.time()), 1)
-        # Public: issued no secret, so the SDK stamps no deadline and checks
-        # none, and RFC 7591 has no field to tell the client one. The record
-        # is ours to retire, after an idle window _renew_registration slides.
-        return self._public_client_idle_ttl
+        # One rule for every registration, public or confidential: kept for
+        # the idle window, then slid by every token grant. A secret gets no
+        # deadline of its own (the SDK stamps 0, RFC 7591's "never"): one
+        # cut off clients in daily use, and the MCP Python SDK client never
+        # recovers from that — it keeps the dead client_id and reopens
+        # /authorize with it. RFC 7591 §5 lets a server retire unused
+        # registrations instead, which is what the idle window does.
+        await self._store.save_client(client_info, ttl=self._registration_idle_ttl)
 
     def _renewal_ttl(self, token: OAuthToken) -> int | None:
-        """How long a public registration lives after a grant issued `token`."""
-        idle = self._public_client_idle_ttl
+        """How long a registration lives after a grant issued `token`."""
+        idle = self._registration_idle_ttl
         if idle is None:
             return None
         # The idle window counts from the moment the last of the grant's
@@ -175,7 +163,7 @@ class YandexOAuthAuthorizationServerProvider(
     async def _renew_registration(
         self, client: OAuthClientInformationFull, token: OAuthToken
     ) -> None:
-        """Restart a public registration's idle window after a token grant.
+        """Restart a registration's idle window after a token grant.
 
         A fixed lifetime would retire a registration in active use, unannounced:
         its next refresh gets invalid_client, and the SDK's own client answers
@@ -200,11 +188,14 @@ class YandexOAuthAuthorizationServerProvider(
         must not turn that grant into a 500 whose tokens the client never
         receives. A miss leaves the previous deadline until the next grant.
 
-        A confidential registration keeps the fixed deadline the client was
-        told at /register; the SDK would refuse its secret past it anyway.
+        A confidential registration made before secrets stopped expiring
+        still carries the deadline it was stamped with, and the SDK refuses
+        the secret past it whatever the store keeps. Saving it with
+        client_secret_expires_at 0 lifts that too, so a client still in use
+        moves to the idle rule at its first grant.
         """
-        if client.client_secret:
-            return
+        if client.client_secret_expires_at:
+            client = client.model_copy(update={"client_secret_expires_at": 0})
         try:
             await self._store.save_client(client, ttl=self._renewal_ttl(token))
         except Exception:
@@ -356,17 +347,45 @@ class YandexOAuthAuthorizationServerProvider(
             form, grant="refresh token", grant_spent=False
         )
 
-        await self._store.revoke_refresh_token(refresh_token.token)
         if client.client_id is None:
             raise ValueError("client_id must be provided")
+        # The new pair first. Until it is stored the old refresh token is the
+        # client's only way back in: revoked first, a failed save here left
+        # the client with a 500, no new tokens and an old one that no longer
+        # worked either.
         await self._store.save_oauth_token(
             token=token,
             client_id=client.client_id,
             scopes=refresh_token.scopes,
             resource=None,
         )
+        await self._retire_refresh_token(refresh_token.token, replaced_by=token)
         await self._renew_registration(client, token)
         return token
+
+    async def _retire_refresh_token(self, old: str, *, replaced_by: OAuthToken) -> None:
+        """Revoke the refresh token a successful refresh traded in.
+
+        Only when Yandex issued a different one. The same token handed back
+        is the record just saved, and revoking it would delete it. No new
+        token at all leaves the old one in force: RFC 6749 §6 has the client
+        keep using it then, so revoking it would end the client's session.
+        The access token the new pair carries is spared too, in case Yandex
+        handed that one back unchanged.
+
+        Best effort, like the renewal: the grant is already stored, and a
+        failed cleanup only leaves the old refresh token to run out its TTL.
+        """
+        if replaced_by.refresh_token is None or replaced_by.refresh_token == old:
+            return
+        try:
+            await self._store.revoke_refresh_token(
+                old, keep_access_token=replaced_by.access_token
+            )
+        except Exception:
+            logger.warning(
+                "Could not revoke a refresh token after a refresh", exc_info=True
+            )
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         return await self._store.get_access_token(token)

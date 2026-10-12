@@ -197,6 +197,21 @@ async def test_revoke_refresh_token_cascades_to_access(
     assert await memory_store.get_access_token("ya-access-1") is None
 
 
+async def test_revoke_refresh_token_can_spare_the_access_token(
+    memory_store: InMemoryOAuthStore,
+) -> None:
+    # A refresh that got the same access token back revokes the old refresh
+    # token without losing the access token it still has to deliver.
+    await memory_store.save_oauth_token(make_token(), "client-1", ["wiki:read"], None)
+
+    await memory_store.revoke_refresh_token(
+        "ya-refresh-1", keep_access_token="ya-access-1"
+    )
+
+    assert await memory_store.get_refresh_token("ya-refresh-1") is None
+    assert await memory_store.get_access_token("ya-access-1") is not None
+
+
 async def test_revoke_access_token_keeps_refresh(
     memory_store: InMemoryOAuthStore,
 ) -> None:

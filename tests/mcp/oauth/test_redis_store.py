@@ -225,6 +225,21 @@ async def test_revoke_refresh_token_cascades_to_access(
     assert await raw_client(redis_store).exists(mapping_key) == 0
 
 
+async def test_revoke_refresh_token_can_spare_the_access_token(
+    redis_store: RedisOAuthStore,
+) -> None:
+    await redis_store.save_oauth_token(make_token(), "client-1", ["wiki:read"], None)
+
+    await redis_store.revoke_refresh_token(
+        "ya-refresh-1", keep_access_token="ya-access-1"
+    )
+
+    assert await redis_store.get_refresh_token("ya-refresh-1") is None
+    assert await redis_store.get_access_token("ya-access-1") is not None
+    mapping_key = f"oauth:mapping:{hash_token('ya-refresh-1')}"
+    assert await raw_client(redis_store).exists(mapping_key) == 0
+
+
 async def test_revoke_access_token_keeps_refresh(
     redis_store: RedisOAuthStore,
 ) -> None:
