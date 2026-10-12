@@ -1,17 +1,22 @@
-"""One exact uv for the Dockerfile and CI, and only a floor for everyone else.
+"""One exact uv for the Dockerfile and CI, and no range for everyone else.
 
 uv refuses nearly every command in a copy of this tree that falls outside
 pyproject.toml's `required-version`, so a ceiling there breaks the Claude
 Desktop bundle, glama.ai's source build and contributors on the next uv
-minor. It stays a floor; the uv the project is built and tested with is
-pinned instead, once in the Dockerfile's uv image and once in every setup-uv
+minor. The project sets none; the uv it is built and tested with is pinned
+instead, once in the Dockerfile's uv image and once in every setup-uv
 step. Only release.yml builds the image, on a tag, so without this check a
 pin that drifts surfaces at release time.
+
+The one exemption is the weekly canary, uv-canary.yml, whose steps install
+the newest uv on purpose: Dependabot cannot see either pin, so the canary is
+what notices the next uv release, by running the bundle and the suite on it.
 """
 
 import re
 import tomllib
 from pathlib import Path
+from typing import NamedTuple
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
@@ -25,8 +30,17 @@ UV_IMAGE = re.compile(
 SETUP_UV = re.compile(r"""^(?P<lead>\s*(?:-\s+)?)uses:\s*["']?astral-sh/setup-uv@""")
 KEY = re.compile(r"^\s*(?:-\s+)?(?P<key>[\w-]+):")
 VERSION = re.compile(
-    r"""^\s+version:\s*(?:"(?P<dq>[^"]+)"|'(?P<sq>[^']+)'|(?P<bare>[^\s"'#]+))\s*(?:#.*)?$"""
+    r"""^\s+version:\s*(?:"(?P<dq>[^"]+)"|'(?P<sq>[^']+)'|(?P<bare>[^\s"'#]+))\s*(?:#(?P<comment>.*))?$"""
 )
+# A step is the canary when this word is in the comment on its `version:` line.
+# Only the canary workflow may carry it, and there the version must float.
+CANARY_MARKER = re.compile(r"\buv-canary\b")
+CANARY_WORKFLOW = "uv-canary.yml"
+
+
+class SetupUv(NamedTuple):
+    version: str | None
+    canary: bool
 
 
 def _dockerfile_uv() -> str:
@@ -35,9 +49,9 @@ def _dockerfile_uv() -> str:
     return tags[0]
 
 
-def _setup_uv_versions() -> dict[str, str | None]:
+def _setup_uv_steps() -> dict[str, SetupUv]:
     """Map every setup-uv step (file:line) to its `with: version`, if any."""
-    steps: dict[str, str | None] = {}
+    steps: dict[str, SetupUv] = {}
     workflows = (ROOT / ".github" / "workflows").glob("*.y*ml")
     for workflow in sorted(workflows):
         lines = workflow.read_text(encoding="utf-8").splitlines()
@@ -49,6 +63,7 @@ def _setup_uv_versions() -> dict[str, str | None]:
             # until a line indented less than that.
             column = len(match.group("lead"))
             version = None
+            canary = False
             in_with = False
             for following in lines[number + 1 :]:
                 stripped = following.lstrip()
@@ -64,16 +79,18 @@ def _setup_uv_versions() -> dict[str, str | None]:
                     version = (
                         found.group("dq") or found.group("sq") or found.group("bare")
                     )
-            steps[f"{workflow.name}:{number + 1}"] = version
+                    canary = bool(CANARY_MARKER.search(found.group("comment") or ""))
+            steps[f"{workflow.name}:{number + 1}"] = SetupUv(version, canary)
     return steps
 
 
-def test_required_version_is_a_floor() -> None:
+def test_required_version_has_no_ceiling() -> None:
     # uv.toml would take over required-version from pyproject.toml unseen.
     assert not (ROOT / "uv.toml").exists()
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    required = SpecifierSet(pyproject["tool"]["uv"]["required-version"])
-    assert [spec.operator for spec in required] == [">="], str(required)
+    required = SpecifierSet(pyproject["tool"]["uv"].get("required-version", ""))
+    # None today. A floor would be tolerable; anything else is a ceiling.
+    assert {spec.operator for spec in required} <= {">="}, str(required)
     assert Version(_dockerfile_uv()) in required
 
 
@@ -85,7 +102,21 @@ def test_dockerfile_uv_image_is_an_exact_release() -> None:
 
 
 def test_every_setup_uv_step_pins_the_dockerfile_uv() -> None:
-    steps = _setup_uv_versions()
+    steps = {
+        step: found.version
+        for step, found in _setup_uv_steps().items()
+        if not found.canary
+    }
     assert steps
     tag = _dockerfile_uv()
     assert steps == dict.fromkeys(steps, tag), f"Dockerfile has uv {tag}"
+
+
+def test_only_the_canary_floats() -> None:
+    canary = {
+        step: found.version for step, found in _setup_uv_steps().items() if found.canary
+    }
+    # Without it nothing installs a newer uv: Dependabot sees neither pin.
+    assert canary
+    assert {step.partition(":")[0] for step in canary} == {CANARY_WORKFLOW}, canary
+    assert canary == dict.fromkeys(canary, "latest")

@@ -37,14 +37,13 @@ dependencies = [
 
 [tool.uv]
 package = true
-# A floor only. uv enforces this in nearly every command it runs inside a
-# copy of this tree — a contributor's checkout, the unpacked Claude Desktop
+# No required-version. uv enforces one in nearly every command it runs inside
+# a copy of this tree — a contributor's checkout, the unpacked Claude Desktop
 # bundle (`uv run`), builders that install from source such as glama.ai — so
-# a ceiling broke all of them the day uv 0.13.0 shipped, and uv ships a
-# breaking minor every three months or so. CI pins its uv explicitly instead:
-# every setup-uv step names the same exact release as the Dockerfile's uv
-# image, and tests/test_dockerfile.py keeps those equal and this a floor.
-required-version = ">=0.11"
+# the `<0.13` ceiling 1.5.0 set broke all of them the day uv 0.13.0 shipped,
+# and its `>=0.11` floor turned away uv 0.10, which runs the bundle fine. CI
+# pins its uv explicitly instead: every setup-uv step names the same exact
+# release as the Dockerfile's uv image (tests/test_dockerfile.py).
 
 [tool.setuptools.packages.find]
 where = ["."]

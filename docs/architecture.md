@@ -349,7 +349,8 @@ The suite runs against mocks at every seam the architecture defines:
 | Wiki client ↔ HTTP | `aioresponses`; assertions on headers, query params and bodies as aiohttp would send them |
 | OAuth ↔ Redis | `fakeredis` |
 | package ↔ interpreter | `tests/test_imports.py` imports every module in a subprocess |
-| Docker image ↔ CI ↔ uv | `tests/test_dockerfile.py`: the Dockerfile's uv pin is exact, every `setup-uv` step pins the same release, `required-version` stays a floor with no `uv.toml` over it (see [Toolchain](#toolchain)) |
+| Docker image ↔ CI ↔ uv | `tests/test_dockerfile.py`: the Dockerfile's uv pin is exact, every `setup-uv` step pins the same release except the weekly canary's, which must float to `latest`, and `required-version` grows no ceiling (the project sets none) and no `uv.toml` overrides it (see [Toolchain](#toolchain)) |
+| bundle ↔ host | `tests/test_manifest.py`: a platform override in `manifest.json` repeats the whole base `env`, and Windows keeps x86_64 Python (see [Toolchain](#toolchain)) |
 
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
@@ -416,6 +417,26 @@ condition — it happens in `build-docker` on every run, so a manual dispatch
 still pushes an image tagged from the ref it ran on (`:main` from main), and
 on a tag the image is out before PyPI is attempted. `api-drift.yml` is the
 weekly live sweep.
+
+`uv-canary.yml` runs with the newest uv weekly, by hand, and on a pull request
+that changes how the bundle is built or launched (`manifest.json`,
+`.mcpbignore`, `pyproject.toml`, `uv.lock` or the workflow itself). It is the
+one place CI does not use the pinned release. The `bundle` job runs on
+ubuntu, macOS, Windows x64 and Windows ARM64. It packs the MCPB bundle, unpacks it and launches it the way Claude Desktop
+does. It runs the unpacked manifest's own `mcp_config` command, args and env,
+with `${__dirname}` and `${user_config.*}` substituted (a dummy token and org
+id) and the working directory set to the bundle. stdin is at EOF, and
+`UV_PYTHON_PREFERENCE=only-managed` with an empty `UV_PYTHON_INSTALL_DIR`
+makes it a machine with no Python of its own. The server must log
+`mcp_wiki starting` and exit 0. The `suite` job runs `uv sync --locked --dev`
+and the tests on ubuntu and macOS. The workflow exists because uv 0.13.0 broke the bundle twice
+and CI saw neither break. `release.yml` validates and packs the bundle but
+never runs it, and Dependabot cannot bump either uv pin (see
+[Toolchain](#toolchain)). Both breaks reproduce against this workflow's
+launcher. With the `<0.13` ceiling restored, uv refuses to run. Without
+`UV_PYTHON`, it fetches Python 3.15 and fails to build `cffi`. A red run
+means fixing compatibility first (the manifest, the lock or a range), then
+moving every pin in one change.
 
 `pages.yml` deploys `docs/diagrams/` to GitHub Pages on a push to main that
 touches it, or by hand. It builds nothing: the HTML is committed, rebuilt
@@ -511,23 +532,44 @@ HTML report), ruff (lint + format), mypy **and** ty (two type checkers — ty
 is the second opinion), pytest + pytest-asyncio. Python 3.11–3.13. The
 package ships `py.typed`.
 
-uv's own version is pinned twice and bounded once. The Dockerfile's uv image
+uv's own version is pinned twice and bounded nowhere. The Dockerfile's uv image
 and every `setup-uv` step in CI (`version:`) name the same exact release, so
 the image is built and CI tests with one known uv. A floating tag is out:
 `:latest` broke the image build when it became uv 0.13.0, and only
 `release.yml` builds the image, so nothing noticed before a release.
-`[tool.uv] required-version` in `pyproject.toml` is a floor and nothing more.
-uv enforces it in nearly every command run inside a copy of this tree (all
-but `uvx`/`uv tool` and `uv self`): a contributor's checkout, the unpacked
-Claude Desktop bundle (its `uv run`), and builders that install from source,
-such as glama.ai. The `<0.13` ceiling 1.5.0 added broke all of them the day
-uv 0.13.0 shipped, and uv releases a breaking minor every three months or so.
-`tests/test_dockerfile.py` fails when the pins disagree, when the range grows
-a ceiling, or when a `uv.toml` appears to override it. Moving to a new uv
-means changing the image tag and the five `version:` inputs in one change.
+`pyproject.toml` sets no `[tool.uv] required-version`. uv enforces one in
+nearly every command run inside a copy of this tree (all but `uvx`/`uv tool`
+and `uv self`): a contributor's checkout, the unpacked Claude Desktop bundle
+(its `uv run`), and builders that install from source, such as glama.ai. The
+`<0.13` ceiling 1.5.0 added broke all of them the day uv 0.13.0 shipped, and
+uv releases a breaking minor every three months or so. Its `>=0.11` floor
+turned away uv 0.10, which runs the bundle fine, and kept nothing out that
+needed keeping out. `tests/test_dockerfile.py` fails when the pins disagree,
+when a ceiling comes back, or when a `uv.toml` appears to override
+`pyproject.toml`. Moving to a new uv means changing the image tag and every
+pinned `version:` input in one change.
+
+Dependabot will not propose that change. The Dockerfile's `FROM` is
+ARG-prefixed, and the github-actions ecosystem does not edit `with:` inputs.
+The prompt comes from `uv-canary.yml` instead (see [CI](#ci)), the one
+sanctioned float. Its `setup-uv` steps carry a `uv-canary` marker in the
+comment on their `version:` line and must say `latest`. The test accepts the
+marker in that workflow only, and holds every unmarked step to the pin. When
+the canary goes red on a new uv, fix compatibility first, then move the pins.
 
 The bundle's interpreter is the user's uv's choice, so `manifest.json` bounds
 it with `UV_PYTHON` (3.11–3.14) in `mcp_config.env`. Since 0.13 uv downloads
 Python 3.15 wherever no suitable interpreter exists, and several locked
 packages (`cffi`, `pydantic-core`, `aiohttp`, `rpds-py`) have no 3.15 wheels.
 Raise that bound once the lock does.
+
+On Windows the bundle stays on x86_64 Python:
+`mcp_config.platform_overrides.win32` adds `UV_PYTHON_ARCH=x86_64`. uv 0.13
+prefers native ARM64 Python on Windows ARM64, and the locked `aiohttp` 3.13.3
+and `cryptography` 46.0.4 have no `win_arm64` wheels (no `cryptography`
+release has one), so its first `uv run` would have to build them from source.
+uv 0.12 used x86_64 Python there, and on x64 Windows the setting changes
+nothing. An override's `env` replaces the base `env` rather than merging into
+it (mcpb's `getMcpConfigForManifest`), so the override repeats every
+variable; `tests/test_manifest.py` fails when it drops one. The canary's
+`windows-11-arm` leg launches the bundle with it.
