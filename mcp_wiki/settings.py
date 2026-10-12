@@ -64,11 +64,15 @@ class Settings(BaseSettings):
     # well as in memory. A confidential client gets this as its secret's
     # lifetime: the SDK stamps it at /register, tells the client and refuses
     # the secret past it. A public one has no secret, so the provider applies
-    # it as an idle window instead, restarted by every token grant and never
-    # shorter than the refresh token that grant issued. Both stores drop a
+    # it as an idle window instead, restarted by every token grant and
+    # counted from the moment the last token that grant issued stops working
+    # (the refresh token after 31 days, or a longer-lived access token).
+    # Both stores drop a
     # registration when its time is up. None disables the expiry, and
-    # registrations then live indefinitely; an empty variable is how the env
-    # file spells it (see below).
+    # registrations made from then on live indefinitely; a public one kept
+    # with a TTL while it was on loses it at its next grant, a confidential
+    # one keeps its secret's deadline. An empty variable is how the env file
+    # spells None (see below).
     oauth_client_secret_expiry_seconds: int | None = Field(
         default=30 * 24 * 60 * 60, ge=1
     )

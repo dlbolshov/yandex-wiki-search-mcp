@@ -28,10 +28,12 @@ Prepare a new release of `yandex-wiki-search-mcp`.
    - `@manifest.json`
    - `@server.json`
    - OCI image tag in `@server.json`
-5. Add a new top entry to `@CHANGELOG.md`.
+5. Promote `## [Unreleased]` in `@CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`
+   and append the dated entry to ROADMAP's execution log.
    Never rewrite older released entries.
 6. Run `uv lock` so `uv.lock` matches the new package metadata and dependencies.
 7. Create a git commit for the release preparation.
-   First line: short summary of the actual change, not just "bump version".
+   First line: `release: X.Y.Z`, the title every release since 1.3.0 has
+   used (CLAUDE.md and `docs/architecture*.md` name the same convention).
    Then bullet points with the important release notes.
 8. Other requirements: $ARGUMENTS

@@ -2,6 +2,8 @@ import contextlib
 import json
 from typing import Any
 
+from pydantic import ValidationError
+
 
 class WikiError(Exception):
     """Base class for Wiki API errors."""
@@ -108,6 +110,54 @@ class WikiTransportError(WikiError):
         self.cause = cause
 
 
+def _describe_unreadable(cause: ValueError) -> str:
+    """One line on why a body did not parse, without echoing the body itself."""
+    if isinstance(cause, ValidationError):
+        first = cause.errors(include_url=False, include_input=False)[0]
+        where = ".".join(str(part) for part in first["loc"])
+        detail = f"{where}: {first['msg']}" if where else first["msg"]
+        more = cause.error_count() - 1
+        return f"{cause.title} {detail}" + (f" (and {more} more)" if more else "")
+    return str(cause) or type(cause).__name__
+
+
+class WikiResponseError(WikiError):
+    """A success status whose body could not be read.
+
+    The request went through; only the answer is unusable — a page a proxy
+    served with 200, an empty body, a field the API renamed. For a write
+    that means the change may well have been applied, and the message says
+    so: a caller retrying blind could apply it twice. A WikiError rather
+    than the pydantic or json exception underneath, so the MCP layer shows
+    the model what happened instead of a bare crash, and `fetch_all` keeps
+    the pages it already has.
+    """
+
+    def __init__(
+        self,
+        method: str,
+        path: str,
+        cause: ValueError,
+        *,
+        writes: bool | None = None,
+    ) -> None:
+        """`writes` defaults to "anything but a GET"; a POST that only reads,
+        like the search endpoint, says False so as not to warn about it."""
+        message = (
+            f"{method} {path} succeeded, but its response could not be read: "
+            f"{_describe_unreadable(cause)}."
+        )
+        if method != "GET" if writes is None else writes:
+            message += (
+                " The change may have been applied: read the current state "
+                "before retrying."
+            )
+        super().__init__(message)
+        self.method = method
+        self.path = path
+        self.cause = cause
+
+
 class PageNotFound(WikiError):
     def __init__(self, page_identifier: int | str):
         super().__init__(f"Wiki page not found: {page_identifier}")
@@ -186,7 +236,10 @@ class WikiLocalFileError(WikiError):
     """
 
     def __init__(self, message: str, *, cause: OSError | None = None) -> None:
-        detail = f"{message} ({cause.strerror})" if cause is not None else message
+        # Not every OSError carries an errno text: io.UnsupportedOperation,
+        # for one, has strerror None.
+        reason = None if cause is None else cause.strerror or str(cause)
+        detail = f"{message} ({reason})" if reason else message
         super().__init__(detail)
         self.cause = cause
 

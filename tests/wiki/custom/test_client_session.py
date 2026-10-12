@@ -1,5 +1,7 @@
 """Session lifecycle, request tracing, and the upload paths beyond the happy one."""
 
+import asyncio
+import contextlib
 import errno
 import io
 import logging
@@ -9,7 +11,7 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, BinaryIO
 
 import pytest
 from aioresponses import aioresponses
@@ -150,19 +152,180 @@ class TestUploadAttachment:
             with pytest.raises(WikiLocalFileError, match=r"Cannot read .*secret"):
                 await wiki_client.page_upload_attachment(10, file_path=str(secret))
 
+    @pytest.mark.skipif(
+        sys.platform == "win32" or os.geteuid() == 0,
+        reason="mode bits do not stop Windows or root from reading",
+    )
+    async def test_a_file_in_a_directory_it_cannot_enter_is_refused(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # The common unreadable case, and the one is_file() got wrong: before
+        # Python 3.14 it re-raised the PermissionError, which mcp >=2.1 shows
+        # the model as a bare crash; from 3.14 it said "not a file".
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        (locked / "secret.txt").write_bytes(b"x")
+        locked.chmod(0)
+        try:
+            with aioresponses() as mocked:
+                mocked.post(
+                    "https://api.wiki.yandex.net/v1/upload_sessions",
+                    exception=AssertionError("no request may be made"),
+                )
+                with pytest.raises(
+                    WikiLocalFileError, match=r"Cannot read .*secret\.txt \(Permission"
+                ):
+                    await wiki_client.page_upload_attachment(
+                        10, file_path=str(locked / "secret.txt")
+                    )
+        finally:
+            locked.chmod(0o700)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX NAME_MAX")
+    async def test_a_name_too_long_is_refused(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        with pytest.raises(WikiLocalFileError, match="File name too long"):
+            await wiki_client.page_upload_attachment(
+                10, file_path=str(tmp_path / ("a" * 300))
+            )
+
+    async def test_a_directory_is_not_a_file_to_upload(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        with pytest.raises(WikiLocalFileError, match="Not a regular file"):
+            await wiki_client.page_upload_attachment(10, file_path=str(tmp_path))
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a FIFO")
+    async def test_a_fifo_is_refused_without_blocking(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # Opening a FIFO for reading blocks until a writer appears; the check
+        # has to come before open() for the call to return at all.
+        fifo = tmp_path / "pipe"
+        os.mkfifo(fifo)
+
+        try:
+            with pytest.raises(WikiLocalFileError, match="Not a regular file"):
+                await asyncio.wait_for(
+                    wiki_client.page_upload_attachment(10, file_path=str(fifo)),
+                    timeout=10,
+                )
+        finally:
+            # Had a reader got stuck in open(), a writer turning up is what
+            # releases its thread; with none waiting this open just fails.
+            with contextlib.suppress(OSError):
+                os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="an open file cannot be replaced on Windows"
+    )
+    async def test_the_size_announced_is_the_file_that_was_opened(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # An editor's atomic save replaces the file between open and a second
+        # lookup of the path; the upload streams the opened one, so that is
+        # the size the session has to be told.
+        spec = tmp_path / "spec.pdf"
+        spec.write_bytes(b"%PDF-1.4")
+        opened = client_module._open_binary
+
+        def open_then_replace(path: Path) -> Any:
+            handle = opened(path)
+            replacement = tmp_path / "replacement"
+            replacement.write_bytes(b"x" * 5000)
+            replacement.replace(path)
+            return handle
+
+        monkeypatch.setattr(client_module, "_open_binary", open_then_replace)
+        session = RequestCapture(payload={"session_id": "session-1"})
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/upload_sessions",
+                callback=session.callback,
+            )
+            mocked.put(UPLOAD_PART_URL, payload={})
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/upload_sessions/session-1/finish",
+                payload={},
+            )
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/pages/10/attachments",
+                payload={"results": []},
+            )
+            await wiki_client.page_upload_attachment(10, file_path=str(spec))
+
+        assert session.last_request.get_json_body()["file_size"] == len(b"%PDF-1.4")
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX character device")
+    async def test_a_device_opened_in_its_place_is_refused(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The path passed the regular-file check, then something else was
+        # opened: streamed, /dev/zero would never end under a size of 0.
+        handles: list[BinaryIO] = []
+        opened = client_module._open_binary
+
+        def open_a_device(path: Path) -> BinaryIO:
+            handles.append(opened(Path(os.devnull)))
+            return handles[-1]
+
+        spec = tmp_path / "spec.pdf"
+        spec.write_bytes(b"%PDF-1.4")
+        monkeypatch.setattr(client_module, "_open_binary", open_a_device)
+        with pytest.raises(WikiLocalFileError, match="Not a regular file"):
+            await wiki_client.page_upload_attachment(10, file_path=str(spec))
+
+        assert handles[0].closed
+
+    async def test_a_handle_that_cannot_be_measured_is_closed(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        closed: list[bool] = []
+
+        class Unmeasurable(io.FileIO):
+            def fileno(self) -> int:
+                raise OSError(errno.EBADF, "Bad file descriptor")
+
+            def close(self) -> None:
+                closed.append(True)
+                super().close()
+
+        spec = tmp_path / "spec.pdf"
+        spec.write_bytes(b"%PDF-1.4")
+        monkeypatch.setattr(
+            client_module, "_open_binary", lambda path: Unmeasurable(path, "rb")
+        )
+        with pytest.raises(WikiLocalFileError, match="Bad file descriptor"):
+            await wiki_client.page_upload_attachment(10, file_path=str(spec))
+
+        assert closed
+
     async def test_a_failed_read_is_a_local_file_error(
         self,
         wiki_client: WikiClient,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        class FailingRead(io.BytesIO):
-            def read(self, size: int | None = -1) -> bytes:
+        # A real file underneath: the upload sizes it with fstat on the handle.
+        class FailingRead(io.FileIO):
+            def read(self, size: int | None = -1, /) -> bytes:
                 raise OSError(errno.EIO, "Input/output error")
 
         spec = tmp_path / "spec.pdf"
         spec.write_bytes(b"%PDF-1.4")
-        monkeypatch.setattr(client_module, "_open_binary", lambda _path: FailingRead())
+        monkeypatch.setattr(
+            client_module, "_open_binary", lambda path: FailingRead(path, "rb")
+        )
         with aioresponses() as mocked:
             mocked.post(
                 "https://api.wiki.yandex.net/v1/upload_sessions",
@@ -224,6 +387,13 @@ class TestLocalPath:
         # Every os call raises ValueError on it, outside the WikiError family.
         with pytest.raises(WikiLocalFileError, match="cannot contain NUL"):
             local_path("report\x00.pdf")
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows takes surrogates")
+    def test_a_lone_surrogate_is_refused(self) -> None:
+        # Path.is_file() used to swallow it as "not found"; every other os
+        # call raises UnicodeEncodeError, outside the WikiError family.
+        with pytest.raises(WikiLocalFileError, match="cannot be encoded"):
+            local_path("report\ud800.pdf")
 
     @pytest.mark.skipif(sys.platform == "win32", reason="Windows guesses any ~name")
     def test_an_unknown_user_is_refused(self) -> None:

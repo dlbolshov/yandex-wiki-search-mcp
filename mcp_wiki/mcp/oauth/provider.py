@@ -27,13 +27,36 @@ from mcp_wiki.mcp.oauth.types import (
 logger = logging.getLogger(__name__)
 
 
+class YandexOAuthUnavailable(Exception):
+    """Yandex's /token could not take a refresh just now: a 5xx or a 429.
+
+    Deliberately not a TokenError. Every TokenError code tells the client
+    something about its grant, and the only one that fits a refusal,
+    invalid_grant, says the refresh token is dead, so a client following
+    RFC 6749 discards it. Yandex being down or rate limiting says nothing
+    about the token: it is still valid, here and at Yandex. The SDK's token
+    handler lets anything that is not a TokenError escape as a 500, which
+    blames the server and says nothing about the grant, so a client keeps
+    its refresh token and can use it once Yandex is back. (The MCP SDK
+    clients still start a sign-in at once; that much no status changes.)
+    """
+
+
+def _is_transient(status: int) -> bool:
+    """Whether a Yandex /token status says it is busy or down, not "no"."""
+    return status == 429 or status >= 500
+
+
 async def _describe_refusal(response: aiohttp.ClientResponse) -> str:
     """The status of a Yandex /token refusal plus its own error, if it sent one."""
     reason = f"HTTP {response.status}"
     try:
         body = await response.json(content_type=None)
-    except ValueError:
-        # An HTML error page from a proxy, or no JSON at all.
+    except (ValueError, LookupError, aiohttp.ClientError, TimeoutError):
+        # An HTML error page from a proxy, no JSON at all, a charset that
+        # does not decode, or a body cut off mid-read. The status alone has
+        # to do: describing a refusal must not fail on its own, or the SDK
+        # answers the client with a bare 500 instead of the refusal.
         return reason
     if isinstance(body, dict):
         details = [
@@ -139,24 +162,57 @@ class YandexOAuthAuthorizationServerProvider(
         # is ours to retire, after an idle window _renew_registration slides.
         return self._public_client_idle_ttl
 
-    async def _renew_registration(self, client: OAuthClientInformationFull) -> None:
+    def _renewal_ttl(self, token: OAuthToken) -> int | None:
+        """How long a public registration lives after a grant issued `token`."""
+        idle = self._public_client_idle_ttl
+        if idle is None:
+            return None
+        # The idle window counts from the moment the last of the grant's
+        # tokens stops working. Both stores refuse a token without
+        # expires_in before this runs.
+        return max(REFRESH_TOKEN_TTL_SECONDS, token.expires_in or 0) + idle
+
+    async def _renew_registration(
+        self, client: OAuthClientInformationFull, token: OAuthToken
+    ) -> None:
         """Restart a public registration's idle window after a token grant.
 
         A fixed lifetime would retire a registration in active use, unannounced:
         its next refresh gets invalid_client, and the SDK's own client answers
         that by reopening /authorize with the dead client_id — a "Client ID
         not found" page in the user's browser rather than a re-registration.
-        So the window slides, and never ends before the refresh token just
-        issued does: every refresh that could succeed finds its client.
+        So the window slides, and it counts from the moment the last token
+        the grant just issued stops working: the refresh token after 31 days,
+        or the access token if Yandex made that one longer, as it commonly
+        does (a year). Bearer requests touch no registration, so a client
+        comes back to /token only once its tokens have run out — by its own
+        clock, which starts when the reply reaches it, later than this. A
+        window that ended with the tokens would be gone by that visit, which
+        then strands the client; counted from their end, the client finds its
+        registration, is told invalid_grant and simply signs in again.
+
+        With the expiry off the record is saved with no TTL at all, which in
+        Redis also clears one an earlier configuration set: switching the
+        expiry off has to reach the registrations made while it was on.
+
+        Best effort. It runs after the grant is committed — the new tokens
+        saved, an old refresh token already revoked — so a store failure here
+        must not turn that grant into a 500 whose tokens the client never
+        receives. A miss leaves the previous deadline until the next grant.
 
         A confidential registration keeps the fixed deadline the client was
         told at /register; the SDK would refuse its secret past it anyway.
         """
-        if client.client_secret or self._public_client_idle_ttl is None:
+        if client.client_secret:
             return
-        await self._store.save_client(
-            client, ttl=max(self._public_client_idle_ttl, REFRESH_TOKEN_TTL_SECONDS)
-        )
+        try:
+            await self._store.save_client(client, ttl=self._renewal_ttl(token))
+        except Exception:
+            logger.warning(
+                "Could not renew the registration of client %s",
+                client.client_id,
+                exc_info=True,
+            )
 
     async def authorize(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
@@ -201,14 +257,26 @@ class YandexOAuthAuthorizationServerProvider(
         )
 
     async def _request_yandex_token(
-        self, form: aiohttp.FormData, *, grant: str
+        self, form: aiohttp.FormData, *, grant: str, grant_spent: bool
     ) -> OAuthToken:
         """POST a grant to Yandex's /token; a refusal becomes an OAuth error.
 
         The SDK's TokenHandler turns a TokenError into the 400 OAuth error
         JSON a client knows how to act on. Anything else escapes it as a bare
         500, which tells the client nothing — not even that this grant is
-        dead and it has to authorize again.
+        dead and it has to authorize again. So a refusal is invalid_grant,
+        but for one case where that would be plainly false: a refresh token
+        Yandex could not take because it was down or rate limiting (5xx,
+        429) is still valid, and told invalid_grant a client following RFC
+        6749 would discard it. That one stays a 500 via YandexOAuthUnavailable.
+        A refusal of our own app (invalid_client, a wrong OAUTH_CLIENT_SECRET)
+        is still invalid_grant: no answer helps the client there, and the
+        warning below is what tells the operator.
+
+        `grant_spent` is whether our own grant is gone whatever Yandex says.
+        An authorization code is: load_authorization_code() already took our
+        mcp_ code, so even a transient refusal leaves nothing to retry, and
+        invalid_grant is accurate whatever Yandex's reason.
         """
         async with (
             aiohttp.ClientSession() as session,
@@ -220,6 +288,10 @@ class YandexOAuthAuthorizationServerProvider(
                 # without this line a misconfigured OAUTH_CLIENT_SECRET would
                 # show up in the log only as a run of 400s on /token.
                 logger.warning("Yandex OAuth refused the %s: %s", grant, reason)
+                if not grant_spent and _is_transient(response.status):
+                    raise YandexOAuthUnavailable(
+                        f"Yandex OAuth could not take the {grant} now: {reason}"
+                    )
                 raise TokenError(
                     error="invalid_grant",
                     error_description=f"Yandex OAuth refused the {grant}: {reason}",
@@ -246,7 +318,9 @@ class YandexOAuthAuthorizationServerProvider(
         # load_authorization_code() has already spent our mcp_ code, so
         # invalid_grant is accurate whatever Yandex's reason: there is
         # nothing left to retry, and the client has to authorize again.
-        token = await self._request_yandex_token(form, grant="authorization code")
+        token = await self._request_yandex_token(
+            form, grant="authorization code", grant_spent=True
+        )
 
         if client.client_id is None:
             raise ValueError("client_id must be provided")
@@ -256,7 +330,7 @@ class YandexOAuthAuthorizationServerProvider(
             scopes=authorization_code.scopes,
             resource=authorization_code.resource,
         )
-        await self._renew_registration(client)
+        await self._renew_registration(client, token)
         return token
 
     async def load_refresh_token(
@@ -276,7 +350,11 @@ class YandexOAuthAuthorizationServerProvider(
         form.add_field("client_id", self._client_id)
         form.add_field("client_secret", self._client_secret)
 
-        token = await self._request_yandex_token(form, grant="refresh token")
+        # Not spent: the old refresh token is revoked only after Yandex
+        # issues a new one, so a refusal leaves it as valid as it was.
+        token = await self._request_yandex_token(
+            form, grant="refresh token", grant_spent=False
+        )
 
         await self._store.revoke_refresh_token(refresh_token.token)
         if client.client_id is None:
@@ -287,7 +365,7 @@ class YandexOAuthAuthorizationServerProvider(
             scopes=refresh_token.scopes,
             resource=None,
         )
-        await self._renew_registration(client)
+        await self._renew_registration(client, token)
         return token
 
     async def load_access_token(self, token: str) -> AccessToken | None:

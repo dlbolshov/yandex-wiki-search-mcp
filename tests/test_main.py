@@ -1,7 +1,6 @@
 """Entry point: the two ways startup refuses, and the one way it proceeds."""
 
 import logging
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -9,15 +8,12 @@ import pytest
 
 from mcp_wiki.__main__ import main
 
-_ENV_PREFIXES = ("WIKI_", "OAUTH_", "REDIS_", "MCP_", "TOOL_")
-
 
 @pytest.fixture
-def env_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def env_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_env: None
+) -> Path:
     """An empty working directory with none of our variables inherited."""
-    for key in list(os.environ):
-        if key.upper().startswith(_ENV_PREFIXES):
-            monkeypatch.delenv(key, raising=False)
     monkeypatch.chdir(tmp_path)
     return tmp_path
 

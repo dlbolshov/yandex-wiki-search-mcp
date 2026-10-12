@@ -1,6 +1,14 @@
+import io
+import json
+
+import pytest
+from pydantic import BaseModel, ValidationError
+
 from mcp_wiki.wiki.custom.errors import (
     GridConflict,
     WikiApiError,
+    WikiLocalFileError,
+    WikiResponseError,
     build_api_error,
 )
 
@@ -69,3 +77,73 @@ class TestGridConflict:
         error = build_api_error(409, b"")
 
         assert not isinstance(error, GridConflict)
+
+
+class _TwoFields(BaseModel):
+    id: int
+    title: str
+
+
+class TestWikiResponseError:
+    def test_a_read_says_what_failed_and_nothing_about_retrying(self) -> None:
+        with pytest.raises(ValidationError) as caught:
+            _TwoFields.model_validate_json(b"<html>Moved</html>")
+
+        error = WikiResponseError("GET", "v1/pages/1", caught.value)
+
+        assert str(error) == (
+            "GET v1/pages/1 succeeded, but its response could not be read: "
+            "_TwoFields Invalid JSON: expected value at line 1 column 1."
+        )
+
+    def test_a_write_says_it_may_have_been_applied(self) -> None:
+        error = WikiResponseError("POST", "v1/pages", ValueError("bad"))
+
+        assert str(error).endswith(
+            "The change may have been applied: read the current state before retrying."
+        )
+
+    def test_a_post_that_only_reads_says_so(self) -> None:
+        error = WikiResponseError("POST", "v1/search", ValueError("x"), writes=False)
+
+        assert "may have been applied" not in str(error)
+
+    def test_names_the_first_field_and_counts_the_rest(self) -> None:
+        with pytest.raises(ValidationError) as caught:
+            _TwoFields.model_validate({"title": None})
+
+        error = WikiResponseError("GET", "v1/x", caught.value)
+
+        assert "_TwoFields id: Field required (and 1 more)." in str(error)
+
+    def test_never_echoes_the_body(self) -> None:
+        # The body is the caller's data and may be large; the field and the
+        # complaint are what a reader needs.
+        with pytest.raises(ValidationError) as caught:
+            _TwoFields.model_validate({"id": "not-a-number-secret", "title": "t"})
+
+        assert "secret" not in str(WikiResponseError("GET", "v1/x", caught.value))
+
+    def test_a_json_error_keeps_its_own_text(self) -> None:
+        with pytest.raises(json.JSONDecodeError) as caught:
+            json.loads(b"<html/>")
+
+        error = WikiResponseError("DELETE", "v1/grids/g", caught.value)
+
+        assert "Expecting value: line 1 column 1 (char 0)" in str(error)
+
+
+class TestWikiLocalFileError:
+    def test_carries_the_errno_text(self) -> None:
+        error = WikiLocalFileError(
+            "Cannot read /x", cause=PermissionError(13, "Permission denied")
+        )
+
+        assert str(error) == "Cannot read /x (Permission denied)"
+
+    def test_an_oserror_without_one_is_not_printed_as_none(self) -> None:
+        error = WikiLocalFileError(
+            "Cannot read /x", cause=io.UnsupportedOperation("fileno")
+        )
+
+        assert str(error) == "Cannot read /x (fileno)"

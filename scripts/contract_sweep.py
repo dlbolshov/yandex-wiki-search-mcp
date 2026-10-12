@@ -162,6 +162,22 @@ async def _await_settled(fn: Callable[[], Awaitable[Any]]) -> Any:
     raise AssertionError("unreachable")
 
 
+def _validation_cause(exc: BaseException) -> ValidationError | None:
+    """The ValidationError somewhere down an exception's cause chain, if any."""
+    cause = exc.__cause__
+    while cause is not None:
+        if isinstance(cause, ValidationError):
+            return cause
+        cause = cause.__cause__
+    return None
+
+
+def _report_model_mismatch(name: str, exc: ValidationError) -> None:
+    first = "; ".join(str(exc).splitlines()[1:3])
+    REPORT.append((name, "MODEL MISMATCH", first[:160]))
+    print(f"  !! {name}: MODEL MISMATCH — {first[:160]}")
+
+
 async def check(
     name: str,
     fn: Callable[[], Awaitable[Any]],
@@ -178,11 +194,17 @@ async def check(
     try:
         result = await _await_settled(fn)
     except ValidationError as exc:
-        first = "; ".join(str(exc).splitlines()[1:3])
-        REPORT.append((name, "MODEL MISMATCH", first[:160]))
-        print(f"  !! {name}: MODEL MISMATCH — {first[:160]}")
+        _report_model_mismatch(name, exc)
         return None
     except WikiError as exc:
+        # The client reports a 2xx body its model cannot read as a
+        # WikiResponseError (and page_clone's unreadable poll as a
+        # WikiOperationError over one); the ValidationError underneath is
+        # still drift in our models, which is what this sweep exists to say.
+        mismatch = _validation_cause(exc)
+        if mismatch is not None:
+            _report_model_mismatch(name, mismatch)
+            return None
         REPORT.append((name, f"API {type(exc).__name__}", str(exc)[:160]))
         print(f"  !! {name}: {type(exc).__name__}: {str(exc)[:160]}")
         return None

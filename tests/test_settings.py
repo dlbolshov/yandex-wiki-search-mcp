@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Any
 
@@ -7,16 +6,7 @@ from pydantic import AnyHttpUrl, SecretStr, ValidationError
 
 from mcp_wiki.settings import Settings, suspicious_env_keys
 
-_ENV_PREFIXES = ("WIKI_", "OAUTH_", "REDIS_", "MCP_", "TOOL_")
-_ENV_NAMES = {"HOST", "PORT", "TRANSPORT", "LOG_LEVEL"}
-
-
-@pytest.fixture(autouse=True)
-def isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in list(os.environ):
-        upper = key.upper()
-        if upper.startswith(_ENV_PREFIXES) or upper in _ENV_NAMES:
-            monkeypatch.delenv(key, raising=False)
+pytestmark = pytest.mark.usefixtures("isolated_env")
 
 
 def make_settings(**overrides: Any) -> Settings:

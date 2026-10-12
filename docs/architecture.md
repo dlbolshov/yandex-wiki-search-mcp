@@ -202,12 +202,22 @@ memory store, Fernet-encrypted for Redis.
   `state` is data echoed back on the final redirect, never a key. Breaking
   that rule was CVE-shaped: a predictable key let an attacker overwrite the
   pending record and collect the victim's code, PKCE included. A refusal
-  from Yandex's `/token` (any non-200, on the code exchange or a refresh) is
-  raised as `TokenError(invalid_grant)` carrying Yandex's status and error,
-  and logged as a warning: that is the one exception the SDK's
-  `TokenHandler` turns into a 400 OAuth error, and anything else reaches the
-  client as a bare 500. On the code exchange `invalid_grant` is accurate
-  whatever Yandex's reason, since loading the `mcp_` code already spent it.
+  from Yandex's `/token` (any non-200) is logged as a warning and raised as
+  `TokenError(invalid_grant)` carrying Yandex's status and error: that is
+  the one exception the SDK's `TokenHandler` turns into a 400 OAuth error,
+  and anything else reaches the client as a bare 500. On the code exchange
+  `invalid_grant` is accurate whatever Yandex's reason, since loading the
+  `mcp_` code already spent it. A refresh is the exception: when Yandex is
+  down or rate limiting (5xx, 429) the refresh token is still valid, and
+  `invalid_grant` would tell an RFC 6749 client to discard it, so the
+  provider raises `YandexOAuthUnavailable` instead: the client gets a 500,
+  which blames the server and says nothing about the token, so a client
+  that keeps it can refresh once Yandex is back (both MCP SDK clients still
+  start a sign-in at once). A refusal of our own app (`invalid_client`, a
+  wrong `OAUTH_CLIENT_SECRET`) stays `invalid_grant`: no answer helps the
+  client there, and the warning is what tells the operator. Describing a
+  refusal never fails on its own: a body that is not JSON, does not decode
+  or is cut off mid-read leaves just the status.
 
   The provider also decides how long a dynamic registration lives, since
   `/register` is unauthenticated and whatever it keeps forever can be
@@ -218,11 +228,23 @@ memory store, Fernet-encrypted for Redis.
   (`token_endpoint_auth_method: none`) is issued no secret, so the SDK stamps
   nothing and checks nothing; the provider gives it the same setting as an
   idle window, restarted after every successful code exchange or refresh and
-  never shorter than the refresh token just issued. A fixed lifetime would
-  retire registrations in active use without warning — RFC 7591 has no field
-  to announce one — and the SDK's own client answers the resulting
+  counted from the moment the last token that grant issued stops working:
+  the refresh token after 31 days, or the access token if Yandex made it
+  longer, as it commonly does (a year). Bearer requests touch no
+  registration, so a client comes back to `/token` only once its tokens have
+  run out, by its own clock, which starts when the reply reaches it. A
+  window that ended with the tokens would be gone by that visit; counted
+  from their end, the client finds its registration, is told
+  `invalid_grant` and signs in again. A fixed lifetime
+  would retire registrations in active use without warning — RFC 7591 has no
+  field to announce one — and the SDK's own client answers the resulting
   `invalid_client` by reopening `/authorize` with the dead `client_id`, which
-  strands the user on a "Client ID not found" page.
+  strands the user on a "Client ID not found" page. With the expiry off, a
+  renewal saves the registration with no TTL, which also clears one left in
+  Redis from when it was on. The renewal is best effort: it runs after the
+  grant is committed (new tokens saved, an old refresh token revoked), so a
+  store failure is logged rather than turned into a 500 whose tokens the
+  client would never receive.
 - **`store.py`** — the `OAuthStore` protocol and the shared
   `REFRESH_TOKEN_TTL_SECONDS` (31 days, Yandex's refresh-token lifetime).
   `save_client` takes its TTL from the provider, as `save_state` and
@@ -287,7 +309,10 @@ then the code exchange, a call with the Bearer and a refresh:
   byte ceiling (resolved from the reply's Content-Type, since the download
   endpoint declares no Content-Length) and a `body_sink` that streams a
   response straight to a caller-supplied consumer instead of memory;
-  `_request()` is the thin bytes-only wrapper the other endpoints use.
+  `_request()` is the thin bytes-only wrapper on top of it, and
+  `_request_parsed()` reads every JSON reply through it, so a 2xx body that
+  does not parse becomes a `WikiResponseError` naming the endpoint; only the
+  upload part and finish steps call `_request()` directly.
   Also owns the multi-step flows: upload sessions (create → parts → finish
   → attach), `page_clone`'s deferred-operation polling, and the atomic
   download-to-disk (`.part` file → fsync → link/replace). That last one
@@ -303,6 +328,10 @@ then the code exchange, a call with the Bearer and a refresh:
   `WikiOperationError` (a deferred operation failed *after* every HTTP
   exchange succeeded), `WikiTransportError` (timeouts and connection
   failures, with a non-empty message even for `TimeoutError`),
+  `WikiResponseError` (a 2xx body that does not parse — a proxy's page, an
+  empty body, a renamed field — naming the endpoint, and for a write warning
+  that the change may have been applied; the client reads every JSON reply
+  through `_request_parsed`, which is where it is raised),
   `ResponseTooLarge` (a body past the caller's `max_bytes` ceiling — refused
   on `Content-Length` before reading, or one byte past the ceiling on a
   stream that declared none), `WikiLocalFileError` (a local path the
@@ -320,7 +349,8 @@ then the code exchange, a call with the Bearer and a refresh:
   it — and the MCP layer may not be imported from here.
 - **`custom/slugs.py`** — `normalize_slug()`: full Wiki URL or slug → bare
   slug. Lives here because the client needs it on every page call (see the
-  layering rule).
+  layering rule). A URL `urlparse` cannot split (an unbalanced `[` in the
+  host) is a `WikiArgumentError`, not urllib's own `ValueError`.
 - **`custom/anchors.py`** — the fallback behind `page_append_content`'s
   `anchor`: when the API answers `ANCHOR_NOT_FOUND`, the client inserts
   after the anchor in the raw markup and saves the page with `page_update`.
@@ -355,7 +385,10 @@ The suite runs against mocks at every seam the architecture defines:
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
 `mode="auto"`, i.e. the modern `2026-07-28` negotiation path;
-`create_test_settings`; `make_test_lifespan`) and `tests/aioresponses_utils.py`.
+`create_test_settings`; `make_test_lifespan`), `tests/conftest.py`
+(`isolated_env`, which clears every variable `Settings` reads — any test that
+builds `Settings` from the environment uses it; `load_fixture`) and
+`tests/aioresponses_utils.py`.
 Protocol model fields are snake_case (`structured_content`, `input_schema`);
 camelCase works as a constructor kwarg but not for attribute access.
 
@@ -449,7 +482,7 @@ locally (see [Diagrams](#diagrams)).
 Versions live in **four files plus one tag string**: `pyproject.toml`,
 `uv.lock` (regenerate, do not edit), `manifest.json`, `server.json` (two
 `version` fields **and** the OCI image tag; `check_versions.py` checks all of
-them). The release commit, by convention titled `Release vX.Y.Z`:
+them). The release commit, by convention titled `release: X.Y.Z`:
 
 1. Bump all of the above; run `uv lock`.
 2. Promote `## [Unreleased]` to `## [X.Y.Z] - date` in `CHANGELOG.md`.

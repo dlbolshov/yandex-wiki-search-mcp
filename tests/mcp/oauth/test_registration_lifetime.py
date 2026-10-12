@@ -80,8 +80,30 @@ def test_a_token_grant_renews_a_public_registration(store: StoreKind) -> None:
         remaining = app.remaining(registration["client_id"])
 
     assert token.status_code == 200, token.text
-    # EXPIRY is 30 days, shorter than the refresh token on purpose: a TTL
-    # past it can only have come from the grant, which sets no less than
-    # the refresh token it issued lives.
+    # The window restarts when the grant's last token stops working — here
+    # the 31-day refresh token, the access token lasting an hour — so a
+    # client coming back after both finds its registration and signs in.
+    window = REFRESH_TOKEN_TTL_SECONDS + EXPIRY
     assert remaining is not None
-    assert REFRESH_TOKEN_TTL_SECONDS - SLACK < remaining <= REFRESH_TOKEN_TTL_SECONDS
+    assert window - SLACK < remaining <= window
+
+
+def test_a_registration_outlives_the_access_token_it_was_issued(
+    store: StoreKind,
+) -> None:
+    # Yandex ID tokens commonly last a year, and bearer requests renew
+    # nothing: the client comes back only once the token has expired, so
+    # the registration has to outlast the token by a whole idle window, or
+    # the client finds it gone the day it needs a new one.
+    year = 365 * 24 * 60 * 60
+    with oauth_app(store) as app:
+        registration = register(app.http, "none")
+        code = authorize(app.http, registration)
+        with aioresponses() as yandex:
+            yandex.post(YANDEX_TOKEN_URL, payload={**YANDEX_TOKENS, "expires_in": year})
+            token = redeem_code(app.http, registration, code)
+        remaining = app.remaining(registration["client_id"])
+
+    assert token.status_code == 200, token.text
+    assert remaining is not None
+    assert year + EXPIRY - SLACK < remaining <= year + EXPIRY
