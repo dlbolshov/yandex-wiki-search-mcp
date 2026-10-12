@@ -312,13 +312,15 @@ See [`.env.example`](.env.example) for the full annotated list and [`compose.yam
 ## Deployment
 
 ```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 300}}}%%
 flowchart LR
-    C["MCP client&lt;br/&gt;Claude / Cursor / Windsurf / VS Code"]
+    L["Local MCP client&lt;br/&gt;Claude / Cursor /&lt;br/&gt;Windsurf / VS Code&lt;br/&gt;single user"]
+    T["Team MCP clients&lt;br/&gt;multi-user,&lt;br/&gt;optional OAuth"]
     S["yandex-wiki-search-mcp"]
     W["Yandex Wiki API"]
-    R[("Redis&lt;br/&gt;optional OAuth token store")]
-    C -- "stdio (local, single user)" --> S
-    C -- "streamable-http (+ OAuth, multi-user)" --> S
+    R[("Redis&lt;br/&gt;optional OAuth&lt;br/&gt;token store")]
+    L -- "stdio" --> S
+    T -- "streamable-http" --> S
     S --> W
     S -.-> R
 ```

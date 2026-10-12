@@ -316,13 +316,15 @@ Query-параметр важнее общесерверной настройк�
 ## Деплой
 
 ```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 300}}}%%
 flowchart LR
-    C["MCP-клиент&lt;br/&gt;Claude / Cursor / Windsurf / VS Code"]
+    L["Локальный MCP-клиент&lt;br/&gt;Claude / Cursor /&lt;br/&gt;Windsurf / VS Code&lt;br/&gt;один пользователь"]
+    T["MCP-клиенты команды&lt;br/&gt;много пользователей,&lt;br/&gt;опционально OAuth"]
     S["yandex-wiki-search-mcp"]
     W["Yandex Wiki API"]
-    R[("Redis&lt;br/&gt;опциональное хранилище OAuth-токенов")]
-    C -- "stdio (локально, один пользователь)" --> S
-    C -- "streamable-http (+ OAuth, много пользователей)" --> S
+    R[("Redis&lt;br/&gt;опциональное хранилище&lt;br/&gt;OAuth-токенов")]
+    L -- "stdio" --> S
+    T -- "streamable-http" --> S
     S --> W
     S -.-> R
 ```
