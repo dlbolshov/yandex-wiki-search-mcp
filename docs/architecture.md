@@ -333,6 +333,7 @@ The suite runs against mocks at every seam the architecture defines:
 | Wiki client ↔ HTTP | `aioresponses`; assertions on headers, query params and bodies as aiohttp would send them |
 | OAuth ↔ Redis | `fakeredis` |
 | package ↔ interpreter | `tests/test_imports.py` imports every module in a subprocess |
+| Docker image ↔ uv | `tests/test_dockerfile.py` checks the Dockerfile's uv pin against `required-version` (see [Toolchain](#toolchain)) |
 
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
@@ -486,3 +487,13 @@ diagrams. Commit the sources, HTML and SVG together.
 HTML report), ruff (lint + format), mypy **and** ty (two type checkers — ty
 is the second opinion), pytest + pytest-asyncio. Python 3.11–3.13. The
 package ships `py.typed`.
+
+uv's own version is one range, `[tool.uv] required-version` in
+`pyproject.toml`. uv refuses to run outside it, and every `setup-uv` step in
+CI installs the newest release inside it. The Dockerfile cannot read that
+range, so its uv image is pinned to an exact release inside it, never a
+floating tag: `:latest` broke the image build when it became uv 0.13.0, and
+only `release.yml` builds the image, so nothing noticed before a release.
+`tests/test_dockerfile.py` fails when the pin and the range disagree. Moving
+to a new uv minor means raising the ceiling and the image tag in the same
+change.
