@@ -31,6 +31,7 @@ jobs:
     - name: Install uv
       uses: astral-sh/setup-uv@v7
       with:
+        version: "0.13.0"  # the Dockerfile's uv; tests/test_dockerfile.py
         cache-suffix: lint
 
     - name: Install dependencies
@@ -67,6 +68,7 @@ jobs:
     - name: Install uv
       uses: astral-sh/setup-uv@v7
       with:
+        version: "0.13.0"  # the Dockerfile's uv; tests/test_dockerfile.py
         cache-suffix: install
 
     - name: Build the wheel
@@ -123,6 +125,8 @@ jobs:
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
+      with:
+        version: "0.13.0"  # the Dockerfile's uv; tests/test_dockerfile.py
 
     - name: Install dependencies
       run: uv sync --dev

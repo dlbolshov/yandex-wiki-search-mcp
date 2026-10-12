@@ -59,6 +59,7 @@ jobs:
         if: steps.creds.outputs.present == 'true'
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.13.0"  # the Dockerfile's uv; tests/test_dockerfile.py
           cache-suffix: drift
 
       - name: Install dependencies

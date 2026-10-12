@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- uv 0.13.0, released 2026-10-09, refused nearly every command in a copy of this tree, because 1.5.0 capped `[tool.uv] required-version` at `<0.13`. That broke three things. The Claude Desktop bundle failed for anyone whose uv had moved to 0.13: it launches `uv run` inside the unpacked bundle, which carries `pyproject.toml`. glama.ai's build failed too, since it installs from a checkout with the latest uv. So did a contributor's `uv sync`, `uv run` and the rest. Installs from PyPI (`uvx`, `pip`) and from a git URL were unaffected, because uv reads `required-version` only from the project it runs in. The Docker image was unaffected as well: the published images run no uv, and 1.5.2's build already pinned uv 0.12.24. `required-version` is now a floor, `>=0.11`. The ceiling's other job, keeping CI off an untested uv minor, moved to an explicit `version:` in every `setup-uv` step, which now pins an exact release. Bundles of 1.5.0–1.5.2 that are already installed keep the ceiling; on uv 0.13 they need reinstalling from a release that has this fix
+- The Claude Desktop bundle now limits its interpreter to Python 3.11–3.14 (`UV_PYTHON` in the manifest's `env`). uv 0.13.0 made Python 3.15 its default download, so on a machine without its own Python 3.11–3.14 (stock macOS ships 3.9, Windows none) the bundle's first `uv run` would fetch 3.15. It would then fail building the locked `cffi`, `pydantic-core`, `aiohttp` and `rpds-py`, none of which has a 3.15 wheel. uv 0.12 picked 3.14 on such machines, so bundles that already work see no change
+
+### Internal
+- CI and the Docker image move to uv 0.13.0, pinned in the Dockerfile and in each of the five `setup-uv` steps. `tests/test_dockerfile.py` now checks three things: all six pins name the same exact release, `required-version` has only a `>=` floor, and no `uv.toml` overrides it. uv 0.13.0 accepts `uv.lock` unchanged. The test suite, the wheel and the image's installed packages are the same as under 0.12.24
+
 ## [1.5.2] - 2026-10-12
 
 Security and OAuth fixes, a Docker image that builds again, and the docs around them. The

@@ -333,7 +333,7 @@ The suite runs against mocks at every seam the architecture defines:
 | Wiki client ↔ HTTP | `aioresponses`; assertions on headers, query params and bodies as aiohttp would send them |
 | OAuth ↔ Redis | `fakeredis` |
 | package ↔ interpreter | `tests/test_imports.py` imports every module in a subprocess |
-| Docker image ↔ uv | `tests/test_dockerfile.py` checks the Dockerfile's uv pin against `required-version` (see [Toolchain](#toolchain)) |
+| Docker image ↔ CI ↔ uv | `tests/test_dockerfile.py`: the Dockerfile's uv pin is exact, every `setup-uv` step pins the same release, `required-version` stays a floor with no `uv.toml` over it (see [Toolchain](#toolchain)) |
 
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
@@ -488,12 +488,23 @@ HTML report), ruff (lint + format), mypy **and** ty (two type checkers — ty
 is the second opinion), pytest + pytest-asyncio. Python 3.11–3.13. The
 package ships `py.typed`.
 
-uv's own version is one range, `[tool.uv] required-version` in
-`pyproject.toml`. uv refuses to run outside it, and every `setup-uv` step in
-CI installs the newest release inside it. The Dockerfile cannot read that
-range, so its uv image is pinned to an exact release inside it, never a
-floating tag: `:latest` broke the image build when it became uv 0.13.0, and
-only `release.yml` builds the image, so nothing noticed before a release.
-`tests/test_dockerfile.py` fails when the pin and the range disagree. Moving
-to a new uv minor means raising the ceiling and the image tag in the same
-change.
+uv's own version is pinned twice and bounded once. The Dockerfile's uv image
+and every `setup-uv` step in CI (`version:`) name the same exact release, so
+the image is built and CI tests with one known uv. A floating tag is out:
+`:latest` broke the image build when it became uv 0.13.0, and only
+`release.yml` builds the image, so nothing noticed before a release.
+`[tool.uv] required-version` in `pyproject.toml` is a floor and nothing more.
+uv enforces it in nearly every command run inside a copy of this tree (all
+but `uvx`/`uv tool` and `uv self`): a contributor's checkout, the unpacked
+Claude Desktop bundle (its `uv run`), and builders that install from source,
+such as glama.ai. The `<0.13` ceiling 1.5.0 added broke all of them the day
+uv 0.13.0 shipped, and uv releases a breaking minor every three months or so.
+`tests/test_dockerfile.py` fails when the pins disagree, when the range grows
+a ceiling, or when a `uv.toml` appears to override it. Moving to a new uv
+means changing the image tag and the five `version:` inputs in one change.
+
+The bundle's interpreter is the user's uv's choice, so `manifest.json` bounds
+it with `UV_PYTHON` (3.11–3.14) in `mcp_config.env`. Since 0.13 uv downloads
+Python 3.15 wherever no suitable interpreter exists, and several locked
+packages (`cffi`, `pydantic-core`, `aiohttp`, `rpds-py`) have no 3.15 wheels.
+Raise that bound once the lock does.

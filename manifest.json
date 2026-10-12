@@ -20,6 +20,7 @@
       ],
       "env": {
         "PYTHONPATH": "${__dirname}",
+        "UV_PYTHON": ">=3.11,<3.15",
         "WIKI_TOKEN": "${user_config.wiki_token}",
         "WIKI_IAM_TOKEN": "${user_config.wiki_iam_token}",
         "WIKI_CLOUD_ORG_ID": "${user_config.wiki_cloud_org_id}",

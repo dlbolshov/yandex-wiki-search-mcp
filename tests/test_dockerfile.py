@@ -1,8 +1,12 @@
-"""The Dockerfile's uv image must stay inside pyproject.toml's `required-version`.
+"""One exact uv for the Dockerfile and CI, and only a floor for everyone else.
 
-uv refuses to run outside that range, so an image past it fails the builder's
-`uv sync --locked`. Only release.yml builds the image, on a tag, so without
-this check a pin and a range that drift apart surface at release time.
+uv refuses nearly every command in a copy of this tree that falls outside
+pyproject.toml's `required-version`, so a ceiling there breaks the Claude
+Desktop bundle, glama.ai's source build and contributors on the next uv
+minor. It stays a floor; the uv the project is built and tested with is
+pinned instead, once in the Dockerfile's uv image and once in every setup-uv
+step. Only release.yml builds the image, on a tag, so without this check a
+pin that drifts surfaces at release time.
 """
 
 import re
@@ -13,18 +17,75 @@ from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parents[1]
-UV_IMAGE = re.compile(r"^FROM\s+\S*astral-sh/uv:(?P<tag>[^\s@]+)", re.MULTILINE)
+# The uv image, whether a stage is built FROM it or a file is copied from it.
+UV_IMAGE = re.compile(
+    r"^(?:FROM\s+(?:--\S+\s+)*|COPY\s+(?:--\S+\s+)*--from=)\S*astral-sh/uv:(?P<tag>[^\s@]+)",
+    re.MULTILINE | re.IGNORECASE,
+)
+SETUP_UV = re.compile(r"""^(?P<lead>\s*(?:-\s+)?)uses:\s*["']?astral-sh/setup-uv@""")
+KEY = re.compile(r"^\s*(?:-\s+)?(?P<key>[\w-]+):")
+VERSION = re.compile(
+    r"""^\s+version:\s*(?:"(?P<dq>[^"]+)"|'(?P<sq>[^']+)'|(?P<bare>[^\s"'#]+))\s*(?:#.*)?$"""
+)
 
 
-def test_dockerfile_uv_image_is_inside_required_version() -> None:
-    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    required = SpecifierSet(pyproject["tool"]["uv"]["required-version"])
-
+def _dockerfile_uv() -> str:
     tags = UV_IMAGE.findall((ROOT / "Dockerfile").read_text(encoding="utf-8"))
     assert len(tags) == 1, tags
-    tag = tags[0]
+    return tags[0]
 
-    # An exact release: a floating tag changes the image's uv without a
-    # commit, which is how `latest` left the range when uv 0.13.0 shipped.
+
+def _setup_uv_versions() -> dict[str, str | None]:
+    """Map every setup-uv step (file:line) to its `with: version`, if any."""
+    steps: dict[str, str | None] = {}
+    workflows = (ROOT / ".github" / "workflows").glob("*.y*ml")
+    for workflow in sorted(workflows):
+        lines = workflow.read_text(encoding="utf-8").splitlines()
+        for number, line in enumerate(lines):
+            match = SETUP_UV.match(line)
+            if not match:
+                continue
+            # The step's keys sit at the column of `uses:`; the step runs
+            # until a line indented less than that.
+            column = len(match.group("lead"))
+            version = None
+            in_with = False
+            for following in lines[number + 1 :]:
+                stripped = following.lstrip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                indent = len(following) - len(stripped)
+                if indent < column:
+                    break
+                if indent == column:
+                    key = KEY.match(following)
+                    in_with = bool(key and key.group("key") == "with")
+                elif in_with and (found := VERSION.match(following)):
+                    version = (
+                        found.group("dq") or found.group("sq") or found.group("bare")
+                    )
+            steps[f"{workflow.name}:{number + 1}"] = version
+    return steps
+
+
+def test_required_version_is_a_floor() -> None:
+    # uv.toml would take over required-version from pyproject.toml unseen.
+    assert not (ROOT / "uv.toml").exists()
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    required = SpecifierSet(pyproject["tool"]["uv"]["required-version"])
+    assert [spec.operator for spec in required] == [">="], str(required)
+    assert Version(_dockerfile_uv()) in required
+
+
+def test_dockerfile_uv_image_is_an_exact_release() -> None:
+    # A floating tag changes the image's uv without a commit, which is how
+    # `latest` broke the image build when uv 0.13.0 shipped.
+    tag = _dockerfile_uv()
     assert re.fullmatch(r"\d+\.\d+\.\d+", tag), tag
-    assert Version(tag) in required, f"uv {tag} is outside {required}"
+
+
+def test_every_setup_uv_step_pins_the_dockerfile_uv() -> None:
+    steps = _setup_uv_versions()
+    assert steps
+    tag = _dockerfile_uv()
+    assert steps == dict.fromkeys(steps, tag), f"Dockerfile has uv {tag}"

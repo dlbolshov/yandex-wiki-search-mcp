@@ -4,10 +4,11 @@ ARG PYTHON_IMAGE=python:3.12-slim
 
 ARG GHCR_REGISTRY_PREFIX=ghcr.io/
 
-# An exact release inside pyproject.toml's [tool.uv] required-version, which
-# `uv sync` enforces: `:latest` left that range when it became uv 0.13.0.
-# tests/test_dockerfile.py fails when the two disagree.
-FROM ${GHCR_REGISTRY_PREFIX}astral-sh/uv:0.12.24 as uv
+# An exact release, the same one every setup-uv step in CI pins: a floating
+# tag changes the image's uv without a commit, which is how `:latest` broke
+# this build when it became uv 0.13.0. tests/test_dockerfile.py fails when the
+# pins disagree.
+FROM ${GHCR_REGISTRY_PREFIX}astral-sh/uv:0.13.0 as uv
 
 FROM ${IMAGE_PREFIX}${PYTHON_IMAGE} as base
 
