@@ -8,7 +8,7 @@
   "column_fit": "spread",
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "054abf72362586491781e1ef595120696e54bf30"
+   "revision": "861a7c9784def37bfbc89edb032e0899019d7344"
   },
   "legend": {
    "entries": {
@@ -48,14 +48,14 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 298,
-     "end_line": 312,
+     "line": 319,
+     "end_line": 333,
      "label": "host · json_response · stateless"
     },
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 276,
-     "end_line": 278,
+     "line": 297,
+     "end_line": 299,
      "label": "middleware: log → stash"
     },
     {
@@ -74,9 +74,21 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 101,
-     "end_line": 126,
+     "line": 117,
+     "end_line": 128,
+     "label": "WikiError → ToolError; the rest left to the SDK"
+    },
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 111,
+     "end_line": 147,
      "label": "call_tool and TOOL_RESULT_TEXT"
+    },
+    {
+     "path": "tests/mcp/server/test_tool_errors.py",
+     "line": 102,
+     "end_line": 122,
+     "label": "promoted vs masked crash (test)"
     }
    ]
   },
@@ -88,21 +100,21 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/tools/page_write.py",
-     "line": 777,
-     "end_line": 807,
+     "line": 778,
+     "end_line": 808,
      "label": "NON_IDEMPOTENT_WRITE, allow_merge=True"
     },
     {
      "path": "mcp_wiki/mcp/tools/page_write.py",
-     "line": 808,
-     "end_line": 848,
+     "line": 809,
+     "end_line": 849,
      "label": "locator, auth, read, write, response"
     },
     {
      "path": "mcp_wiki/mcp/tools/page_write.py",
-     "line": 196,
-     "end_line": 226,
-     "label": "_apply_replacements: 0 or >1 → ValueError"
+     "line": 197,
+     "end_line": 227,
+     "label": "_apply_replacements: 0 or >1 → ToolError"
     }
    ]
   },
@@ -114,8 +126,8 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/utils.py",
-     "line": 16,
-     "end_line": 43,
+     "line": 17,
+     "end_line": 44,
      "label": "token and per-request ?orgId="
     },
     {
@@ -134,20 +146,20 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 598,
-     "end_line": 633,
+     "line": 599,
+     "end_line": 634,
      "label": "Authorization (WIKI_TOKEN) and select_org"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 722,
-     "end_line": 809,
+     "line": 723,
+     "end_line": 810,
      "label": "GET: max_retries+1 attempts, POST: one"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 90,
-     "end_line": 92,
+     "line": 91,
+     "end_line": 93,
      "label": "429/502/503/504, Retry-After ≤ 3 s"
     }
    ]
@@ -160,14 +172,14 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 885,
-     "end_line": 897,
+     "line": 886,
+     "end_line": 898,
      "label": "GET v1/pages?slug="
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 1528,
-     "end_line": 1536,
+     "line": 1529,
+     "end_line": 1537,
      "label": "POST v1/pages/{id}"
     },
     {
@@ -207,7 +219,7 @@
   },
   {
    "from": 800,
-   "to": 890,
+   "to": 915,
    "label": "Error → isError: before POST (no match, not text, GET failure) or at POST (write may have landed)"
   }
  ],
@@ -355,17 +367,26 @@
   {
    "id": "m-error",
    "from": "tool",
-   "to": "sdk",
+   "to": "call_tool",
    "y": 820,
-   "label": "exception → ToolError",
+   "label": "ToolError · WikiError",
    "variant": "dashed",
-   "note": "ValueError: before POST; WikiError: at GET or POST"
+   "note": "refusal: ToolError before POST; WikiError at GET or POST"
+  },
+  {
+   "id": "m-error-promote",
+   "from": "call_tool",
+   "to": "sdk",
+   "y": 855,
+   "label": "ToolError",
+   "variant": "dashed",
+   "note": "WikiError promoted; any other exception: a crash, masked on mcp ≥2.1"
   },
   {
    "id": "m-error-http",
    "from": "sdk",
    "to": "client",
-   "y": 862,
+   "y": 890,
    "label": "200 · isError=true",
    "variant": "dashed",
    "note": "JSON-RPC result, not error"
@@ -455,7 +476,8 @@
    "items": [
     "No match, several matches, or a non-text page: error before POST",
     "A failed POST also gives isError, but the write may have landed",
-    "ValueError and WikiError → ToolError → result with isError",
+    "Refusals raise ToolError; call_tool promotes a WikiError to one",
+    "Any other exception: mcp ≥2.1 masks it as a crash",
     "Client gets HTTP 200, not a JSON-RPC error"
    ]
   },

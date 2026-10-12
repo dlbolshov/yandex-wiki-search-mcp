@@ -66,12 +66,14 @@ class TestNonTextContentSurvives:
 
     @staticmethod
     def _server(mode: ToolResultText) -> WikiMCPServer:
-        # An annotated ContentBlock return does carry an output schema, so the
-        # result arrives with structured_content set just as a model-returning
-        # tool's does — the structured_content check alone would not save it.
+        # With an output schema the result arrives with structured_content set
+        # just as a model-returning tool's does, so the structured_content
+        # check alone would not save the block. mcp 2.0 derives that schema
+        # for a ContentBlock return by itself; 2.1+ only when asked
+        # (python-sdk#3320), so it is asked for to cover both.
         server = WikiMCPServer(name="test", tool_result_text=mode)
 
-        @server.tool()
+        @server.tool(structured_output=True)
         def make_image() -> ImageContent:
             return ImageContent(
                 type="image",

@@ -7,7 +7,7 @@
   "quality_profile": "showcase",
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "054abf72362586491781e1ef595120696e54bf30"
+   "revision": "861a7c9784def37bfbc89edb032e0899019d7344"
   },
   "locale": "en"
  },
@@ -35,7 +35,7 @@
     {
      "path": "manifest.json",
      "line": 12,
-     "end_line": 30,
+     "end_line": 31,
      "label": "MCPB: uv run for Claude Desktop"
     },
     {
@@ -74,8 +74,8 @@
     },
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 262,
-     "end_line": 295,
+     "line": 283,
+     "end_line": 316,
      "label": "create_mcp_server: build and registration"
     }
    ]
@@ -102,8 +102,8 @@
     },
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 298,
-     "end_line": 328,
+     "line": 319,
+     "end_line": 349,
      "label": "run_options / http_app_options"
     }
    ]
@@ -136,8 +136,8 @@
     },
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 276,
-     "end_line": 278,
+     "line": 297,
+     "end_line": 299,
      "label": "middleware order"
     }
    ]
@@ -193,14 +193,14 @@
     },
     {
      "path": "mcp_wiki/mcp/tools/page_read.py",
-     "line": 224,
-     "end_line": 255,
+     "line": 225,
+     "end_line": 256,
      "label": "read tool registration"
     },
     {
      "path": "mcp_wiki/mcp/tools/page_write.py",
-     "line": 1028,
-     "end_line": 1037,
+     "line": 1029,
+     "end_line": 1038,
      "label": "local-file gate"
     }
    ]
@@ -221,8 +221,8 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/utils.py",
-     "line": 16,
-     "end_line": 43,
+     "line": 17,
+     "end_line": 44,
      "label": "per-request token and org"
     },
     {
@@ -249,20 +249,20 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 542,
-     "end_line": 575,
+     "line": 543,
+     "end_line": 576,
      "label": "WikiClient and aiohttp session"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 598,
-     "end_line": 633,
+     "line": 599,
+     "end_line": 634,
      "label": "Authorization and X-Org-Id"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 770,
-     "end_line": 810,
+     "line": 771,
+     "end_line": 811,
      "label": "retries and error mapping"
     }
    ]
@@ -289,14 +289,14 @@
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 885,
-     "end_line": 917,
+     "line": 886,
+     "end_line": 918,
      "label": "GET v1/pages"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 958,
-     "end_line": 1005,
+     "line": 959,
+     "end_line": 1006,
      "label": "POST v1/search"
     }
    ]
@@ -324,8 +324,8 @@
     },
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 222,
-     "end_line": 257,
+     "line": 243,
+     "end_line": 278,
      "label": "scopes and AuthSettings"
     },
     {
@@ -352,8 +352,8 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 185,
-     "end_line": 220,
+     "line": 206,
+     "end_line": 241,
      "label": "store selection"
     },
     {
@@ -454,14 +454,14 @@
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 1945,
-     "end_line": 1971,
+     "line": 1946,
+     "end_line": 1972,
      "label": "upload: read in parts"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 278,
-     "end_line": 298,
+     "line": 279,
+     "end_line": 299,
      "label": "download: create .part"
     }
    ]
@@ -608,7 +608,7 @@
    "items": [
     "One client and one aiohttp session per lifespan",
     "Retries 429/502/503/504 and conn drops: GET (except download), search, upload_part",
-    "Failures → WikiError hierarchy → is_error result",
+    "Failures → WikiError → ToolError in call_tool → is_error result",
     "Upload: session → 5 MiB parts → finish → attach"
    ]
   },
@@ -619,7 +619,7 @@
     "PyPI, MCPB, MCP Registry: stdio; GHCR image: stdio or streamable-http",
     "streamable-http: stateless, JSON responses, /healthz",
     "compose.yaml starts only Redis",
-    "Code snapshot: main @ 054abf7"
+    "Code snapshot: 861a7c9"
    ]
   }
  ]

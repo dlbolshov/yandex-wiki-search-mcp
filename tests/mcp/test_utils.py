@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.exceptions import ToolError
 
 import mcp_wiki.mcp.request_ctx as request_ctx
 from mcp_wiki.mcp.utils import get_yandex_auth, resolve_page_locator
@@ -110,7 +111,7 @@ class TestGetYandexAuthWithoutAContext:
 
 class TestResolvePageLocator:
     def test_rejects_a_slug_that_normalizes_to_nothing(self) -> None:
-        with pytest.raises(ValueError, match="Slug must not be empty"):
+        with pytest.raises(ToolError, match="Slug must not be empty"):
             resolve_page_locator(page_id=None, slug=" / ")
 
     def test_normalizes_a_full_url(self) -> None:

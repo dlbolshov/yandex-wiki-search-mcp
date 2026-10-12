@@ -33,6 +33,7 @@ from mcp_wiki.wiki.custom.errors import (
     PageNotFound,
     ResponseTooLarge,
     WikiApiError,
+    WikiArgumentError,
     WikiConfigError,
     WikiError,
     WikiLocalFileError,
@@ -140,8 +141,17 @@ def local_path(path: str) -> Path:
     Sync on purpose: expanduser only reads environment state, but pathlib
     methods inside an async function trip ASYNC240 — and the rule is right
     in general, so it is not silenced there.
+
+    Both refusals here are WikiLocalFileError: anything else would reach the
+    model as a bare crash on mcp >=2.1 (a NUL makes every later os call raise
+    ValueError, and `~name` for an unknown user raises RuntimeError).
     """
-    return Path(path).expanduser()
+    if "\x00" in path:
+        raise WikiLocalFileError(f"Cannot use {path!r}: a path cannot contain NUL")
+    try:
+        return Path(path).expanduser()
+    except RuntimeError as exc:
+        raise WikiLocalFileError(f"Cannot expand '~' in {path}: {exc}") from exc
 
 
 def _parent_is_not_a_directory(target: Path) -> bool:
@@ -989,7 +999,7 @@ class WikiClient(WikiProtocol):
                 # Without highlight the wire validates the cursor and then
                 # ignores it, answering page 1 again — a silent lie to the
                 # caller who asked for page N. Refuse loudly instead.
-                raise ValueError(
+                raise WikiArgumentError(
                     "cursor requires highlight=true: the search endpoint "
                     "paginates only in highlight mode and silently ignores "
                     "the cursor otherwise, returning page 1 again."
@@ -1443,7 +1453,7 @@ class WikiClient(WikiProtocol):
         # so callers get the copy's id and slug, not a status URL.
         normalized = normalize_slug(target)
         if not normalized:
-            raise ValueError("target must not be empty.")
+            raise WikiArgumentError("target must not be empty.")
 
         body: dict[str, Any] = {"target": normalized}
         if title is not None:
@@ -1946,18 +1956,25 @@ class WikiClient(WikiProtocol):
         if not await asyncio.to_thread(path.is_file):
             raise WikiLocalFileError(f"File not found: {path}")
 
-        stat_result = await asyncio.to_thread(path.stat)
-        upload_session = await self.upload_session_create(
-            file_name=path.name,
-            file_size=stat_result.st_size,
-            auth=auth,
-        )
-
-        handle = await asyncio.to_thread(_open_binary, path)
+        # Opened before the upload session exists, so a file this process
+        # cannot read is refused without leaving an orphan session behind.
         try:
+            handle = await asyncio.to_thread(_open_binary, path)
+        except OSError as exc:
+            raise WikiLocalFileError(f"Cannot read {path}", cause=exc) from exc
+        try:
+            stat_result = await asyncio.to_thread(path.stat)
+            upload_session = await self.upload_session_create(
+                file_name=path.name,
+                file_size=stat_result.st_size,
+                auth=auth,
+            )
             part_number = 1
             while True:
-                chunk = await asyncio.to_thread(handle.read, self.CHUNK_SIZE)
+                try:
+                    chunk = await asyncio.to_thread(handle.read, self.CHUNK_SIZE)
+                except OSError as exc:
+                    raise WikiLocalFileError(f"Cannot read {path}", cause=exc) from exc
                 if not chunk:
                     break
                 await self._upload_part(

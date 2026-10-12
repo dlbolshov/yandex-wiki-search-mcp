@@ -10,6 +10,7 @@ from mcp.server import MCPServer
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.caching import CacheableMethod, CacheHint
 from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
@@ -26,6 +27,7 @@ from mcp_wiki.mcp.resources import register_resources
 from mcp_wiki.mcp.tools import register_all_tools
 from mcp_wiki.settings import Settings, ToolResultText
 from mcp_wiki.wiki.custom.client import WikiClient
+from mcp_wiki.wiki.custom.errors import WikiError
 
 Lifespan = Callable[[MCPServer[Any]], AbstractAsyncContextManager[AppContext]]
 
@@ -80,7 +82,15 @@ async def healthz(_request: Request) -> PlainTextResponse:
 
 
 class WikiMCPServer(MCPServer[Any]):
-    """MCPServer with a configurable text duplicate of structured tool results.
+    """MCPServer that reports Wiki failures to the model and trims result text.
+
+    Since mcp 2.1 (python-sdk#3314) a failed tool shows the model its message
+    only when it raised `ToolError`; anything else counts as a crash, is
+    logged with its traceback and reaches the model as a bare `Error
+    executing tool <name>`. The tools raise `ToolError` for their own
+    refusals. The Wiki layer cannot import the SDK, so a `WikiError` (the
+    API's answer, a refused argument, a timeout) is promoted to one here.
+    Every other exception stays a crash.
 
     The MCP spec recommends (SHOULD) mirroring structured_content as a text
     block for backwards compatibility; the SDK renders it with indent=2.
@@ -104,7 +114,18 @@ class WikiMCPServer(MCPServer[Any]):
         arguments: dict[str, Any],
         context: Context[Any, Any] | None = None,
     ) -> Any:
-        result = await super().call_tool(name, arguments, context)
+        try:
+            result = await super().call_tool(name, arguments, context)
+        except ToolError as exc:
+            # Every 2.x keeps what the tool raised as __cause__: 2.0 wraps all
+            # of it in a ToolError carrying the text, 2.1+ wraps a crash in
+            # UnexpectedToolError without it. The text rebuilt here is the
+            # one 2.0 sends, so the model reads the same message on either.
+            if isinstance(exc.__cause__, WikiError):
+                raise ToolError(
+                    f"Error executing tool {name}: {exc.__cause__}"
+                ) from exc.__cause__
+            raise
         if self._tool_result_text == "pretty" or not isinstance(result, CallToolResult):
             return result
         # Nothing to duplicate, so nothing to trim: an error result or a tool

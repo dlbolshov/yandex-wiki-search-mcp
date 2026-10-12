@@ -8,7 +8,7 @@
   "column_fit": "spread",
   "repository": {
    "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
-   "revision": "054abf72362586491781e1ef595120696e54bf30"
+   "revision": "861a7c9784def37bfbc89edb032e0899019d7344"
   },
   "legend": {
    "entries": {
@@ -488,14 +488,14 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 298,
-     "end_line": 312,
+     "line": 319,
+     "end_line": 333,
      "label": "host · json_response · stateless"
     },
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 276,
-     "end_line": 278,
+     "line": 297,
+     "end_line": 299,
      "label": "middleware: лог → stash"
     },
     {
@@ -514,9 +514,21 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/server.py",
-     "line": 101,
-     "end_line": 126,
+     "line": 117,
+     "end_line": 128,
+     "label": "WikiError → ToolError; прочее решает SDK"
+    },
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 111,
+     "end_line": 147,
      "label": "call_tool и TOOL_RESULT_TEXT"
+    },
+    {
+     "path": "tests/mcp/server/test_tool_errors.py",
+     "line": 102,
+     "end_line": 122,
+     "label": "повышение vs скрытый сбой (тест)"
     }
    ]
   },
@@ -528,21 +540,21 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/tools/page_write.py",
-     "line": 777,
-     "end_line": 807,
+     "line": 778,
+     "end_line": 808,
      "label": "NON_IDEMPOTENT_WRITE, allow_merge=True"
     },
     {
      "path": "mcp_wiki/mcp/tools/page_write.py",
-     "line": 808,
-     "end_line": 848,
+     "line": 809,
+     "end_line": 849,
      "label": "локатор, auth, чтение, запись, ответ"
     },
     {
      "path": "mcp_wiki/mcp/tools/page_write.py",
-     "line": 196,
-     "end_line": 226,
-     "label": "_apply_replacements: 0 или >1 → ValueError"
+     "line": 197,
+     "end_line": 227,
+     "label": "_apply_replacements: 0 или >1 → ToolError"
     }
    ]
   },
@@ -554,8 +566,8 @@
    "sources": [
     {
      "path": "mcp_wiki/mcp/utils.py",
-     "line": 16,
-     "end_line": 43,
+     "line": 17,
+     "end_line": 44,
      "label": "токен и ?orgId= на запрос"
     },
     {
@@ -574,20 +586,20 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 598,
-     "end_line": 633,
+     "line": 599,
+     "end_line": 634,
      "label": "Authorization (WIKI_TOKEN) и select_org"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 722,
-     "end_line": 809,
+     "line": 723,
+     "end_line": 810,
      "label": "GET: max_retries+1 попыток, POST: одна"
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 90,
-     "end_line": 92,
+     "line": 91,
+     "end_line": 93,
      "label": "429/502/503/504, Retry-After ≤ 3 с"
     }
    ]
@@ -600,14 +612,14 @@
    "sources": [
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 885,
-     "end_line": 897,
+     "line": 886,
+     "end_line": 898,
      "label": "GET v1/pages?slug="
     },
     {
      "path": "mcp_wiki/wiki/custom/client.py",
-     "line": 1528,
-     "end_line": 1536,
+     "line": 1529,
+     "end_line": 1537,
      "label": "POST v1/pages/{id}"
     },
     {
@@ -647,7 +659,7 @@
   },
   {
    "from": 800,
-   "to": 890,
+   "to": 915,
    "label": "Ошибка → isError: до POST (нет совпадения, не текст, сбой GET) или на POST (запись могла пройти)"
   }
  ],
@@ -795,17 +807,26 @@
   {
    "id": "m-error",
    "from": "tool",
-   "to": "sdk",
+   "to": "call_tool",
    "y": 820,
-   "label": "исключение → ToolError",
+   "label": "ToolError · WikiError",
    "variant": "dashed",
-   "note": "ValueError — до POST; WikiError — на GET или на POST"
+   "note": "отказ: ToolError до POST; WikiError — на GET или на POST"
+  },
+  {
+   "id": "m-error-promote",
+   "from": "call_tool",
+   "to": "sdk",
+   "y": 855,
+   "label": "ToolError",
+   "variant": "dashed",
+   "note": "WikiError повышен; любое другое исключение — сбой, на mcp ≥2.1 без текста"
   },
   {
    "id": "m-error-http",
    "from": "sdk",
    "to": "client",
-   "y": 862,
+   "y": 890,
    "label": "200 · isError=true",
    "variant": "dashed",
    "note": "результат JSON-RPC, не error"
@@ -895,7 +916,8 @@
    "items": [
     "Нет совпадения, их несколько или страница не текст — ошибка до POST",
     "Сбой самого POST тоже даёт isError, но запись могла пройти",
-    "ValueError и WikiError → ToolError → результат с isError",
+    "Отказы бросают ToolError; call_tool повышает до него WikiError",
+    "Любое другое исключение mcp ≥2.1 скрывает как сбой",
     "Клиент получает HTTP 200, а не JSON-RPC error"
    ]
   },

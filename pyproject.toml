@@ -37,13 +37,14 @@ dependencies = [
 
 [tool.uv]
 package = true
-# One source for every setup-uv step in CI: without it the action warns
-# "Could not determine uv version ... Falling back to latest" on each run.
-# uv itself enforces this locally too, so the floor stays at a version
-# contributors actually have; the ceiling keeps CI off an untested major.
-# The Dockerfile's uv image is pinned inside this range, so raise the two
-# together (tests/test_dockerfile.py).
-required-version = ">=0.11,<0.13"
+# No required-version. uv enforces one in nearly every command it runs inside
+# a copy of this tree — a contributor's checkout, the unpacked Claude Desktop
+# bundle (`uv run`), builders that install from source such as glama.ai — so
+# the `<0.13` ceiling 1.5.0 set broke all of them the day uv 0.13.0 shipped,
+# and its `>=0.11` floor turned away uv 0.10, which runs the bundle fine. CI
+# pins its uv explicitly instead: every setup-uv step outside uv-canary.yml
+# names the same exact release as the Dockerfile's uv image
+# (tests/test_dockerfile.py).
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -12,6 +12,7 @@ from mcp_wiki.wiki.custom.errors import (
     GridNotFound,
     PageNotFound,
     WikiApiError,
+    WikiArgumentError,
     WikiOperationError,
 )
 from mcp_wiki.wiki.proto.types.pages import (
@@ -165,7 +166,7 @@ class TestWikiClient:
         # refuses to send that silent lie, before touching the network.
         with (
             aioresponses(),
-            pytest.raises(ValueError, match="cursor requires highlight"),
+            pytest.raises(WikiArgumentError, match="cursor requires highlight"),
         ):
             await wiki_client.page_search("q", cursor=2)
 
@@ -923,14 +924,14 @@ class TestWikiClient:
         self,
         wiki_client: WikiClient,
     ) -> None:
-        with pytest.raises(ValueError, match="at least one of title, content"):
+        with pytest.raises(WikiArgumentError, match="at least one of title, content"):
             await wiki_client.page_update(10)
 
     async def test_page_update_rejects_set_and_clear_redirect_together(
         self,
         wiki_client: WikiClient,
     ) -> None:
-        with pytest.raises(ValueError, match="mutually exclusive"):
+        with pytest.raises(WikiArgumentError, match="mutually exclusive"):
             await wiki_client.page_update(
                 10, redirect_to_page_id=77, clear_redirect=True
             )
@@ -1033,7 +1034,7 @@ class TestWikiClient:
         self,
         wiki_client: WikiClient,
     ) -> None:
-        with pytest.raises(ValueError, match="target must not be empty"):
+        with pytest.raises(WikiArgumentError, match="target must not be empty"):
             await wiki_client.page_clone(10, target="  / ")
 
     async def test_page_clone_not_found_raises_page_not_found(

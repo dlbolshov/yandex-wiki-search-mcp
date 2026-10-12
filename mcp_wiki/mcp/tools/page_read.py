@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal, TypeVar
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import (
     BlobResourceContents,
     EmbeddedResource,
@@ -326,7 +327,7 @@ def register_page_read_tools(
             # — an empty result reads as an empty wiki rather than as a filter
             # that threw everything away. Only the emptiness check lives here;
             # the client normalizes the value it sends, like every other slug.
-            raise ValueError(
+            raise ToolError(
                 "slug_prefix must not be empty. Omit it to search the whole Wiki."
             )
         response = await app_context.wiki.page_search(
@@ -370,7 +371,7 @@ def register_page_read_tools(
             )
         if slug is None:  # pragma: no cover - narrowing for the type checker;
             # resolve_page_locator raises unless exactly one is set.
-            raise ValueError("Either page_id or slug must be provided.")
+            raise ToolError("Either page_id or slug must be provided.")
 
         return await get_wiki(ctx).page_get_by_slug(
             slug,
@@ -431,7 +432,7 @@ def register_page_read_tools(
         # thousands-of-pages walk.
         if from_root:
             if page_id is not None or slug is not None:
-                raise ValueError(
+                raise ToolError(
                     "from_root traverses the whole Wiki and cannot be combined "
                     "with page_id or slug."
                 )
@@ -443,7 +444,7 @@ def register_page_read_tools(
             include_self = False
         else:
             if page_id is None and slug is None:
-                raise ValueError(
+                raise ToolError(
                     "Provide exactly one of page_id or slug, or pass "
                     "from_root=true to traverse the whole Wiki."
                 )
@@ -454,7 +455,7 @@ def register_page_read_tools(
             # flag. Skipped when page_id is also set: there the exclusivity
             # violation is the real error, and that caller has a page.
             if page_id is None and slug is not None and not normalize_slug(slug):
-                raise ValueError(
+                raise ToolError(
                     "Slug must not be empty. Pass from_root=true to traverse "
                     "the whole Wiki."
                 )
@@ -616,7 +617,7 @@ def register_page_read_tools(
     ) -> WikiGrid:
         grid_id = grid_id.strip()
         if not grid_id:
-            raise ValueError("grid_id must not be empty.")
+            raise ToolError("grid_id must not be empty.")
 
         return await get_wiki(ctx).grid_get(
             grid_id,
@@ -697,7 +698,7 @@ def register_page_read_tools(
             # sibling tools exist. Without this the common case — an image past
             # the image budget — reached the agent as a bare transport string
             # quoting a limit the tool description never mentions.
-            raise ValueError(
+            raise ToolError(
                 f"Attachment is larger than the "
                 f"{exc.max_bytes}-byte inline limit for its type "
                 f"({MAX_INLINE_ATTACHMENT_BYTES} for text and other binaries, "
@@ -710,7 +711,7 @@ def register_page_read_tools(
             # mime, or a header claiming a renderable image — and the bytes then
             # turned out not to be one. The client cannot make this call: only
             # the body settles it.
-            raise ValueError(
+            raise ToolError(
                 f"Attachment is {len(raw)} bytes, over the "
                 f"{MAX_INLINE_ATTACHMENT_BYTES}-byte limit for non-image "
                 f"content ({MAX_INLINE_IMAGE_BYTES} for images). "

@@ -611,8 +611,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="130.4" y="857.3" class="t-muted" font-size="8" text-anchor="middle">before the tool runs</text>
         </g>
 
-        <g id="node-e_slug" data-node-id="e_slug" data-node-label="Empty slug_prefix" tabindex="0" role="button" aria-label="Focus Empty slug_prefix, ValueError, no HTTP, Error → isError=true › Offline checks" aria-pressed="false" data-node-kind="security" data-node-sublabel="ValueError, no HTTP" data-node-context="Error → isError=true › Offline checks">
-          <title>Empty slug_prefix · ValueError, no HTTP · Error → isError=true › Offline checks</title>
+        <g id="node-e_slug" data-node-id="e_slug" data-node-label="Empty slug_prefix" tabindex="0" role="button" aria-label="Focus Empty slug_prefix, ToolError, no HTTP, Error → isError=true › Offline checks" aria-pressed="false" data-node-kind="security" data-node-sublabel="ToolError, no HTTP" data-node-context="Error → isError=true › Offline checks">
+          <title>Empty slug_prefix · ToolError, no HTTP · Error → isError=true › Offline checks</title>
           <rect x="202.39999999999998" y="813" width="128" height="52" rx="6" class="c-mask"/>
           <rect x="202.39999999999998" y="813" width="128" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(208.39999999999998 819) scale(0.6875)">
@@ -620,11 +620,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="266.4" y="845" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Empty slug_prefix</text>
-          <text x="266.4" y="857.3" class="t-muted" font-size="8" text-anchor="middle">ValueError, no HTTP</text>
+          <text x="266.4" y="857.3" class="t-muted" font-size="8" text-anchor="middle">ToolError, no HTTP</text>
         </g>
 
-        <g id="node-e_cursor" data-node-id="e_cursor" data-node-label="cursor w/o highlight" tabindex="0" role="button" aria-label="Focus cursor w/o highlight, ValueError, no HTTP, Error → isError=true › Offline checks" aria-pressed="false" data-node-kind="security" data-node-sublabel="ValueError, no HTTP" data-node-context="Error → isError=true › Offline checks">
-          <title>cursor w/o highlight · ValueError, no HTTP · Error → isError=true › Offline checks</title>
+        <g id="node-e_cursor" data-node-id="e_cursor" data-node-label="cursor w/o highlight" tabindex="0" role="button" aria-label="Focus cursor w/o highlight, WikiArgumentError, no HTTP, Error → isError=true › Offline checks" aria-pressed="false" data-node-kind="security" data-node-sublabel="WikiArgumentError, no HTTP" data-node-context="Error → isError=true › Offline checks">
+          <title>cursor w/o highlight · WikiArgumentError, no HTTP · Error → isError=true › Offline checks</title>
           <rect x="488.4" y="813" width="136" height="52" rx="6" class="c-mask"/>
           <rect x="488.4" y="813" width="136" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(494.4 819) scale(0.6875)">
@@ -632,7 +632,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="556.4" y="844.6" class="t-primary" font-size="10.6" font-weight="600" text-anchor="middle">cursor w/o highlight</text>
-          <text x="556.4" y="856.8" class="t-muted" font-size="8" text-anchor="middle">ValueError, no HTTP</text>
+          <text x="556.4" y="856.8" class="t-muted" font-size="8" text-anchor="middle">WikiArgumentError, no HTTP</text>
         </g>
 
         <g id="node-e_api" data-node-id="e_api" data-node-label="WikiApiError" tabindex="0" role="button" aria-label="Focus WikiApiError, or WikiTransportError, Error → isError=true › Request &amp; paging" aria-pressed="false" data-node-kind="security" data-node-sublabel="or WikiTransportError" data-node-context="Error → isError=true › Request &amp; paging">

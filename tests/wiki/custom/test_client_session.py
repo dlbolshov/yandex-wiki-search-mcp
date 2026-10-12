@@ -1,7 +1,11 @@
 """Session lifecycle, request tracing, and the upload paths beyond the happy one."""
 
+import errno
+import io
 import logging
+import os
 import re
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -10,7 +14,8 @@ from typing import Any
 import pytest
 from aioresponses import aioresponses
 
-from mcp_wiki.wiki.custom.client import WikiClient, _build_trace_config
+from mcp_wiki.wiki.custom import client as client_module
+from mcp_wiki.wiki.custom.client import WikiClient, _build_trace_config, local_path
 from mcp_wiki.wiki.custom.errors import WikiApiError, WikiLocalFileError
 from tests.aioresponses_utils import RequestCapture
 
@@ -124,6 +129,48 @@ class TestUploadAttachment:
             with pytest.raises(WikiLocalFileError, match=r"nope\.txt"):
                 await wiki_client.page_upload_attachment(10, file_path="/nope.txt")
 
+    @pytest.mark.skipif(
+        sys.platform == "win32" or os.geteuid() == 0,
+        reason="mode bits do not stop Windows or root from reading",
+    )
+    async def test_an_unreadable_file_is_refused_before_any_request(
+        self, wiki_client: WikiClient, tmp_path: Path
+    ) -> None:
+        # It passes is_file() and stat(), so it used to fail only at open(),
+        # after the upload session existed, and as a raw PermissionError that
+        # mcp >=2.1 shows the model as a bare crash.
+        secret = tmp_path / "secret.txt"
+        secret.write_bytes(b"x")
+        secret.chmod(0)
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/upload_sessions",
+                exception=AssertionError("no request may be made"),
+            )
+            with pytest.raises(WikiLocalFileError, match=r"Cannot read .*secret"):
+                await wiki_client.page_upload_attachment(10, file_path=str(secret))
+
+    async def test_a_failed_read_is_a_local_file_error(
+        self,
+        wiki_client: WikiClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class FailingRead(io.BytesIO):
+            def read(self, size: int | None = -1) -> bytes:
+                raise OSError(errno.EIO, "Input/output error")
+
+        spec = tmp_path / "spec.pdf"
+        spec.write_bytes(b"%PDF-1.4")
+        monkeypatch.setattr(client_module, "_open_binary", lambda _path: FailingRead())
+        with aioresponses() as mocked:
+            mocked.post(
+                "https://api.wiki.yandex.net/v1/upload_sessions",
+                payload={"session_id": "session-1"},
+            )
+            with pytest.raises(WikiLocalFileError, match="Input/output error"):
+                await wiki_client.page_upload_attachment(10, file_path=str(spec))
+
     async def test_append_markup_writes_a_file_macro_to_the_page(
         self, wiki_client: WikiClient
     ) -> None:
@@ -170,6 +217,26 @@ class TestUploadAttachment:
             append_capture.last_request.get_json_body()["content"]
             == result.appended_content
         )
+
+
+class TestLocalPath:
+    def test_a_nul_is_refused(self) -> None:
+        # Every os call raises ValueError on it, outside the WikiError family.
+        with pytest.raises(WikiLocalFileError, match="cannot contain NUL"):
+            local_path("report\x00.pdf")
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows guesses any ~name")
+    def test_an_unknown_user_is_refused(self) -> None:
+        with pytest.raises(WikiLocalFileError, match="Cannot expand '~'"):
+            local_path("~no_such_user_zz/report.pdf")
+
+    async def test_download_refuses_a_nul_in_save_to(
+        self, wiki_client: WikiClient
+    ) -> None:
+        with aioresponses(), pytest.raises(WikiLocalFileError, match="NUL"):
+            await wiki_client.page_download_attachment(
+                42, file_id=5, save_to="out\x00.bin"
+            )
 
 
 class TestAnchorFallback:

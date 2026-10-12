@@ -60,6 +60,7 @@ The full developer guide — layers, code map, design decisions, testing seams, 
   `MCPServer` creation, lifespan wiring, optional OAuth provider registration, and resource/tool registration.
   Also `run_options()` / `http_app_options()`, which assemble the transport keywords `run()` and `streamable_http_app()` take — these are no longer constructor arguments.
   **Always pass `host`**: the SDK defaults it to `127.0.0.1` and auto-arms DNS rebinding protection on loopback, so an app built without it answers every MCP request behind a real hostname with `421` while `/healthz` still returns `200`.
+  `WikiMCPServer.call_tool` promotes a `WikiError` to the SDK's `ToolError`, so its message reaches the model (see the error bullet under Constraints).
 
 - `mcp_wiki/mcp/middleware.py`
   DEBUG log of every inbound message with the time spent serving it, so it subtracts against the Wiki client's own per-request timings.
@@ -156,6 +157,10 @@ Write tools:
 - `tests/mcp/tools/test_page_write_tools.py`
   Write-tool behavior against mocked Wiki protocol.
 
+- `tests/mcp/server/test_tool_errors.py`
+  What a failing tool shows the model: a `WikiError`'s text, never a crash's.
+  Most of it passes on the locked mcp 2.0.0 either way; the `test-latest-mcp` CI job is where it bites.
+
 - `tests/mcp/server/test_request_ctx.py`
   The middleware that publishes the inbound request, covered over real HTTP.
   This is the guard on a provisional SDK API — keep it end-to-end rather than calling the handler directly.
@@ -196,6 +201,8 @@ When adding a new MCP tool:
 4. Register the tool in:
    - `mcp_wiki/mcp/tools/page_read.py` for read-only operations
    - `mcp_wiki/mcp/tools/page_write.py` for write operations
+
+   Refuse bad arguments with `ToolError`, not `ValueError` (see the error bullet under Constraints). A refusal in the client raises `WikiArgumentError`.
 5. Update:
    - `README.md`
    - `README_ru.md`
@@ -212,8 +219,8 @@ dedicated release commit on `main` (`Release vX.Y.Z`) that updates everything
 at once: `pyproject.toml`, `uv.lock` (via `uv lock`, never by hand),
 `manifest.json`, `server.json` (both `version` fields **and** the OCI image
 tag), promotes `[Unreleased]` to `[X.Y.Z] - date`, and appends the ROADMAP
-log entry. `scripts/check_versions.py` verifies the sync (except the OCI
-tag). Full procedure: `docs/architecture.md` → "Release process". Do not
+log entry. `scripts/check_versions.py` verifies the sync, OCI tag included.
+Full procedure: `docs/architecture.md` → "Release process". Do not
 reference the future version number from docs, ROADMAP entries, or code
 comments before that commit exists — the number is not decided until release.
 
@@ -239,6 +246,7 @@ Constraints:
 - `page_update` replaces full content when `content` is provided
 - file upload uses Yandex Wiki multipart upload sessions
 - `HOST` must reach `run()` / `streamable_http_app()`, or HTTP transports answer `421` behind any non-loopback hostname
+- a failing tool shows the model its message only if it raised `ToolError` (`mcp.server.mcpserver.exceptions`). Since mcp 2.1.0 (python-sdk#3314) anything else counts as a crash: logged with a traceback, reported as a bare `Error executing tool <name>`. Tool-layer refusals therefore raise `ToolError`; `ValueError` is right only inside pydantic validators, where the SDK turns it into an argument error. The Wiki layer cannot import the SDK and raises `WikiError` subclasses instead (`WikiArgumentError` for a request the client refuses to send), which `WikiMCPServer.call_tool` promotes to `ToolError`. Any other exception stays masked, on purpose. `uv.lock` pins mcp 2.0.0, which passes every message on, so a `ValueError` refusal passes the `test` matrix; the `test-latest-mcp` job, which runs the suite on the newest mcp, is what catches it
 - `GET /pages/descendants?slug=` **empty means the whole organization** — a real contract, not bad input (an unresolvable slug 404s). `page_get_descendants(from_root=true)` is the only caller that sends it; do not add an "empty slug" guard to `WikiClient.page_get_descendants` or to the params model, and note that omitting the parameter entirely is a `400`. `resolve_page_locator` still rejects the empty slug for every other tool, where the API genuinely needs a page
 - `page_search` results carry a ~510-character excerpt in `content`, cut from wherever the match sits — not the page and not a summary. Matches inside it are wrapped in `<em>` tags only when the call passed `highlight=true`; otherwise the excerpt is unmarked. Its `\n`/`\t` are the source page's layout, not fragment separators. This is documented in four places that must stay in sync: the field description in `wiki/proto/types/pages.py`, the tool description, `build_instructions()`, and this bullet
 - `page_search` pagination is **mode-gated** (the wire grew the split between 2026-08-11 and 2026-08-25): without `highlight` the response cursors are always null and a request `cursor` is validated then ignored — `WikiClient.page_search` refuses that pair rather than send a silent lie — while with `highlight=true` pages hard-cap at 10 results regardless of `limit` and `cursor` (integer 1–500, the page number) walks up to ~100 results. Past the end of the set the wire answers empty pages with an ever-growing `next_cursor`, so the stop condition is "empty `results` or null `next_cursor` on a non-empty page", never `next_cursor` alone. `order_by` works only in that mode and stays unexposed. If the sweep's `page_search (default-mode cursors)` row goes BROKEN, the split healed — re-probe both modes before touching the descriptions

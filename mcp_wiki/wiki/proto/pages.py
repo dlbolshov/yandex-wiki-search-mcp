@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from mcp_wiki.wiki.custom.errors import WikiArgumentError
 from mcp_wiki.wiki.proto.common import YandexAuth
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentContent,
@@ -52,7 +53,7 @@ def validate_page_update_args(
     drift apart as update-able fields are added.
     """
     if redirect_to_page_id is not None and clear_redirect:
-        raise ValueError(
+        raise WikiArgumentError(
             "redirect_to_page_id and clear_redirect are mutually exclusive."
         )
     if (
@@ -61,7 +62,7 @@ def validate_page_update_args(
         and redirect_to_page_id is None
         and not clear_redirect
     ):
-        raise ValueError(
+        raise WikiArgumentError(
             "Provide at least one of title, content, redirect_to_page_id, "
             "or clear_redirect."
         )

@@ -1,0 +1,196 @@
+# uv is pinned to one exact release: the Dockerfile's `astral-sh/uv:<tag>` and
+# the `version:` of every other setup-uv step (tests/test_dockerfile.py keeps
+# them in step). Dependabot sees neither pin — the Dockerfile's FROM is
+# ARG-prefixed, and the github-actions ecosystem does not edit `with:` inputs
+# — so nothing would ever prompt a uv bump. Meanwhile the Claude Desktop
+# bundle runs on whatever uv its user has, and uv 0.13.0 broke it twice (a
+# `required-version` ceiling, then a default Python with no wheels in the
+# lock) without CI seeing either. This workflow runs the bundle, launched the
+# way the host launches it, and the test suite on the newest uv every week.
+#
+# It also runs on a pull request that changes how the bundle is built or
+# launched, so a launch fix is proven on the newest uv before it ships.
+#
+# A red run: fix compatibility first — manifest.json's `mcp_config`, uv.lock,
+# or a range in pyproject.toml — then move the pins to the new uv in the same
+# change: the Dockerfile and every pinned setup-uv `version:` in test.yml,
+# release.yml and api-drift.yml.
+
+name: uv canary
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - manifest.json
+      - .mcpbignore
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/uv-canary.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # windows-11-arm is the leg for manifest.json's win32 override. uv 0.13
+  # prefers native ARM64 Python there, and the locked aiohttp 3.13.3 and
+  # cryptography 46.0.4 have no win_arm64 wheels, so without
+  # UV_PYTHON_ARCH=x86_64 the bundle's first `uv run` would have to build them
+  # from source. The override's `env` replaces the base `env` rather than
+  # merging into it (mcpb's getMcpConfigForManifest), which is why it repeats
+  # every variable; tests/test_manifest.py keeps it that way.
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest, windows-11-arm ]
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest  # uv-canary: floats on purpose; tests/test_dockerfile.py
+          enable-cache: false
+
+      # Only runs the launcher below; uv may not use it for the bundle.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Pack and unpack the bundle
+        shell: bash
+        run: |
+          npx -y @anthropic-ai/mcpb pack . b.mcpb
+          python -I -c 'import sys, zipfile; zipfile.ZipFile("b.mcpb").extractall(sys.argv[1])' "$RUNNER_TEMP/bundle"
+
+      # Reads the unpacked manifest the way the host does and runs its exact
+      # command, args and env, on a machine with no Python of its own: uv may
+      # use only interpreters it downloads, into an empty directory. With
+      # stdin at EOF the server starts, logs, and exits 0. UV_NO_BUILD keeps
+      # it honest: the runners have compilers a Claude Desktop user lacks, so
+      # a missing wheel has to fail here rather than get built.
+      - name: Launch the bundle the way Claude Desktop does
+        shell: bash
+        run: |
+          python -I - "$RUNNER_TEMP/bundle" "$RUNNER_TEMP/uv-python" <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          bundle = pathlib.Path(sys.argv[1]).resolve()
+          pythons = pathlib.Path(sys.argv[2])
+          manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+          config = manifest["server"]["mcp_config"]
+          # An override replaces each field it sets; it is not merged.
+          override = config.get("platform_overrides", {}).get(sys.platform, {})
+          command = override.get("command") or config["command"]
+          args = override.get("args") or config.get("args", [])
+          env = override.get("env") or config.get("env", {})
+
+          # The manifest's defaults, under the two values a user must enter.
+          user_config = {
+              key: option["default"]
+              for key, option in manifest.get("user_config", {}).items()
+              if "default" in option
+          } | {"wiki_token": "x", "wiki_org_id": "1"}
+          variables = {"__dirname": str(bundle)} | {
+              f"user_config.{key}": (str(value).lower() if isinstance(value, bool) else str(value))
+              for key, value in user_config.items()
+          }
+
+          def substitute(value: str) -> str:
+              # A KeyError here is a placeholder this smoke does not model yet.
+              return re.sub(r"\$\{([^}]+)\}", lambda match: variables[match.group(1)], value)
+
+          # setup-uv's own UV_* settings belong to the runner, not to a user.
+          launch_env = {
+              name: value
+              for name, value in os.environ.items()
+              if not name.startswith("UV_") and name != "VIRTUAL_ENV"
+          }
+          launch_env |= {name: substitute(value) for name, value in env.items()}
+          launch_env |= {
+              "UV_PYTHON_PREFERENCE": "only-managed",
+              "UV_PYTHON_INSTALL_DIR": str(pythons),
+              "UV_NO_BUILD": "1",
+          }
+          argv = [substitute(command), *map(substitute, args)]
+          print("$", " ".join(argv), flush=True)
+          for name in sorted(env):
+              print(f"  {name}={launch_env[name]}", flush=True)
+
+          # Files, not pipes: a timeout then still leaves the output to print,
+          # and on Windows run() cannot block after the kill on a grandchild
+          # (uv's trampoline, then python.exe) that holds a pipe open.
+          logs = pythons.parent / "bundle-logs"
+          logs.mkdir(exist_ok=True)
+          stdout, stderr = logs / "stdout.txt", logs / "stderr.txt"
+          try:
+              with stdout.open("wb") as out, stderr.open("wb") as err:
+                  result = subprocess.run(
+                      argv,
+                      cwd=bundle,
+                      env=launch_env,
+                      stdin=subprocess.DEVNULL,
+                      stdout=out,
+                      stderr=err,
+                      timeout=900,
+                  )
+          finally:
+              for log in (stderr, stdout):
+                  print(log.read_text(encoding="utf-8", errors="replace"))
+              if pythons.is_dir():
+                  print("Python downloaded:", *sorted(p.name for p in pythons.iterdir()))
+          assert result.returncode == 0, f"exit code {result.returncode}"
+          started = "mcp_wiki starting" in stderr.read_text(encoding="utf-8", errors="replace")
+          assert started, "the server never started"
+          PY
+
+  suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # uv takes the first Python on PATH. Pinned so the image's own python3
+      # moving to a release the lock has no wheels for cannot turn this red
+      # for a reason that has nothing to do with uv.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: latest  # uv-canary: floats on purpose; tests/test_dockerfile.py
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Run tests
+        run: uv run pytest -q

@@ -119,8 +119,20 @@ precedent).
 - **`mcp_wiki/mcp/server.py`** — assembly point. `create_mcp_server()` wires
   the lifespan, the optional OAuth provider and store, instructions, cache
   hints, middleware, custom routes (`/healthz`, the OAuth callback), then
-  registers resources and tools. Three details that bite:
-  - `WikiMCPServer.call_tool` post-processes results for `TOOL_RESULT_TEXT`
+  registers resources and tools. Four details that bite:
+  - `WikiMCPServer.call_tool` decides what a failed tool tells the model.
+    Since mcp 2.1 (python-sdk#3314) the SDK passes the error text on only
+    for a `ToolError`. Anything else counts as a crash: the server logs it
+    with its traceback and the model gets a bare `Error executing tool
+    <name>`. So the tools refuse bad arguments with `ToolError`; a
+    `ValueError` stays only inside pydantic validators, where the SDK turns
+    it into an argument error. A `WikiError` comes from a layer that cannot
+    import the SDK, so `call_tool` promotes it to a `ToolError` with the text
+    mcp 2.0 sent. Every other exception stays masked, which is the half of
+    the policy worth keeping. `uv.lock` pins mcp 2.0.0, which passes every
+    message on, so only the `test-latest-mcp` job (see [CI](#ci)) sees a
+    regression here.
+  - It also post-processes results for `TOOL_RESULT_TEXT`
     (`pretty`/`compact`/`none`) without touching structured content.
   - Transport keywords live in `run_options()`/`http_app_options()`, not the
     constructor — and **`host` must reach them**: the SDK defaults it to
@@ -295,7 +307,11 @@ then the code exchange, a call with the Bearer and a refresh:
   on `Content-Length` before reading, or one byte past the ceiling on a
   stream that declared none), `WikiLocalFileError` (a local path the
   attachment tools cannot use, keeping the `OSError` as `cause`),
-  `WikiConfigError` (bad server setup).
+  `WikiConfigError` (bad server setup), `WikiArgumentError` (a request the
+  client refuses to send: a search `cursor` without `highlight`, an empty
+  clone target, a page update asking for nothing or for opposite things;
+  also a `ValueError`). Every failure meant for the caller to read is a
+  `WikiError`, and the MCP layer relies on that to show its text.
 - **`custom/mimes.py`** — `image_mime()`: the four formats a vision API will
   decode (PNG/JPEG/GIF/WebP), recognized by magic bytes and never by the
   wire's `Content-Type`. Lives in the Wiki layer because both attachment
@@ -333,7 +349,8 @@ The suite runs against mocks at every seam the architecture defines:
 | Wiki client ↔ HTTP | `aioresponses`; assertions on headers, query params and bodies as aiohttp would send them |
 | OAuth ↔ Redis | `fakeredis` |
 | package ↔ interpreter | `tests/test_imports.py` imports every module in a subprocess |
-| Docker image ↔ uv | `tests/test_dockerfile.py` checks the Dockerfile's uv pin against `required-version` (see [Toolchain](#toolchain)) |
+| Docker image ↔ CI ↔ uv | `tests/test_dockerfile.py`: the Dockerfile's uv pin is exact, every `setup-uv` step pins the same release except the weekly canary's, which must float to `latest`, and `required-version` grows no ceiling (the project sets none) and no `uv.toml` overrides it (see [Toolchain](#toolchain)) |
+| bundle ↔ host | `tests/test_manifest.py`: `Settings` builds from the env the bundle passes (empty strings for what the user left blank), a platform override in `manifest.json` repeats the whole base `env`, every env keeps Python below 3.15, and Windows keeps x86_64 Python (see [Toolchain](#toolchain)) |
 
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
@@ -365,7 +382,7 @@ findings belong in [api-notes.md](api-notes.md).
 
 ## CI
 
-`test.yml` runs three jobs on every push and PR:
+`test.yml` runs four jobs on every push and PR:
 
 - **lint** — `scripts/check_versions.py` (version consistency across release
   metadata), ruff check, ruff format check, ty, mypy.
@@ -374,6 +391,13 @@ findings belong in [api-notes.md](api-notes.md).
   because everything else installs from `uv.lock`, so the version ranges in
   `pyproject.toml` were once exercised nowhere — and 1.0.0 shipped
   uninstallable the day its SDK released a major version.
+- **test-latest-mcp** — the whole suite with mcp moved to the newest release
+  the range allows (`uv sync --dev --upgrade-package mcp`; mcp-types follows,
+  everything else stays locked). `uv.lock` pins mcp 2.0.0, the floor of the
+  range, so `test` covers that end and this job the end `uvx` and `pip`
+  users get. It exists because mcp 2.1.0 changed what a failed tool shows
+  the model (see `WikiMCPServer.call_tool` above): 43 tests failed there and
+  passed on the lock, and `install` only counts tools.
 - **test** — pytest across the OS × Python matrix (3.11–3.13); coverage
   uploaded to Codecov from one matrix entry. The **100% coverage gate is
   enforced on ubuntu only**, as a separate `coverage report --fail-under=100`
@@ -394,6 +418,28 @@ still pushes an image tagged from the ref it ran on (`:main` from main), and
 on a tag the image is out before PyPI is attempted. `api-drift.yml` is the
 weekly live sweep.
 
+`uv-canary.yml` runs with the newest uv weekly, by hand, and on a pull request
+that changes how the bundle is built or launched (`manifest.json`,
+`.mcpbignore`, `pyproject.toml`, `uv.lock` or the workflow itself). It is the
+one place CI does not use the pinned release. The `bundle` job runs on
+ubuntu, macOS, Windows x64 and Windows ARM64. It packs the MCPB bundle, unpacks it and launches it the way Claude Desktop
+does. It runs the unpacked manifest's own `mcp_config` command, args and env,
+with `${__dirname}` and `${user_config.*}` substituted (a dummy token and org
+id) and the working directory set to the bundle. stdin is at EOF, and
+`UV_PYTHON_PREFERENCE=only-managed` with an empty `UV_PYTHON_INSTALL_DIR`
+makes it a machine with no Python of its own. `UV_NO_BUILD=1` makes a missing
+wheel fail instead of being compiled with the runner's toolchain, which a
+Claude Desktop user does not have. The server must log `mcp_wiki starting`
+and exit 0. The `suite` job runs `uv sync --locked --dev` and the tests on
+ubuntu and macOS, on Python 3.13. The workflow exists because uv 0.13.0 broke the bundle twice
+and CI saw neither break. `release.yml` validates and packs the bundle but
+never runs it, and Dependabot cannot bump either uv pin (see
+[Toolchain](#toolchain)). Both breaks reproduce against this workflow's
+launcher. With the `<0.13` ceiling restored, uv refuses to run. Without
+`UV_PYTHON`, it fetches Python 3.15 and fails to build `cffi`. A red run
+means fixing compatibility first (the manifest, the lock or a range), then
+moving every pin in one change.
+
 `pages.yml` deploys `docs/diagrams/` to GitHub Pages on a push to main that
 touches it, or by hand. It builds nothing: the HTML is committed, rebuilt
 locally (see [Diagrams](#diagrams)).
@@ -402,8 +448,8 @@ locally (see [Diagrams](#diagrams)).
 
 Versions live in **four files plus one tag string**: `pyproject.toml`,
 `uv.lock` (regenerate, do not edit), `manifest.json`, `server.json` (two
-`version` fields **and** the OCI image tag — the one `check_versions.py` does
-not cover). The release commit, by convention titled `Release vX.Y.Z`:
+`version` fields **and** the OCI image tag; `check_versions.py` checks all of
+them). The release commit, by convention titled `Release vX.Y.Z`:
 
 1. Bump all of the above; run `uv lock`.
 2. Promote `## [Unreleased]` to `## [X.Y.Z] - date` in `CHANGELOG.md`.
@@ -488,12 +534,44 @@ HTML report), ruff (lint + format), mypy **and** ty (two type checkers — ty
 is the second opinion), pytest + pytest-asyncio. Python 3.11–3.13. The
 package ships `py.typed`.
 
-uv's own version is one range, `[tool.uv] required-version` in
-`pyproject.toml`. uv refuses to run outside it, and every `setup-uv` step in
-CI installs the newest release inside it. The Dockerfile cannot read that
-range, so its uv image is pinned to an exact release inside it, never a
-floating tag: `:latest` broke the image build when it became uv 0.13.0, and
-only `release.yml` builds the image, so nothing noticed before a release.
-`tests/test_dockerfile.py` fails when the pin and the range disagree. Moving
-to a new uv minor means raising the ceiling and the image tag in the same
-change.
+uv's own version is pinned twice and bounded nowhere. The Dockerfile's uv image
+and every `setup-uv` step in CI (`version:`) name the same exact release, so
+the image is built and CI tests with one known uv. A floating tag is out:
+`:latest` broke the image build when it became uv 0.13.0, and only
+`release.yml` builds the image, so nothing noticed before a release.
+`pyproject.toml` sets no `[tool.uv] required-version`. uv enforces one in
+nearly every command run inside a copy of this tree (all but `uvx`/`uv tool`
+and `uv self`): a contributor's checkout, the unpacked Claude Desktop bundle
+(its `uv run`), and builders that install from source, such as glama.ai. The
+`<0.13` ceiling 1.5.0 added broke all of them the day uv 0.13.0 shipped, and
+uv releases a breaking minor every three months or so. Its `>=0.11` floor
+turned away uv 0.10, which runs the bundle fine, and kept nothing out that
+needed keeping out. `tests/test_dockerfile.py` fails when the pins disagree,
+when a ceiling comes back, or when a `uv.toml` appears to override
+`pyproject.toml`. Moving to a new uv means changing the image tag and every
+pinned `version:` input in one change.
+
+Dependabot will not propose that change. The Dockerfile's `FROM` is
+ARG-prefixed, and the github-actions ecosystem does not edit `with:` inputs.
+The prompt comes from `uv-canary.yml` instead (see [CI](#ci)), the one
+sanctioned float. Its `setup-uv` steps carry a `uv-canary` marker in the
+comment on their `version:` line and must say `latest`. The test accepts the
+marker in that workflow only, and holds every unmarked step to the pin. When
+the canary goes red on a new uv, fix compatibility first, then move the pins.
+
+The bundle's interpreter is the user's uv's choice, so `manifest.json` bounds
+it with `UV_PYTHON` (3.11–3.14) in `mcp_config.env`. Since 0.13 uv downloads
+Python 3.15 wherever no suitable interpreter exists, and several locked
+packages (`cffi`, `pydantic-core`, `aiohttp`, `rpds-py`) have no 3.15 wheels.
+Raise that bound once the lock does.
+
+On Windows the bundle stays on x86_64 Python:
+`mcp_config.platform_overrides.win32` adds `UV_PYTHON_ARCH=x86_64`. uv 0.13
+prefers native ARM64 Python on Windows ARM64, and the locked `aiohttp` 3.13.3
+and `cryptography` 46.0.4 have no `win_arm64` wheels (no `cryptography`
+release has one), so its first `uv run` would have to build them from source.
+uv 0.12 used x86_64 Python there, and on x64 Windows the setting changes
+nothing. An override's `env` replaces the base `env` rather than merging into
+it (mcpb's `getMcpConfigForManifest`), so the override repeats every
+variable; `tests/test_manifest.py` fails when it drops one. The canary's
+`windows-11-arm` leg launches the bundle with it.
