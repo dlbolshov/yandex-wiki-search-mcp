@@ -611,8 +611,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="130.4" y="857.3" class="t-muted" font-size="8" text-anchor="middle">до вызова инструмента</text>
         </g>
 
-        <g id="node-e_slug" data-node-id="e_slug" data-node-label="Пустой slug_prefix" tabindex="0" role="button" aria-label="Фокус: Пустой slug_prefix, ValueError, без HTTP, Ошибка → isError=true › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="ValueError, без HTTP" data-node-context="Ошибка → isError=true › Проверки без сети">
-          <title>Пустой slug_prefix · ValueError, без HTTP · Ошибка → isError=true › Проверки без сети</title>
+        <g id="node-e_slug" data-node-id="e_slug" data-node-label="Пустой slug_prefix" tabindex="0" role="button" aria-label="Фокус: Пустой slug_prefix, ToolError, без HTTP, Ошибка → isError=true › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="ToolError, без HTTP" data-node-context="Ошибка → isError=true › Проверки без сети">
+          <title>Пустой slug_prefix · ToolError, без HTTP · Ошибка → isError=true › Проверки без сети</title>
           <rect x="202.39999999999998" y="813" width="128" height="52" rx="6" class="c-mask"/>
           <rect x="202.39999999999998" y="813" width="128" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(208.39999999999998 819) scale(0.6875)">
@@ -620,11 +620,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="266.4" y="845" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Пустой slug_prefix</text>
-          <text x="266.4" y="857.3" class="t-muted" font-size="8" text-anchor="middle">ValueError, без HTTP</text>
+          <text x="266.4" y="857.3" class="t-muted" font-size="8" text-anchor="middle">ToolError, без HTTP</text>
         </g>
 
-        <g id="node-e_cursor" data-node-id="e_cursor" data-node-label="cursor без highlight" tabindex="0" role="button" aria-label="Фокус: cursor без highlight, ValueError, без HTTP, Ошибка → isError=true › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="ValueError, без HTTP" data-node-context="Ошибка → isError=true › Проверки без сети">
-          <title>cursor без highlight · ValueError, без HTTP · Ошибка → isError=true › Проверки без сети</title>
+        <g id="node-e_cursor" data-node-id="e_cursor" data-node-label="cursor без highlight" tabindex="0" role="button" aria-label="Фокус: cursor без highlight, WikiArgumentError, без HTTP, Ошибка → isError=true › Проверки без сети" aria-pressed="false" data-node-kind="security" data-node-sublabel="WikiArgumentError, без HTTP" data-node-context="Ошибка → isError=true › Проверки без сети">
+          <title>cursor без highlight · WikiArgumentError, без HTTP · Ошибка → isError=true › Проверки без сети</title>
           <rect x="488.4" y="813" width="136" height="52" rx="6" class="c-mask"/>
           <rect x="488.4" y="813" width="136" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(494.4 819) scale(0.6875)">
@@ -632,7 +632,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="556.4" y="844.6" class="t-primary" font-size="10.6" font-weight="600" text-anchor="middle">cursor без highlight</text>
-          <text x="556.4" y="856.8" class="t-muted" font-size="8" text-anchor="middle">ValueError, без HTTP</text>
+          <text x="556.4" y="856.7" class="t-muted" font-size="7.9" text-anchor="middle">WikiArgumentError, без HTTP</text>
         </g>
 
         <g id="node-e_api" data-node-id="e_api" data-node-label="WikiApiError" tabindex="0" role="button" aria-label="Фокус: WikiApiError, или WikiTransportError, Ошибка → isError=true › Запрос и листание" aria-pressed="false" data-node-kind="security" data-node-sublabel="или WikiTransportError" data-node-context="Ошибка → isError=true › Запрос и листание">
