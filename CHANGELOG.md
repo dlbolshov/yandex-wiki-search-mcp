@@ -2,7 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.5.2] - 2026-10-12
+
+Security and OAuth fixes, a Docker image that builds again, and the docs around them. The
+tool surface changes in one place: over HTTP the two local-file tools are no longer
+registered, since there they could not reach the caller's disk and only exposed the
+server's. That closes a hole rather than removing a feature, hence the patch bump.
 
 ### Changed
 - The Docker and Compose examples in both READMEs publish the port on loopback (`127.0.0.1:8000:8000`), with a warning that the plain-token HTTP endpoint has no authentication of its own, and the Security section says what that means: every caller that reaches the port acts as the owner of `WIKI_TOKEN`, in any organization the token can reach via `?orgId=`/`?cloudOrgId=`

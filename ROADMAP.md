@@ -558,3 +558,23 @@ MCP-сервер `mcp.wiki.yandex.net` (`wiki-mcp-server` 1.28.1 — 31 тулз
   api-notes (EN/RU). `contract_sweep.py` берёт scratch-slug из `SWEEP_SLUG`
   (окружение или `.env`), если позиционный аргумент опущен; `.env.example`
   документирует его в dev-блоке. 718 тестов, 100% покрытие.
+- 2026-10-12: v1.5.2 выпущен — патч безопасности и OAuth. Локальные файловые
+  тулзы (`page_upload_attachment`, `page_download_attachment`) регистрируются
+  только на stdio: plain-token HTTP никого не аутентифицирует, и сервер из
+  Docker-примера README отдавал любому, кто дотянулся до порта, чтение и
+  запись произвольных файлов на своей машине; Docker/Compose-примеры теперь
+  публикуют порт на loopback. Публичные OAuth-клиенты
+  (`token_endpoint_auth_method: none`) снова истекают — со времён mcp 2.x SDK
+  не ставил им `client_secret_expires_at`, и они жили вечно: теперь срок
+  решает провайдер, публичному клиенту — idle-окно
+  `OAUTH_CLIENT_SECRET_EXPIRY_SECONDS`, которое продлевает каждый вход или
+  refresh, не короче 31-дневного refresh-токена. Отказ Yandex `/token` — 400
+  `invalid_grant` вместо голого 500; Redis забирает одноразовые записи через
+  `DEL`; in-memory стор отказывает истёкшей регистрации сразу; пустой
+  `OAUTH_CLIENT_SECRET_EXPIRY_SECONDS` выключает срок, а не роняет старт.
+  Docker-образ снова собирается: `uv:latest` стал 0.13.0 вне
+  `required-version`, пин на 0.12.24 держит тест. Интерактивные диаграммы
+  Archify (EN/RU) на GitHub Pages и их SVG в `docs/architecture*.md`;
+  Docker-контекст стал allowlist'ом (`/code` 8.1 → 0.8 MB), MCPB 427 → 246 KB;
+  Deployment-схема README перерисована под Mermaid 12; в architecture-доках
+  закрыто 11 дрейфов. 766 тестов, 100% покрытие.
