@@ -18,7 +18,11 @@ from mcp_wiki.mcp.tools.page_read import (
     MAX_INLINE_IMAGE_BYTES,
     _drain_cursor,
 )
-from mcp_wiki.wiki.custom.errors import ResponseTooLarge, WikiTransportError
+from mcp_wiki.wiki.custom.errors import (
+    ResponseTooLarge,
+    WikiArgumentError,
+    WikiTransportError,
+)
 from mcp_wiki.wiki.proto.types.pages import (
     AttachmentContent,
     AttachmentListResponse,
@@ -307,7 +311,7 @@ class TestPageReadTools:
     ) -> None:
         # The refusal itself lives in the client (it guards direct callers
         # too); here it must surface to the agent as a tool error, not vanish.
-        mock_wiki_protocol.page_search.side_effect = ValueError(
+        mock_wiki_protocol.page_search.side_effect = WikiArgumentError(
             "cursor requires highlight=true: the search endpoint paginates "
             "only in highlight mode and silently ignores the cursor "
             "otherwise, returning page 1 again."

@@ -2,6 +2,7 @@ from typing import Any
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.exceptions import ToolError
 from starlette.requests import Request
 
 from mcp_wiki.mcp.request_ctx import current_request
@@ -49,11 +50,11 @@ def resolve_page_locator(
     slug: str | None,
 ) -> tuple[int | None, str | None]:
     if (page_id is None) == (slug is None):
-        raise ValueError("Provide exactly one of page_id or slug.")
+        raise ToolError("Provide exactly one of page_id or slug.")
 
     if slug is not None:
         slug = normalize_slug(slug)
         if not slug:
-            raise ValueError("Slug must not be empty.")
+            raise ToolError("Slug must not be empty.")
 
     return page_id, slug

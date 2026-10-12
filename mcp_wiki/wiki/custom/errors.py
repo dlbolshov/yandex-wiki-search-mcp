@@ -77,6 +77,18 @@ class WikiConfigError(WikiError):
     """
 
 
+class WikiArgumentError(WikiError, ValueError):
+    """The client refused to send a request because of its arguments.
+
+    Raised before any HTTP, for a request that would leave nothing to send
+    (an empty clone target), ask for nothing or for two opposite things (a
+    page update), or be answered misleadingly (a search cursor without
+    highlight comes back as page 1). A WikiError like every other Wiki
+    failure, which is how the MCP layer knows to show its text to the model;
+    and still a ValueError, which is what it is to a direct caller.
+    """
+
+
 class WikiTransportError(WikiError):
     """The request never produced an HTTP response.
 

@@ -1,6 +1,7 @@
 from typing import TypeAlias
 
 from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.exceptions import ToolError
 from starlette.requests import Request
 
 from mcp_wiki.mcp.context import AppContext
@@ -45,7 +46,7 @@ async def resolve_page_id_and_type(
         # already raised unless exactly one of the two is set, so reaching
         # here with neither is impossible. The branch exists for the type
         # checker, which cannot see that guarantee across the call.
-        raise ValueError("Either page_id or slug must be provided.")
+        raise ToolError("Either page_id or slug must be provided.")
 
     page = await get_wiki(ctx).page_get_by_slug(
         slug,
@@ -64,12 +65,12 @@ async def resolve_page_slug(
     if slug is not None:
         return slug
     if page_id is None:  # pragma: no cover - narrowing, see above
-        raise ValueError("Either page_id or slug must be provided.")
+        raise ToolError("Either page_id or slug must be provided.")
 
     page = await get_wiki(ctx).page_get(
         page_id,
         auth=get_yandex_auth(ctx),
     )
     if not page.slug:
-        raise ValueError(f"Page {page_id} does not have a slug in the API response.")
+        raise ToolError(f"Page {page_id} does not have a slug in the API response.")
     return page.slug

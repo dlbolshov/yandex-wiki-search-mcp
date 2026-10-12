@@ -119,8 +119,20 @@ precedent).
 - **`mcp_wiki/mcp/server.py`** — assembly point. `create_mcp_server()` wires
   the lifespan, the optional OAuth provider and store, instructions, cache
   hints, middleware, custom routes (`/healthz`, the OAuth callback), then
-  registers resources and tools. Three details that bite:
-  - `WikiMCPServer.call_tool` post-processes results for `TOOL_RESULT_TEXT`
+  registers resources and tools. Four details that bite:
+  - `WikiMCPServer.call_tool` decides what a failed tool tells the model.
+    Since mcp 2.1 (python-sdk#3314) the SDK passes the error text on only
+    for a `ToolError`. Anything else counts as a crash: the server logs it
+    with its traceback and the model gets a bare `Error executing tool
+    <name>`. So the tools refuse bad arguments with `ToolError`; a
+    `ValueError` stays only inside pydantic validators, where the SDK turns
+    it into an argument error. A `WikiError` comes from a layer that cannot
+    import the SDK, so `call_tool` promotes it to a `ToolError` with the text
+    mcp 2.0 sent. Every other exception stays masked, which is the half of
+    the policy worth keeping. `uv.lock` pins mcp 2.0.0, which passes every
+    message on, so only the `test-latest-mcp` job (see [CI](#ci)) sees a
+    regression here.
+  - It also post-processes results for `TOOL_RESULT_TEXT`
     (`pretty`/`compact`/`none`) without touching structured content.
   - Transport keywords live in `run_options()`/`http_app_options()`, not the
     constructor — and **`host` must reach them**: the SDK defaults it to
@@ -295,7 +307,11 @@ then the code exchange, a call with the Bearer and a refresh:
   on `Content-Length` before reading, or one byte past the ceiling on a
   stream that declared none), `WikiLocalFileError` (a local path the
   attachment tools cannot use, keeping the `OSError` as `cause`),
-  `WikiConfigError` (bad server setup).
+  `WikiConfigError` (bad server setup), `WikiArgumentError` (a request the
+  client refuses to send: a search `cursor` without `highlight`, an empty
+  clone target, a page update asking for nothing or for opposite things;
+  also a `ValueError`). Every failure meant for the caller to read is a
+  `WikiError`, and the MCP layer relies on that to show its text.
 - **`custom/mimes.py`** — `image_mime()`: the four formats a vision API will
   decode (PNG/JPEG/GIF/WebP), recognized by magic bytes and never by the
   wire's `Content-Type`. Lives in the Wiki layer because both attachment
@@ -365,7 +381,7 @@ findings belong in [api-notes.md](api-notes.md).
 
 ## CI
 
-`test.yml` runs three jobs on every push and PR:
+`test.yml` runs four jobs on every push and PR:
 
 - **lint** — `scripts/check_versions.py` (version consistency across release
   metadata), ruff check, ruff format check, ty, mypy.
@@ -374,6 +390,13 @@ findings belong in [api-notes.md](api-notes.md).
   because everything else installs from `uv.lock`, so the version ranges in
   `pyproject.toml` were once exercised nowhere — and 1.0.0 shipped
   uninstallable the day its SDK released a major version.
+- **test-latest-mcp** — the whole suite with mcp moved to the newest release
+  the range allows (`uv sync --dev --upgrade-package mcp`; mcp-types follows,
+  everything else stays locked). `uv.lock` pins mcp 2.0.0, the floor of the
+  range, so `test` covers that end and this job the end `uvx` and `pip`
+  users get. It exists because mcp 2.1.0 changed what a failed tool shows
+  the model (see `WikiMCPServer.call_tool` above): 43 tests failed there and
+  passed on the lock, and `install` only counts tools.
 - **test** — pytest across the OS × Python matrix (3.11–3.13); coverage
   uploaded to Codecov from one matrix entry. The **100% coverage gate is
   enforced on ubuntu only**, as a separate `coverage report --fail-under=100`

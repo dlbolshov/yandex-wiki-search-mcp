@@ -33,6 +33,7 @@ from mcp_wiki.wiki.custom.errors import (
     PageNotFound,
     ResponseTooLarge,
     WikiApiError,
+    WikiArgumentError,
     WikiConfigError,
     WikiError,
     WikiLocalFileError,
@@ -989,7 +990,7 @@ class WikiClient(WikiProtocol):
                 # Without highlight the wire validates the cursor and then
                 # ignores it, answering page 1 again — a silent lie to the
                 # caller who asked for page N. Refuse loudly instead.
-                raise ValueError(
+                raise WikiArgumentError(
                     "cursor requires highlight=true: the search endpoint "
                     "paginates only in highlight mode and silently ignores "
                     "the cursor otherwise, returning page 1 again."
@@ -1443,7 +1444,7 @@ class WikiClient(WikiProtocol):
         # so callers get the copy's id and slug, not a status URL.
         normalized = normalize_slug(target)
         if not normalized:
-            raise ValueError("target must not be empty.")
+            raise WikiArgumentError("target must not be empty.")
 
         body: dict[str, Any] = {"target": normalized}
         if title is not None:

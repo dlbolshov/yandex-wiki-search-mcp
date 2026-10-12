@@ -1,6 +1,7 @@
 from typing import Annotated, Any
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, model_validator
 
@@ -206,7 +207,7 @@ def _apply_replacements(
     for index, replacement in enumerate(replacements, start=1):
         count = content.count(replacement.old_text)
         if count == 0:
-            raise ValueError(
+            raise ToolError(
                 f"Replacement {index}/{len(replacements)}: old_text not found "
                 "in the page content. Nothing was written. Read the page with "
                 "page_get and copy the text exactly, including whitespace."
@@ -216,7 +217,7 @@ def _apply_replacements(
                 str(n) for n in _occurrence_lines(content, replacement.old_text)
             )
             suffix = " and more" if count > _OCCURRENCE_LINES_CAP else ""
-            raise ValueError(
+            raise ToolError(
                 f"Replacement {index}/{len(replacements)}: old_text occurs "
                 f"{count} times (lines {lines}{suffix}). Nothing was written. "
                 "Extend old_text to make it unique, or set replace_all=true."
@@ -229,13 +230,13 @@ def _apply_replacements(
 def _require_non_empty_text(value: str, *, field_name: str) -> str:
     normalized = value.strip()
     if not normalized:
-        raise ValueError(f"{field_name} must not be empty.")
+        raise ToolError(f"{field_name} must not be empty.")
     return normalized
 
 
 def _validate_row_ids(row_ids: list[str | int]) -> list[str]:
     if not row_ids:
-        raise ValueError("row_ids must not be empty.")
+        raise ToolError("row_ids must not be empty.")
 
     normalized: list[str] = []
     for index, row_id in enumerate(row_ids):
@@ -250,7 +251,7 @@ def _validate_row_ids(row_ids: list[str | int]) -> list[str]:
 
 def _validate_column_slugs(column_slugs: list[str]) -> list[str]:
     if not column_slugs:
-        raise ValueError("column_slugs must not be empty.")
+        raise ToolError("column_slugs must not be empty.")
 
     return [
         _require_non_empty_text(column_slug, field_name=f"column_slugs[{index}]")
@@ -323,12 +324,12 @@ def register_page_write_tools(
             else None
         )
         if default_sort is not None and not default_sort:
-            raise ValueError("default_sort must not be empty.")
+            raise ToolError("default_sort must not be empty.")
         normalized_default_sort = (
             [entry.to_mapping() for entry in default_sort] if default_sort else []
         )
         if normalized_title is None and not normalized_default_sort:
-            raise ValueError("Provide at least one of title or default_sort.")
+            raise ToolError("Provide at least one of title or default_sort.")
 
         return await get_wiki(ctx).grid_update(
             normalized_grid_id,
@@ -377,9 +378,9 @@ def register_page_write_tools(
         normalized_grid_id = _require_non_empty_text(grid_id, field_name="grid_id")
         normalized_revision = _require_non_empty_text(revision, field_name="revision")
         if not rows:
-            raise ValueError("rows must not be empty.")
+            raise ToolError("rows must not be empty.")
         if position is not None and after_row_id is not None:
-            raise ValueError("Provide either position or after_row_id, not both.")
+            raise ToolError("Provide either position or after_row_id, not both.")
         normalized_after_row_id = (
             _require_non_empty_text(str(after_row_id), field_name="after_row_id")
             if after_row_id is not None
@@ -477,7 +478,7 @@ def register_page_write_tools(
     ) -> GridCellsResponse:
         normalized_grid_id = _require_non_empty_text(grid_id, field_name="grid_id")
         if not cells:
-            raise ValueError("cells must not be empty.")
+            raise ToolError("cells must not be empty.")
         return await get_wiki(ctx).grid_update_cells(
             normalized_grid_id,
             cells=[cell.to_payload() for cell in cells],
@@ -540,7 +541,7 @@ def register_page_write_tools(
         normalized_grid_id = _require_non_empty_text(grid_id, field_name="grid_id")
         normalized_revision = _require_non_empty_text(revision, field_name="revision")
         if not columns:
-            raise ValueError("columns must not be empty.")
+            raise ToolError("columns must not be empty.")
 
         return await get_wiki(ctx).grid_add_columns(
             normalized_grid_id,
@@ -609,9 +610,9 @@ def register_page_write_tools(
         normalized_revision = _require_non_empty_text(revision, field_name="revision")
         normalized_row_id = _require_non_empty_text(str(row_id), field_name="row_id")
         if position is None and after_row_id is None:
-            raise ValueError("Provide either position or after_row_id.")
+            raise ToolError("Provide either position or after_row_id.")
         if position is not None and after_row_id is not None:
-            raise ValueError("Provide either position or after_row_id, not both.")
+            raise ToolError("Provide either position or after_row_id, not both.")
         normalized_after_row_id = (
             _require_non_empty_text(str(after_row_id), field_name="after_row_id")
             if after_row_id is not None
@@ -818,10 +819,10 @@ def register_page_write_tools(
             )
         else:  # pragma: no cover - narrowing; resolve_page_locator raised
             # already unless exactly one of the two is set.
-            raise ValueError("Either page_id or slug must be provided.")
+            raise ToolError("Either page_id or slug must be provided.")
         content = page.content if isinstance(page.content, str) else None
         if content is None:
-            raise ValueError(
+            raise ToolError(
                 f"Page {page.slug or page.id} has no editable text content "
                 f"(page_type={page.page_type!r})."
             )
