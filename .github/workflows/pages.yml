@@ -1,0 +1,47 @@
+name: Diagrams
+
+# Publishes docs/diagrams/ (the interactive Archify diagrams and their
+# index page) to GitHub Pages. Nothing is built here: the HTML is committed,
+# regenerated locally with scripts/build_diagrams.py, so this only deploys.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/diagrams/**"
+      - ".github/workflows/pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push waits rather than cancelling a
+# deployment that is already rolling out.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Configure Pages
+      uses: actions/configure-pages@v6
+
+    - name: Upload docs/diagrams as the Pages artifact
+      uses: actions/upload-pages-artifact@v5
+      with:
+        path: docs/diagrams
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v5

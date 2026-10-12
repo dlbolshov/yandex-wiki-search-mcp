@@ -1,0 +1,369 @@
+{
+ "schema_version": 1,
+ "diagram_type": "sequence",
+ "meta": {
+  "title": "OAuth 1/2: register & sign in",
+  "output": "docs/diagrams/en/oauth-login.html",
+  "quality_profile": "showcase",
+  "column_fit": "spread",
+  "legend": {
+   "entries": {
+    "emphasis": {
+     "label": "request"
+    },
+    "return": {
+     "label": "response"
+    },
+    "security": {
+     "label": "code or token"
+    },
+    "dashed": {
+     "label": "302 redirect"
+    },
+    "default": {
+     "label": "store (SET: no reply)"
+    }
+   }
+  },
+  "repository": {
+   "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
+   "revision": "054abf72362586491781e1ef595120696e54bf30"
+  },
+  "locale": "en"
+ },
+ "participants": [
+  {
+   "id": "client",
+   "type": "external",
+   "label": "MCP client",
+   "sublabel": "Claude Code etc.",
+   "sources": [
+    {
+     "path": "README.md",
+     "line": 283,
+     "end_line": 306,
+     "label": "OAuth mode and ?orgId= in the URL"
+    }
+   ]
+  },
+  {
+   "id": "browser",
+   "type": "frontend",
+   "label": "Browser",
+   "sublabel": "user",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 194,
+     "end_line": 201,
+     "label": "Yandex /authorize URL"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 104,
+     "end_line": 115,
+     "label": "302 to the client's redirect_uri"
+    }
+   ]
+  },
+  {
+   "id": "server",
+   "type": "backend",
+   "label": "MCP server",
+   "sublabel": "SDK + provider",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 233,
+     "end_line": 257,
+     "label": "provider and AuthSettings: DCR, TTL"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 161,
+     "end_line": 201,
+     "label": "authorize: server's own state, 600 s"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 80,
+     "end_line": 115,
+     "label": "callback: state → mcp_ code for 300 s"
+    }
+   ]
+  },
+  {
+   "id": "store",
+   "type": "database",
+   "label": "Store",
+   "sublabel": "Redis or memory",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 120,
+     "end_line": 159,
+     "label": "registration expiry and idle-window renewal"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/stores/redis.py",
+     "line": 91,
+     "end_line": 109,
+     "label": "SET / GET client, TTL from the provider"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/stores/redis.py",
+     "line": 117,
+     "end_line": 136,
+     "label": "state: one-shot, the DEL is the claim"
+    }
+   ]
+  },
+  {
+   "id": "yandex",
+   "type": "external",
+   "label": "Yandex OAuth",
+   "sublabel": "oauth.yandex.ru",
+   "sources": [
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 58,
+     "end_line": 61,
+     "label": "Yandex URL, app id and secret"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 194,
+     "end_line": 201,
+     "label": "redirect to Yandex /authorize"
+    }
+   ]
+  }
+ ],
+ "segments": [
+  {
+   "from": 152,
+   "to": 267,
+   "label": "Discovery: 401 → server metadata"
+  },
+  {
+   "from": 286,
+   "to": 361,
+   "label": "Client registration (DCR): provider sets expiry"
+  },
+  {
+   "from": 380,
+   "to": 739,
+   "label": "Yandex sign-in: every hop goes through the browser"
+  }
+ ],
+ "messages": [
+  {
+   "id": "m01",
+   "from": "client",
+   "to": "server",
+   "label": "POST /mcp, no token",
+   "variant": "emphasis",
+   "y": 172
+  },
+  {
+   "id": "m02",
+   "from": "server",
+   "to": "client",
+   "label": "401 + resource_metadata",
+   "variant": "return",
+   "y": 200
+  },
+  {
+   "id": "m03",
+   "from": "client",
+   "to": "server",
+   "label": "GET /.well-known ×2",
+   "variant": "emphasis",
+   "y": 228
+  },
+  {
+   "id": "m04",
+   "from": "server",
+   "to": "client",
+   "label": "200: /authorize, /token, /register",
+   "variant": "return",
+   "y": 256
+  },
+  {
+   "id": "m05",
+   "from": "client",
+   "to": "server",
+   "label": "POST /register",
+   "variant": "emphasis",
+   "y": 306
+  },
+  {
+   "id": "m06",
+   "from": "server",
+   "to": "store",
+   "label": "SET client + TTL",
+   "variant": "default",
+   "y": 328
+  },
+  {
+   "id": "m07",
+   "from": "server",
+   "to": "client",
+   "label": "201 client_id",
+   "variant": "return",
+   "y": 350
+  },
+  {
+   "id": "m08",
+   "from": "client",
+   "to": "browser",
+   "label": "open /authorize",
+   "variant": "emphasis",
+   "note": "PKCE: client keeps code_verifier",
+   "y": 400
+  },
+  {
+   "id": "m09",
+   "from": "browser",
+   "to": "server",
+   "label": "GET /authorize",
+   "variant": "emphasis",
+   "y": 422
+  },
+  {
+   "id": "m10",
+   "from": "server",
+   "to": "store",
+   "label": "GET client",
+   "variant": "default",
+   "y": 444
+  },
+  {
+   "id": "m11",
+   "from": "store",
+   "to": "server",
+   "label": "client info",
+   "variant": "return",
+   "y": 472
+  },
+  {
+   "id": "m12",
+   "from": "server",
+   "to": "store",
+   "label": "SET state, 600s",
+   "variant": "default",
+   "y": 500
+  },
+  {
+   "id": "m13",
+   "from": "server",
+   "to": "browser",
+   "label": "302 → Yandex",
+   "variant": "dashed",
+   "y": 522
+  },
+  {
+   "id": "m14",
+   "from": "browser",
+   "to": "yandex",
+   "label": "login & consent",
+   "variant": "emphasis",
+   "y": 550
+  },
+  {
+   "id": "m15",
+   "from": "yandex",
+   "to": "browser",
+   "label": "302 → /callback?code",
+   "variant": "dashed",
+   "y": 578
+  },
+  {
+   "id": "m16",
+   "from": "browser",
+   "to": "server",
+   "label": "GET /callback",
+   "variant": "emphasis",
+   "y": 606
+  },
+  {
+   "id": "m17",
+   "from": "server",
+   "to": "store",
+   "label": "claim state (DEL)",
+   "variant": "default",
+   "y": 628
+  },
+  {
+   "id": "m18",
+   "from": "store",
+   "to": "server",
+   "label": "state",
+   "variant": "return",
+   "y": 656
+  },
+  {
+   "id": "m19",
+   "from": "server",
+   "to": "store",
+   "label": "SET mcp_ code, 300s",
+   "variant": "default",
+   "note": "Yandex code is kept in the mcp_ record",
+   "y": 684
+  },
+  {
+   "id": "m20",
+   "from": "server",
+   "to": "browser",
+   "label": "302 → redirect_uri",
+   "variant": "dashed",
+   "y": 706
+  },
+  {
+   "id": "m21",
+   "from": "browser",
+   "to": "client",
+   "label": "code=mcp_…",
+   "variant": "emphasis",
+   "y": 728
+  }
+ ],
+ "cards": [
+  {
+   "dot": "slate",
+   "title": "Scenario",
+   "items": [
+    "OAUTH_ENABLED=true, TRANSPORT=streamable-http, OAUTH_STORE=redis",
+    "On stdio, OAuth plays no part: nothing checks a Bearer",
+    "Continued in part 2: code exchange, Bearer call, refresh"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "Registration TTL",
+   "items": [
+    "Client with secret: lives until secret expiry (30 days), known to it",
+    "Public client: 30 days from registration; each code exchange or refresh on /token (part 2) extends it, to no less than 31 days",
+    "Empty OAUTH_CLIENT_SECRET_EXPIRY_SECONDS: no expiry"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "One-shot records",
+   "items": [
+    "state (600 s) and mcp_ code (300 s) are claimed once",
+    "In Redis, the request whose DEL removed the record gets it",
+    "Yandex code never goes to the client: it's in the mcp_ record"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Errors",
+   "items": [
+    "Unknown or expired client_id at /authorize → 400",
+    "Foreign or stale state at /callback → 400 invalid state",
+    "User declines at Yandex → 400, the client keeps waiting"
+   ]
+  }
+ ]
+}

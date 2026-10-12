@@ -83,6 +83,10 @@ The full developer guide — layers, code map, design decisions, testing seams, 
 - `mcp_wiki/mcp/oauth/`
   Optional OAuth provider/store implementation reused for MCP auth flows.
 
+- `docs/diagrams/`
+  Archify diagrams in English and Russian (sources, interactive HTML, SVG), published to GitHub Pages by `.github/workflows/pages.yml` and embedded in `docs/architecture*.md`.
+  Each cites line ranges at one pinned commit, so nothing breaks when the code moves — they just go stale. When a change alters what one shows, update both language sources and rebuild with `scripts/build_diagrams.py` (`docs/architecture.md` → "Diagrams").
+
 ## Tool Inventory
 
 Read-only tools:

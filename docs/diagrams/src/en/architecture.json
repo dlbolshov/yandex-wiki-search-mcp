@@ -1,0 +1,626 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "yandex-wiki-search-mcp: runtime architecture",
+  "output": "docs/diagrams/en/architecture.html",
+  "quality_profile": "showcase",
+  "repository": {
+   "url": "https://github.com/dlbolshov/yandex-wiki-search-mcp",
+   "revision": "054abf72362586491781e1ef595120696e54bf30"
+  },
+  "locale": "en"
+ },
+ "components": [
+  {
+   "id": "mcp_host",
+   "type": "external",
+   "label": "MCP client",
+   "sublabel": "Claude · Cursor · VS Code",
+   "pos": [
+    0,
+    260
+   ],
+   "size": [
+    160,
+    64
+   ],
+   "sources": [
+    {
+     "path": "README.md",
+     "line": 47,
+     "end_line": 75,
+     "label": "run via uvx / Claude Code"
+    },
+    {
+     "path": "manifest.json",
+     "line": 12,
+     "end_line": 30,
+     "label": "MCPB: uv run for Claude Desktop"
+    },
+    {
+     "path": "README.md",
+     "line": 38,
+     "end_line": 39,
+     "label": "install buttons: Cursor, VS Code"
+    }
+   ]
+  },
+  {
+   "id": "startup",
+   "type": "backend",
+   "label": "Startup & assembly",
+   "sublabel": "main() → Settings → create_mcp_server",
+   "pos": [
+    225,
+    80
+   ],
+   "size": [
+    220,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/__main__.py",
+     "line": 12,
+     "end_line": 63,
+     "label": "main(): Settings, typos, run()"
+    },
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 116,
+     "end_line": 144,
+     "label": "auth / org validation"
+    },
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 262,
+     "end_line": 295,
+     "label": "create_mcp_server: build and registration"
+    }
+   ]
+  },
+  {
+   "id": "transport",
+   "type": "frontend",
+   "label": "MCP SDK transport",
+   "sublabel": "stdio · SSE · HTTP /mcp",
+   "pos": [
+    250,
+    260
+   ],
+   "size": [
+    170,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 38,
+     "end_line": 44,
+     "label": "TRANSPORT · HOST · PORT"
+    },
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 298,
+     "end_line": 328,
+     "label": "run_options / http_app_options"
+    }
+   ]
+  },
+  {
+   "id": "middleware",
+   "type": "backend",
+   "label": "Middleware",
+   "sublabel": "DEBUG log · request stash",
+   "pos": [
+    490,
+    260
+   ],
+   "size": [
+    160,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/middleware.py",
+     "line": 42,
+     "end_line": 55,
+     "label": "inbound message log (DEBUG)"
+    },
+    {
+     "path": "mcp_wiki/mcp/request_ctx.py",
+     "line": 27,
+     "end_line": 51,
+     "label": "request stash in contextvar"
+    },
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 276,
+     "end_line": 278,
+     "label": "middleware order"
+    }
+   ]
+  },
+  {
+   "id": "resources",
+   "type": "backend",
+   "label": "MCP resources",
+   "sublabel": "configuration · yfm-cheatsheet",
+   "pos": [
+    485,
+    80
+   ],
+   "size": [
+    170,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/resources.py",
+     "line": 20,
+     "end_line": 48,
+     "label": "wiki-mcp://configuration"
+    },
+    {
+     "path": "mcp_wiki/mcp/resources.py",
+     "line": 50,
+     "end_line": 59,
+     "label": "wiki-mcp://yfm-cheatsheet"
+    }
+   ]
+  },
+  {
+   "id": "tools",
+   "type": "backend",
+   "label": "MCP tools",
+   "sublabel": "10 read · 23 write",
+   "pos": [
+    780,
+    260
+   ],
+   "size": [
+    170,
+    64
+   ],
+   "tag": "write: not read-only",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/tools/__init__.py",
+     "line": 10,
+     "end_line": 25,
+     "label": "WIKI_READ_ONLY gate"
+    },
+    {
+     "path": "mcp_wiki/mcp/tools/page_read.py",
+     "line": 224,
+     "end_line": 255,
+     "label": "read tool registration"
+    },
+    {
+     "path": "mcp_wiki/mcp/tools/page_write.py",
+     "line": 1028,
+     "end_line": 1037,
+     "label": "local-file gate"
+    }
+   ]
+  },
+  {
+   "id": "auth_resolver",
+   "type": "security",
+   "label": "get_yandex_auth",
+   "sublabel": "Bearer + ?orgId= → YandexAuth",
+   "pos": [
+    775,
+    80
+   ],
+   "size": [
+    180,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/utils.py",
+     "line": 16,
+     "end_line": 43,
+     "label": "per-request token and org"
+    },
+    {
+     "path": "mcp_wiki/wiki/proto/common.py",
+     "line": 11,
+     "end_line": 31,
+     "label": "select_org: org pair as a whole"
+    }
+   ]
+  },
+  {
+   "id": "wiki_client",
+   "type": "backend",
+   "label": "WikiClient",
+   "sublabel": "aiohttp · retry · WikiError",
+   "pos": [
+    1070,
+    260
+   ],
+   "size": [
+    175,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 542,
+     "end_line": 575,
+     "label": "WikiClient and aiohttp session"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 598,
+     "end_line": 633,
+     "label": "Authorization and X-Org-Id"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 770,
+     "end_line": 810,
+     "label": "retries and error mapping"
+    }
+   ]
+  },
+  {
+   "id": "wiki_api",
+   "type": "external",
+   "label": "Yandex Wiki API",
+   "sublabel": "api.wiki.yandex.net/v1",
+   "pos": [
+    1430,
+    260
+   ],
+   "size": [
+    165,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 46,
+     "end_line": 54,
+     "label": "WIKI_API_BASE_URL"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 885,
+     "end_line": 917,
+     "label": "GET v1/pages"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 958,
+     "end_line": 1005,
+     "label": "POST v1/search"
+    }
+   ]
+  },
+  {
+   "id": "oauth",
+   "type": "security",
+   "label": "OAuth provider",
+   "sublabel": "proxy to Yandex OAuth · DCR",
+   "pos": [
+    240,
+    440
+   ],
+   "size": [
+    190,
+    64
+   ],
+   "tag": "OAUTH_ENABLED",
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 47,
+     "end_line": 78,
+     "label": "YandexOAuth provider"
+    },
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 222,
+     "end_line": 257,
+     "label": "scopes and AuthSettings"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 80,
+     "end_line": 115,
+     "label": "/oauth/yandex/callback"
+    }
+   ]
+  },
+  {
+   "id": "oauth_store",
+   "type": "database",
+   "label": "OAuth store",
+   "sublabel": "memory or Redis+Fernet",
+   "pos": [
+    600,
+    440
+   ],
+   "size": [
+    170,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/server.py",
+     "line": 185,
+     "end_line": 220,
+     "label": "store selection"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/store.py",
+     "line": 13,
+     "end_line": 41,
+     "label": "OAuthStore protocol, TTL from provider"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/stores/crypto.py",
+     "line": 7,
+     "end_line": 25,
+     "label": "Fernet field encryption"
+    }
+   ]
+  },
+  {
+   "id": "yandex_oauth",
+   "type": "external",
+   "label": "Yandex OAuth",
+   "sublabel": "oauth.yandex.ru",
+   "pos": [
+    250,
+    620
+   ],
+   "size": [
+    170,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 58,
+     "end_line": 61,
+     "label": "Yandex URL, app id and secret"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 194,
+     "end_line": 201,
+     "label": "redirect to Yandex /authorize"
+    },
+    {
+     "path": "mcp_wiki/mcp/oauth/provider.py",
+     "line": 203,
+     "end_line": 227,
+     "label": "POST /token; refusal → invalid_grant"
+    }
+   ]
+  },
+  {
+   "id": "redis",
+   "type": "database",
+   "label": "Redis",
+   "sublabel": "optional",
+   "pos": [
+    610,
+    620
+   ],
+   "size": [
+    150,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/mcp/oauth/stores/redis.py",
+     "line": 25,
+     "end_line": 55,
+     "label": "aiocache Redis, oauth:* keys"
+    },
+    {
+     "path": "compose.yaml",
+     "line": 11,
+     "end_line": 21,
+     "label": "redis:8-alpine"
+    }
+   ]
+  },
+  {
+   "id": "local_fs",
+   "type": "database",
+   "label": "Server-host filesystem",
+   "sublabel": "upload reads · download writes",
+   "pos": [
+    1067,
+    620
+   ],
+   "size": [
+    180,
+    64
+   ],
+   "sources": [
+    {
+     "path": "mcp_wiki/settings.py",
+     "line": 99,
+     "end_line": 114,
+     "label": "gate: stdio only, OAuth off"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 1945,
+     "end_line": 1971,
+     "label": "upload: read in parts"
+    },
+    {
+     "path": "mcp_wiki/wiki/custom/client.py",
+     "line": 278,
+     "end_line": 298,
+     "label": "download: create .part"
+    }
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "Server process · Python",
+   "wraps": [
+    "startup",
+    "transport",
+    "middleware",
+    "resources",
+    "tools",
+    "auth_resolver",
+    "wiki_client",
+    "oauth",
+    "oauth_store"
+   ]
+  }
+ ],
+ "connections": [
+  {
+   "id": "host-transport",
+   "from": "mcp_host",
+   "to": "transport",
+   "label": "JSON-RPC",
+   "variant": "emphasis"
+  },
+  {
+   "id": "transport-middleware",
+   "from": "transport",
+   "to": "middleware",
+   "variant": "emphasis"
+  },
+  {
+   "id": "middleware-tools",
+   "from": "middleware",
+   "to": "tools",
+   "label": "tools/call",
+   "variant": "emphasis"
+  },
+  {
+   "id": "tools-client",
+   "from": "tools",
+   "to": "wiki_client",
+   "label": "WikiProtocol",
+   "variant": "emphasis"
+  },
+  {
+   "id": "client-api",
+   "from": "wiki_client",
+   "to": "wiki_api",
+   "label": "HTTPS · X-(Cloud-)Org-Id",
+   "variant": "emphasis"
+  },
+  {
+   "id": "startup-transport",
+   "from": "startup",
+   "to": "transport",
+   "label": "run(TRANSPORT)"
+  },
+  {
+   "id": "middleware-resources",
+   "from": "middleware",
+   "to": "resources",
+   "label": "resources/read"
+  },
+  {
+   "id": "tools-auth",
+   "from": "tools",
+   "to": "auth_resolver",
+   "label": "on every call",
+   "variant": "security"
+  },
+  {
+   "id": "resources-auth",
+   "from": "resources",
+   "to": "auth_resolver",
+   "label": "stashed org",
+   "variant": "security"
+  },
+  {
+   "id": "transport-oauth",
+   "from": "transport",
+   "to": "oauth",
+   "label": "Bearer · OAuth, not stdio",
+   "variant": "security"
+  },
+  {
+   "id": "oauth-yandex",
+   "from": "oauth",
+   "to": "yandex_oauth",
+   "label": "302 /authorize · POST /token",
+   "variant": "security"
+  },
+  {
+   "id": "oauth-store",
+   "from": "oauth",
+   "to": "oauth_store",
+   "label": "state · code · token",
+   "variant": "dashed"
+  },
+  {
+   "id": "store-redis",
+   "from": "oauth_store",
+   "to": "redis",
+   "label": "OAUTH_STORE=redis",
+   "variant": "dashed"
+  },
+  {
+   "id": "client-files",
+   "from": "wiki_client",
+   "to": "local_fs",
+   "label": "stdio · no OAuth · not read-only",
+   "variant": "dashed"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "amber",
+   "title": "Registration gates",
+   "items": [
+    "WIKI_READ_ONLY=true: only the 10 read tools",
+    "Non-stdio or OAuth: no upload/download on server-host FS (31)",
+    "stdio without OAuth: all 33, exactly manifest.json's list",
+    "Server instructions use the same flags"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Auth and organization",
+   "items": [
+    "Authorization: request token → WIKI_TOKEN → IAM (Bearer)",
+    "?orgId= / ?cloudOrgId= replaces the whole org pair",
+    "Under OAuth, client Bearer is the Yandex access token",
+    "Without OAuth, HTTP calls use the server token"
+   ]
+  },
+  {
+   "dot": "cyan",
+   "title": "WikiClient",
+   "items": [
+    "One client and one aiohttp session per lifespan",
+    "Retries 429/502/503/504 and conn drops: GET (except download), search, upload_part",
+    "Failures → WikiError hierarchy → is_error result",
+    "Upload: session → 5 MiB parts → finish → attach"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "Delivery",
+   "items": [
+    "PyPI, MCPB, MCP Registry: stdio; GHCR image: stdio or streamable-http",
+    "streamable-http: stateless, JSON responses, /healthz",
+    "compose.yaml starts only Redis",
+    "Code snapshot: main @ 054abf7"
+   ]
+  }
+ ]
+}

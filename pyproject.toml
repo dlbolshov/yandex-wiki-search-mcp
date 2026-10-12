@@ -41,6 +41,8 @@ package = true
 # "Could not determine uv version ... Falling back to latest" on each run.
 # uv itself enforces this locally too, so the floor stays at a version
 # contributors actually have; the ceiling keeps CI off an untested major.
+# The Dockerfile's uv image is pinned inside this range, so raise the two
+# together (tests/test_dockerfile.py).
 required-version = ">=0.11,<0.13"
 
 [tool.setuptools.packages.find]

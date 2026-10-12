@@ -48,6 +48,19 @@ output schema and returns a single content block — `ImageContent` for a
 recognized image, `EmbeddedResource` otherwise — which ships once and which
 `TOOL_RESULT_TEXT` leaves alone.
 
+The same picture as an interactive diagram, every box linked to the source
+lines it is drawn from:
+
+[![Runtime architecture: MCP client, transport, middleware, tools, WikiClient and the Yandex Wiki API, with the optional OAuth provider, its store and the gated server-host filesystem](diagrams/en/architecture.svg)](https://dlbolshov.github.io/yandex-wiki-search-mcp/#en/architecture)
+
+And one real call end to end — `page_edit` by slug over streamable HTTP, with
+the retry rule that differs between its `GET` and its `POST`:
+
+[![Sequence of one page_edit call: MCP SDK, call_tool, the tool, get_yandex_auth, WikiClient and the Wiki API, including the error branch](diagrams/en/page-edit.svg)](https://dlbolshov.github.io/yandex-wiki-search-mcp/#en/page-edit)
+
+All diagrams, zoomable and with source links, are at **https://dlbolshov.github.io/yandex-wiki-search-mcp/**; see
+[Diagrams](#diagrams) for what they are and how they are rebuilt.
+
 ## The two layers
 
 The package is split into a domain layer and a presentation layer, and the
@@ -149,6 +162,11 @@ precedent).
   blocks a write) and the cheat-sheet text. Rules encode live-verified
   renderer behavior (`scripts/yfm_smoke.py`).
 
+How `page_search` checks its arguments, which checks run before any HTTP, the
+two modes `highlight` switches between, and the paging loop the agent runs:
+
+[![Workflow of page_search: argument schema, slug_prefix and cursor checks, POST v1/search, the highlight modes and the agent's paging loop](diagrams/en/page-search.svg)](https://dlbolshov.github.io/yandex-wiki-search-mcp/#en/page-search)
+
 ### OAuth subsystem (`mcp_wiki/mcp/oauth/`)
 
 Optional; only assembled when `OAUTH_ENABLED=true`. The server then acts as
@@ -220,6 +238,13 @@ memory store, Fernet-encrypted for Redis.
   `DEL`, not the `GET`: two concurrent redemptions may both read one, but
   only the caller whose `DEL` removed the key gets it.
 - **`types.py`** — the pydantic shapes for state, callback and code records.
+
+The whole flow, drawn from the code in two parts — registration and login,
+then the code exchange, a call with the Bearer and a refresh:
+
+[![OAuth part 1: discovery, dynamic client registration and the browser login up to the mcp_ code](diagrams/en/oauth-login.svg)](https://dlbolshov.github.io/yandex-wiki-search-mcp/#en/oauth-login)
+
+[![OAuth part 2: code exchange with PKCE, a tool call with the Bearer and token refresh](diagrams/en/oauth-tokens.svg)](https://dlbolshov.github.io/yandex-wiki-search-mcp/#en/oauth-tokens)
 
 ### Wiki layer (`mcp_wiki/wiki/`)
 
@@ -308,6 +333,7 @@ The suite runs against mocks at every seam the architecture defines:
 | Wiki client ↔ HTTP | `aioresponses`; assertions on headers, query params and bodies as aiohttp would send them |
 | OAuth ↔ Redis | `fakeredis` |
 | package ↔ interpreter | `tests/test_imports.py` imports every module in a subprocess |
+| Docker image ↔ uv | `tests/test_dockerfile.py` checks the Dockerfile's uv pin against `required-version` (see [Toolchain](#toolchain)) |
 
 Layout mirrors the source tree (`tests/mcp/...`, `tests/wiki/...`). Shared
 helpers: `tests/mcp/conftest.py` (the `client` fixture on SDK default
@@ -368,6 +394,10 @@ still pushes an image tagged from the ref it ran on (`:main` from main), and
 on a tag the image is out before PyPI is attempted. `api-drift.yml` is the
 weekly live sweep.
 
+`pages.yml` deploys `docs/diagrams/` to GitHub Pages on a push to main that
+touches it, or by hand. It builds nothing: the HTML is committed, rebuilt
+locally (see [Diagrams](#diagrams)).
+
 ## Release process
 
 Versions live in **four files plus one tag string**: `pyproject.toml`,
@@ -406,6 +436,10 @@ by hand:
   `api-notes_ru.md`, this file ↔ `architecture_ru.md`.
 - **Env var surface**: `settings.py` ↔ `.env.example` ↔ README configuration
   tables ↔ `manifest.json` user config.
+- **Diagrams**: `docs/diagrams/src/{en,ru}/*.json` describe the code at the
+  commit in their `meta.repository.revision`, and nothing re-checks them
+  against later code. A change to what a diagram shows means updating both
+  language sources and rebuilding — see [Diagrams](#diagrams).
 
 ## Scripts
 
@@ -417,6 +451,34 @@ by hand:
 | `yfm_smoke.py` | Live YFM renderer probes behind the lint rules |
 | `docs_probe.py` | The 2026-08 docs drop vs the wire, claim by claim (writes!); includes the hosted MCP tools/list |
 | `probe_api*.sh`, `smoke.sh` | Ad-hoc curl probes from past investigations |
+| `build_diagrams.py` | Rebuilds `docs/diagrams/` from its Archify sources (checks, HTML, SVG); local only |
+
+## Diagrams
+
+`docs/diagrams/` holds five [Archify](https://github.com/tt-a1i/archify)
+diagrams in English and Russian: the runtime architecture, one `page_edit`
+call, `page_search`'s checks and paging, and the OAuth flow in two parts.
+`pages.yml` publishes the folder to **https://dlbolshov.github.io/yandex-wiki-search-mcp/**, whose index switches between
+them and between the languages.
+
+- `src/<lang>/<name>.json` — the source of truth: Archify's typed JSON, with
+  every box citing repository line ranges at one pinned commit
+  (`meta.repository`).
+- `<lang>/<name>.html` — the checked, self-contained interactive diagram:
+  zoom, search, upstream/downstream reach, a route probe, light/dark, export,
+  and each box's cited lines one click away on GitHub.
+- `<lang>/<name>.svg` — the viewer's own "SVG · Auto" export, which follows
+  the reader's light/dark preference; this file embeds them.
+
+To change one, edit both language sources — when the code moved, also the
+cited ranges and `meta.repository.revision`, which must be a pushed commit
+— and run `uv run python scripts/build_diagrams.py [name] [--lang en|ru]`.
+For every source it runs Archify's `finalize` (schema, layout, source
+evidence verified against that commit, a real-browser check), copies the
+HTML in and re-exports the SVG through headless Chrome. It needs Archify
+installed once (`npx skills add tt-a1i/archify -g`, Node 18+) and Chrome or
+Chromium on `PATH`; neither is a project dependency, and CI never builds
+diagrams. Commit the sources, HTML and SVG together.
 
 ## Toolchain
 
@@ -425,3 +487,13 @@ by hand:
 HTML report), ruff (lint + format), mypy **and** ty (two type checkers — ty
 is the second opinion), pytest + pytest-asyncio. Python 3.11–3.13. The
 package ships `py.typed`.
+
+uv's own version is one range, `[tool.uv] required-version` in
+`pyproject.toml`. uv refuses to run outside it, and every `setup-uv` step in
+CI installs the newest release inside it. The Dockerfile cannot read that
+range, so its uv image is pinned to an exact release inside it, never a
+floating tag: `:latest` broke the image build when it became uv 0.13.0, and
+only `release.yml` builds the image, so nothing noticed before a release.
+`tests/test_dockerfile.py` fails when the pin and the range disagree. Moving
+to a new uv minor means raising the ceiling and the image tag in the same
+change.

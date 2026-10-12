@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yandex-wiki-search-mcp — diagrams</title>
+<meta name="description" content="Interactive architecture, sequence and workflow diagrams of yandex-wiki-search-mcp, an MCP server for Yandex Wiki.">
+<style>
+  :root {
+    --bg: #f3f4f6; --bar: #ffffff; --text: #111827; --muted: #6b7280;
+    --border: #e5e7eb; --active-bg: #111827; --active-text: #ffffff; --hover: #f3f4f6;
+    --sub-active: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #050816; --bar: #0b1020; --text: #e5e7eb; --muted: #9ca3af;
+      --border: #1f2937; --active-bg: #e5e7eb; --active-text: #0b1020; --hover: #111827;
+      --sub-active: #1f2937;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 8px 16px; background: var(--bar); border-bottom: 1px solid var(--border); }
+  .name { font-weight: 600; margin-right: 8px; color: inherit; text-decoration: none; }
+  nav { display: flex; gap: 6px; flex-wrap: wrap; }
+  nav a { padding: 6px 12px; border-radius: 8px; color: var(--text); text-decoration: none;
+    border: 1px solid var(--border); }
+  nav a:hover { background: var(--hover); }
+  nav.tabs a[aria-current="page"], nav.langs a[aria-current="true"] {
+    background: var(--active-bg); color: var(--active-text); border-color: var(--active-bg); }
+  nav.parts { padding-left: 12px; border-left: 1px solid var(--border); }
+  nav.parts[hidden] { display: none; }
+  nav.parts a { padding: 4px 10px; font-size: 13px; }
+  nav.parts a[aria-current="page"] { background: var(--sub-active); font-weight: 600; }
+  .end { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  nav.langs a { padding: 4px 8px; font-size: 12px; }
+  .open { color: var(--muted); font-size: 13px; }
+  .open a { color: inherit; }
+  main { flex: 1; position: relative; min-height: 0; }
+  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); }
+  iframe[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <a class="name" href="https://github.com/dlbolshov/yandex-wiki-search-mcp">yandex-wiki-search-mcp</a>
+  <nav class="tabs">
+    <a data-tab="architecture"></a>
+    <a data-tab="page-edit"></a>
+    <a data-tab="page-search"></a>
+    <a data-tab="oauth"></a>
+  </nav>
+  <nav class="parts" id="oauth-parts" hidden>
+    <a data-view="oauth-login"></a>
+    <a data-view="oauth-tokens"></a>
+  </nav>
+  <span class="end">
+    <span class="open"><a id="open-alone" target="_blank" rel="noopener"></a></span>
+    <nav class="langs" aria-label="Language">
+      <a data-lang="en" href="#en">EN</a>
+      <a data-lang="ru" href="#ru">RU</a>
+    </nav>
+  </span>
+</header>
+<main id="stage"></main>
+<script>
+  // Each diagram is its own Archify-validated HTML in en/ or ru/; this page
+  // only switches between them. Links look like #en/architecture.
+  const VIEWS = {
+    'architecture': 'architecture',
+    'page-edit': 'page-edit',
+    'page-search': 'page-search',
+    'oauth-login': 'oauth',
+    'oauth-tokens': 'oauth',
+  };
+  const TEXT = {
+    en: {
+      'architecture': 'Architecture', 'page-edit': 'page_edit call', 'page-search': 'Search',
+      'oauth': 'OAuth', 'oauth-login': '1 · registration & login', 'oauth-tokens': '2 · tokens & call',
+      open: 'open alone ↗',
+    },
+    ru: {
+      'architecture': 'Архитектура', 'page-edit': 'Вызов page_edit', 'page-search': 'Поиск',
+      'oauth': 'OAuth', 'oauth-login': '1 · регистрация и вход', 'oauth-tokens': '2 · токены и вызов',
+      open: 'открыть отдельно ↗',
+    },
+  };
+  const stage = document.getElementById('stage');
+  const parts = document.getElementById('oauth-parts');
+  const frames = {};
+  let lang = (navigator.language || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
+  let view = 'architecture';
+  let lastOauthPart = 'oauth-login';
+
+  function parse() {
+    const [first, second] = location.hash.slice(1).split('/');
+    if (TEXT[first]) { lang = first; if (second) view = second; }
+    else if (first) view = first;
+    if (view === 'oauth') view = lastOauthPart;
+    if (!VIEWS[view]) view = 'architecture';
+  }
+
+  function render() {
+    const tab = VIEWS[view];
+    if (tab === 'oauth') lastOauthPart = view;
+    const src = `${lang}/${view}.html`;
+    document.documentElement.lang = lang;
+    // Create a frame on first visit only, so the viewer measures a visible box
+    // and keeps its zoom/focus state when the reader switches back.
+    if (!frames[src]) {
+      const f = document.createElement('iframe');
+      f.src = src;
+      f.title = TEXT[lang][view];
+      f.allow = 'fullscreen; clipboard-write';
+      stage.appendChild(f);
+      frames[src] = f;
+    }
+    for (const [k, f] of Object.entries(frames)) f.hidden = k !== src;
+    for (const a of document.querySelectorAll('nav.tabs a')) {
+      const t = a.dataset.tab;
+      a.textContent = TEXT[lang][t];
+      a.href = `#${lang}/${t === 'oauth' ? lastOauthPart : t}`;
+      if (t === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    }
+    parts.hidden = tab !== 'oauth';
+    for (const a of parts.querySelectorAll('a')) {
+      a.textContent = TEXT[lang][a.dataset.view];
+      a.href = `#${lang}/${a.dataset.view}`;
+      if (a.dataset.view === view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    }
+    for (const a of document.querySelectorAll('nav.langs a')) {
+      a.href = `#${a.dataset.lang}/${view}`;
+      a.setAttribute('aria-current', String(a.dataset.lang === lang));
+    }
+    const open = document.getElementById('open-alone');
+    open.textContent = TEXT[lang].open;
+    open.href = src;
+  }
+
+  window.addEventListener('hashchange', () => { parse(); render(); });
+  parse();
+  render();
+</script>
+</body>
+</html>

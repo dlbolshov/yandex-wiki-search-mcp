@@ -1,23 +1,17 @@
-.git*
-.editorconfig
-.idea
-.vscode
-.dockerignore
-docker-compose.yml
-README.md
-etc
-local
-build
-env
-.env
-.kube
-local-docker
-Makefile
-.pytest_cache
-.mypy_cache
-.ruff_cache
-ci
-.helm
-.venv
-Dockerfile
-*.Dockerfile
+# An allowlist, not a blocklist: the image runs `python -m mcp_wiki` from
+# /code with its dependencies installed into /venv from pyproject.toml and
+# uv.lock, so those, the package and the license files are all it needs.
+# Everything else — docs and their GIFs/diagrams, tests, scripts, release
+# metadata, and local leftovers such as .venv, coverage, dist/, .archify/ or
+# Claude worktrees — stays out of both the build context and the image,
+# including whatever new clutter appears in the checkout later.
+*
+!mcp_wiki
+!pyproject.toml
+!uv.lock
+!LICENSE
+!NOTICE
+
+# Bytecode from a local run must not shadow the sources.
+**/__pycache__
+**/*.py[cod]
